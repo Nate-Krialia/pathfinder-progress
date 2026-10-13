@@ -1,0 +1,17 @@
+{
+  "id": "pathfinder-progress",
+  "title": "Pathfinder Progress",
+  "description": "Use-based skill mastery, gathering, and crafting for Pathfinder 2e.",
+  "version": "0.0.1",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13"
+  },
+  "relationships": {
+    "systems": [
+      { "id": "pf2e", "type": "system" }
+    ]
+  },
+  "esmodules": ["scripts/main.js"],
+  "authors": [{ "name": "nate-krialia" }]
+}
