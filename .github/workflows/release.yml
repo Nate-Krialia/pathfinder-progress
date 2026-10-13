@@ -1,0 +1,25 @@
+name: Publish dev build
+
+on:
+  push:
+    branches: [main, "claude/**"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build module zip
+        run: zip -r module.zip module.json scripts README.md
+      - name: Publish rolling "dev" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: Dev build
+          prerelease: true
+          files: |
+            module.json
+            module.zip

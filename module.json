@@ -9,9 +9,21 @@
   },
   "relationships": {
     "systems": [
-      { "id": "pf2e", "type": "system" }
+      {
+        "id": "pf2e",
+        "type": "system"
+      }
     ]
   },
-  "esmodules": ["scripts/main.js"],
-  "authors": [{ "name": "nate-krialia" }]
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "authors": [
+    {
+      "name": "nate-krialia"
+    }
+  ],
+  "url": "https://github.com/Nate-Krialia/pathfinder-progress",
+  "manifest": "https://github.com/Nate-Krialia/pathfinder-progress/releases/download/dev/module.json",
+  "download": "https://github.com/Nate-Krialia/pathfinder-progress/releases/download/dev/module.zip"
 }
