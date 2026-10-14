@@ -2,7 +2,7 @@
   "id": "pathfinder-progress",
   "title": "Pathfinder Progress",
   "description": "Use-based skill mastery, gathering, and crafting for Pathfinder 2e.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "compatibility": {
     "minimum": "13",
     "verified": "14.369"
@@ -12,6 +12,13 @@
       {
         "id": "pf2e",
         "type": "system"
+      }
+    ],
+    "requires": [
+      {
+        "id": "socketlib",
+        "type": "module",
+        "manifest": "https://github.com/farling42/foundryvtt-socketlib/releases/latest/download/module.json"
       }
     ]
   },

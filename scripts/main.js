@@ -1,4 +1,5 @@
 import { MODULE_ID } from "./config.js";
+import * as adapter from "./adapter.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./xp.js";
 
 Hooks.once("init", () => {
@@ -23,7 +24,7 @@ Hooks.once("init", () => {
 });
 
 Hooks.once("ready", () => {
-  game.modules.get(MODULE_ID).api = { getXp, getTier };
+  game.modules.get(MODULE_ID).api = { getXp, getTier, adapter };
   console.log(`${MODULE_ID} | ready`);
 });
 
