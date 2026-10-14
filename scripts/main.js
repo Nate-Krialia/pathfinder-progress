@@ -1,5 +1,5 @@
 import { MODULE_ID } from "./config.js";
-import { handleChatMessage, getXp, getTier } from "./xp.js";
+import { handleChatMessage, addGrantButton, getXp, getTier } from "./xp.js";
 
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, "paused", {
@@ -9,6 +9,16 @@ Hooks.once("init", () => {
     config: true,
     type: Boolean,
     default: false
+  });
+
+  game.settings.register(MODULE_ID, "awardMode", {
+    name: "Award mode",
+    hint: "GM grants: a button appears on skill checks for the GM. Automatic: rolls with a DC award XP instantly.",
+    scope: "world",
+    config: true,
+    type: String,
+    choices: { gm: "GM grants", auto: "Automatic" },
+    default: "gm"
   });
 });
 
@@ -20,3 +30,5 @@ Hooks.once("ready", () => {
 Hooks.on("createChatMessage", message => {
   handleChatMessage(message).catch(err => console.error(`${MODULE_ID} |`, err));
 });
+
+Hooks.on("renderChatMessageHTML", (message, html) => addGrantButton(message, html));
