@@ -8,6 +8,9 @@ export const OUTCOME_XP = {
   criticalSuccess: 2
 };
 
+// XP for rolls with no degree of success (e.g. sheet rolls with no DC).
+export const DEFAULT_XP = 1;
+
 // Total XP needed to reach each mastery tier (tier 0 starts at 0 XP).
 export const TIERS = [
   { name: "Novice", xp: 0 },

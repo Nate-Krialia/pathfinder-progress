@@ -1,4 +1,4 @@
-import { MODULE_ID, OUTCOME_XP, TIERS } from "./config.js";
+import { MODULE_ID, OUTCOME_XP, DEFAULT_XP, TIERS } from "./config.js";
 
 export function getXp(actor, skill) {
   return actor.getFlag(MODULE_ID, "skillXp")?.[skill] ?? 0;
@@ -36,8 +36,8 @@ export function parseSkillCheck(message) {
   if (actor?.type !== "character") return null;
 
   const skill = (context.domains ?? []).find(d => CONFIG.PF2E?.skills?.[d]);
-  const amount = OUTCOME_XP[context.outcome];
-  if (!skill || !amount) return null;
+  const amount = OUTCOME_XP[context.outcome] ?? DEFAULT_XP;
+  if (!skill) return null;
 
   return { actor, skill, amount, hasDc: context.dc?.value != null };
 }
@@ -65,10 +65,10 @@ export function addGrantButton(message, html) {
   if (game.settings.get(MODULE_ID, "awardMode") !== "gm") return;
 
   const check = parseSkillCheck(message);
+  console.debug(`${MODULE_ID} | render card`, check, message.flags?.pf2e?.context);
   if (!check) return;
 
-  const content = html.querySelector(".message-content");
-  if (!content) return;
+  const content = html.querySelector(".message-content") ?? html;
 
   const button = document.createElement("button");
   button.type = "button";
