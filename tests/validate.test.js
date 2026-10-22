@@ -195,3 +195,45 @@ test("live: station location is fixed{town} or carried{holder}; pendingAction is
   assert.deepEqual(validateRecord("pendingAction", act, ctx), []);
   assert.ok(validateRecord("pendingAction", { ...act, daysReserved: -1 }, ctx).length > 0);
 });
+
+// Duplicate ids are reported even when a copy is ALSO invalid ------------------
+test("an invalid copy of an existing id reports BOTH its schema error and the duplicate", () => {
+  const { errors, registry } = loadDefinitions([
+    source(MATERIAL, "pack.main", "Iron"),
+    source({ ...MATERIAL, tier: 9 }, "world.test-defs", "Iron (copy)")
+  ]);
+  const fields = errors.map(e => e.field).sort();
+  assert.deepEqual(fields, ["id", "tier"], errors.map(formatError).join(" | "));
+  const dup = errors.find(e => e.field === "id");
+  assert.equal(dup.pack, "world.test-defs");
+  assert.ok(dup.message.includes("pack.main"), "duplicate error must name the original pack too");
+  // The original, valid record is still the one that loads.
+  assert.equal(registry.material.get("iron").tier, 1);
+});
+
+test("a VALID duplicate still fails loudly, and the first definition wins", () => {
+  const { errors, registry } = loadDefinitions([
+    source(MATERIAL, "pack.main", "Iron"),
+    source({ ...MATERIAL, name: "Iron copy" }, "world.test-defs", "Iron (copy)")
+  ]);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].field, "id");
+  assert.equal(registry.material.get("iron").name, "Iron");
+});
+
+test("duplicates are caught across different kinds (ids share one namespace)", () => {
+  const { errors } = loadDefinitions([
+    source(MATERIAL, "pack.a", "Iron"),
+    source({ ...RECIPE, id: "iron" }, "pack.b", "Iron recipe")
+  ]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /already defined in \[pack\.a\]/);
+});
+
+test("when the INVALID copy comes first, the valid one is still reported as a duplicate", () => {
+  const { errors } = loadDefinitions([
+    source({ ...MATERIAL, tier: 9 }, "pack.a", "Iron (bad)"),
+    source(MATERIAL, "pack.b", "Iron (good)")
+  ]);
+  assert.ok(errors.some(e => e.pack === "pack.b" && e.field === "id"), errors.map(formatError).join(" | "));
+});

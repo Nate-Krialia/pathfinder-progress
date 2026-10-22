@@ -70,6 +70,8 @@ export function loadDefinitions(sources) {
   const errors = [];
   const parsed = [];
 
+  // 1. Parse every source and schema-check it. Invalid records are KEPT here
+  //    (marked) so the duplicate check below still sees them.
   for (const source of sources) {
     const ctx = { pack: source.pack, entry: source.entry };
     const result = parseDefinition(source.text, ctx);
@@ -81,21 +83,25 @@ export function loadDefinitions(sources) {
       continue;
     }
     const recordErrors = validateRecord(kind, result.data, ctx);
-    if (recordErrors.length) { errors.push(...recordErrors); continue; }
-    parsed.push({ kind, data: result.data, ctx });
+    errors.push(...recordErrors);
+    parsed.push({ kind, data: result.data, ctx, invalid: recordErrors.length > 0 });
   }
 
-  // Ids are globally unique, so a "material" and a "recipe" can never share one.
+  // 2. Ids are globally unique (a "material" and a "recipe" can never share
+  //    one). Checked over EVERY record with a usable id, valid or not, so a
+  //    broken copy of an existing id reports the collision as well. The first
+  //    definition seen keeps the id; later ones are rejected.
   const byId = new Map();
   const unique = [];
   for (const rec of parsed) {
-    const first = byId.get(rec.data.id);
+    const id = rec.data.id;
+    const first = typeof id === "string" && id !== "" ? byId.get(id) : undefined;
     if (first) {
-      errors.push(mk(rec.ctx, "id", `"${rec.data.id}" is already defined in [${first.ctx.pack}] "${first.ctx.entry}" (ids must be unique across all packs)`));
+      errors.push(mk(rec.ctx, "id", `"${id}" is already defined in [${first.ctx.pack}] "${first.ctx.entry}" (ids must be unique across all packs)`));
       continue;
     }
-    byId.set(rec.data.id, rec);
-    unique.push(rec);
+    if (typeof id === "string" && id !== "") byId.set(id, rec);
+    if (!rec.invalid) unique.push(rec);
   }
 
   const customRoles = unique.filter(r => r.kind === "customRole").map(r => r.data);
