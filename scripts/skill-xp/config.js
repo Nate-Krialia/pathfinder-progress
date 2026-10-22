@@ -1,0 +1,20 @@
+/** Tunables for the use-based skill XP track (separate from the downtime system). */
+// XP awarded per check, by degree of success. Failures teach more than easy wins.
+export const OUTCOME_XP = {
+  criticalFailure: 3,
+  failure: 2,
+  success: 1,
+  criticalSuccess: 2
+};
+
+// XP for rolls with no degree of success (e.g. sheet rolls with no DC).
+export const DEFAULT_XP = 1;
+
+// Total XP needed to reach each mastery tier (tier 0 starts at 0 XP).
+export const TIERS = [
+  { name: "Novice", xp: 0 },
+  { name: "Practiced", xp: 25 },
+  { name: "Adept", xp: 75 },
+  { name: "Expert", xp: 150 },
+  { name: "Master", xp: 300 }
+];

@@ -1,0 +1,7 @@
+{
+  "kind": "material",
+  "id": "iron",
+  "name": "Iron",
+  "tier": 1,
+  "effects": { "basePower": "T1" }
+}

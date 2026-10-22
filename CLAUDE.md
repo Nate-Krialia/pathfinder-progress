@@ -8,15 +8,15 @@ Read this file first on every task. Then load only the system file(s) the task t
 
 | File | Covers |
 |---|---|
-| `01-data-model.md` | Record shapes, where each lives, validation |
-| `02-research.md` | Projects, daily checks, thresholds, formula unlocks, workshop upgrades |
-| `03-crafting.md` | Slots, roles, quality, craft check, failure/loss |
-| `04-gathering.md` | Nodes, DC ladder, hidden rung rolls, charges |
-| `05-exploration.md` | Regions, expeditions, anchors, scenes |
-| `06-commissions.md` | Patron/crafter flow, formula loans, GM-issued jobs, teaching |
-| `07-stations.md` | Fixed/portable stations, tiers, fees, ownership |
-| `08-foundry-integration.md` | Adapter, sockets, action queue, permissions, UI surfaces |
-| `09-build-order.md` | Staged build plan with test gates |
+| `docs/01-data-model.md` | Record shapes, where each lives, validation |
+| `docs/02-research.md` | Projects, daily checks, thresholds, formula unlocks, workshop upgrades |
+| `docs/03-crafting.md` | Slots, roles, quality, craft check, failure/loss |
+| `docs/04-gathering.md` | Nodes, DC ladder, hidden rung rolls, charges |
+| `docs/05-exploration.md` | Regions, expeditions, anchors, scenes |
+| `docs/06-commissions.md` | Patron/crafter flow, formula loans, GM-issued jobs, teaching |
+| `docs/07-stations.md` | Fixed/portable stations, tiers, fees, ownership |
+| `docs/08-foundry-integration.md` | Adapter, sockets, action queue, permissions, UI surfaces |
+| `docs/09-build-order.md` | Staged build plan with test gates |
 
 ## Design pillars (non-negotiable)
 
@@ -35,7 +35,7 @@ Read this file first on every task. Then load only the system file(s) the task t
 - **Schema validation on load**: all definitions are validated when read. Bad data fails loudly (clear error naming the entry), never silently.
 - **All PF2e item/actor reading goes through one adapter file** (`adapter/pf2e.js` or equivalent). No other file touches PF2e data structures directly.
 - **Hidden rolls run on the GM client only.** Players must never see or influence them.
-- **Players cannot write world settings, scenes, or compendiums.** Any such write is relayed to the GM client (see `08-foundry-integration.md`).
+- **Players cannot write world settings, scenes, or compendiums.** Any such write is relayed to the GM client (see `docs/08-foundry-integration.md`).
 - Each downtime day goes to exactly one activity (research, exploring, workshop upgrade).
 - Prefer Foundry-native building blocks: Items, compendium packs, flags, tokens, ApplicationV2, socketlib.
 - Keep tunable numbers in one config object/file, never hardcoded in logic.
@@ -47,7 +47,7 @@ Research progress per degree, tier thresholds, DC offsets, station fee per tier,
 
 ## Deferred / not yet designed
 
-- Practice and discovery bonuses to research are only sketched (see `02-research.md`).
+- Practice and discovery bonuses to research are only sketched (see `docs/02-research.md`).
 - Trait-to-material mapping table for corpse yields must be authored.
 - Procedural map generation (explicitly deferred).
 - Per-grade materials (explicitly rejected for now; keep the item flag schema extensible).

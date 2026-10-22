@@ -2,16 +2,20 @@
   "id": "pathfinder-progress",
   "title": "Pathfinder Progress",
   "description": "Use-based skill mastery, gathering, and crafting for Pathfinder 2e.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "compatibility": {
-    "minimum": "13",
+    "minimum": "14",
     "verified": "14.369"
   },
   "relationships": {
     "systems": [
       {
         "id": "pf2e",
-        "type": "system"
+        "type": "system",
+        "compatibility": {
+          "minimum": "8.6.1",
+          "verified": "8.6.1"
+        }
       }
     ],
     "requires": [
@@ -32,5 +36,21 @@
   ],
   "url": "https://github.com/Nate-Krialia/pathfinder-progress",
   "manifest": "https://github.com/Nate-Krialia/pathfinder-progress/releases/download/dev/module.json",
-  "download": "https://github.com/Nate-Krialia/pathfinder-progress/releases/download/dev/module.zip"
+  "download": "https://github.com/Nate-Krialia/pathfinder-progress/releases/download/dev/module.zip",
+  "packs": [
+    {
+      "name": "definitions",
+      "label": "Pathfinder Progress: Definitions",
+      "type": "JournalEntry",
+      "path": "packs/definitions",
+      "system": "pf2e"
+    },
+    {
+      "name": "crafted-items",
+      "label": "Pathfinder Progress: Crafted Items",
+      "type": "Item",
+      "path": "packs/crafted-items",
+      "system": "pf2e"
+    }
+  ]
 }

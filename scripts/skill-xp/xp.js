@@ -1,4 +1,5 @@
-import { MODULE_ID, OUTCOME_XP, DEFAULT_XP, TIERS } from "./config.js";
+import { MODULE_ID } from "../config.js";
+import { OUTCOME_XP, DEFAULT_XP, TIERS } from "./config.js";
 
 export function getXp(actor, skill) {
   return actor.getFlag(MODULE_ID, "skillXp")?.[skill] ?? 0;

@@ -1,0 +1,4 @@
+node_modules/
+# Built in CI (npm run build:packs); never committed.
+packs/
+build/generated/

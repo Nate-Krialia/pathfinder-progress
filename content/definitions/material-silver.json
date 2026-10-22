@@ -1,0 +1,7 @@
+{
+  "kind": "material",
+  "id": "silver",
+  "name": "Silver",
+  "tier": 2,
+  "effects": { "basePower": "T2", "bonusDamage": "+1d4 vs fiends" }
+}

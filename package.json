@@ -1,0 +1,12 @@
+{
+  "name": "pathfinder-progress",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "build:packs": "node build/pack.mjs"
+  },
+  "devDependencies": {
+    "@foundryvtt/foundryvtt-cli": "^3.0.5"
+  }
+}
