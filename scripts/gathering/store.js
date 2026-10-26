@@ -5,6 +5,8 @@
  */
 import { MODULE_ID, NODE_FLAG } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
+import { check } from "../data/schema.js";
+import { LIVE_SCHEMAS } from "../data/schemas.js";
 import { activateRecord, makeAnchorRecord, makeCorpseRecord, makeNodeRecord, normalizeNode, refillRecord } from "./node.js";
 import { checkGatherable, hiddenSuccessChance, neededD20, pickSkill, resolveGather, visiblePassChance } from "./resolve.js";
 import { formatGatherSummary } from "./summary.js";
@@ -24,15 +26,21 @@ export function resolveToken(ref) {
 const readRecord = doc => doc.getFlag(MODULE_ID, NODE_FLAG);
 export const isNodeToken = doc => readRecord(doc) !== undefined;
 /**
- * Save a node record. setFlag MERGES objects, so when the new record has dropped
- * keys the old one had (e.g. replacing a node with an anchor) the old flag is
- * cleared first; otherwise stale keys would survive.
+ * Save a node record. Refuses a record that breaks the node rules (for example
+ * 0 charges while still "active"), so an inconsistent node can never be stored.
+ * setFlag MERGES objects, so when the new record has dropped keys the old one had
+ * (e.g. replacing a node with an anchor) the old flag is cleared first.
  */
-async function writeRecord(doc, record) {
+export async function saveNodeRecord(doc, record) {
+  const problems = check(LIVE_SCHEMAS.node, record);
+  if (problems.length) {
+    throw new Error(`refusing to save an inconsistent node record for ${doc.name}: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
+  }
   const old = readRecord(doc);
   if (old !== undefined && Object.keys(old).some(key => !(key in record))) await doc.unsetFlag(MODULE_ID, NODE_FLAG);
   await doc.setFlag(MODULE_ID, NODE_FLAG, record);
 }
+const writeRecord = saveNodeRecord;
 
 function describe(doc, api) {
   const record = readRecord(doc);
@@ -122,6 +130,34 @@ export function nodeInfo(api, token) {
 }
 
 // Gathering -----------------------------------------------------------------------------------
+/**
+ * Give the actor every gain, or none: if one fails, the ones already given are taken
+ * back (a new stack is deleted; a topped-up stack goes back to its old quantity).
+ */
+async function grantAll(actor, gains, definitions) {
+  const done = [];
+  try {
+    for (const gain of gains) {
+      const material = definitions.material.get(gain.materialId);
+      const before = adapter.getMaterialStacks(actor).find(s => s.materialId === gain.materialId)?.quantity ?? 0;
+      const item = await adapter.giveMaterial(actor, material, gain.quantity);
+      done.push({ item, before });
+    }
+  } catch (error) {
+    const undoFailures = [];
+    for (const { item, before } of done.reverse()) {
+      try {
+        if (before === 0) await item.delete();
+        else await item.update({ "system.quantity": before });
+      } catch (undoError) {
+        undoFailures.push(undoError.message);
+      }
+    }
+    error.undoFailures = undoFailures;
+    throw error;
+  }
+}
+
 /** A dry run: shows DCs, your modifier and the odds, and any reason the gather would be refused. Spends nothing. */
 export function previewGather(api, actor, token, skill) {
   const doc = resolveToken(token);
@@ -180,21 +216,40 @@ export async function gather({ actor, node: nodeRef, skill, degree: forced, chat
 
   const result = resolveGather({ node, visible, modifier, d20: () => rollDie(20), die: rollDie });
 
-  // Burn the charge first, so a later failure can never leave a free attempt.
-  await writeRecord(doc, { ...readRecord(doc), charges: result.chargesAfter, state: result.stateAfter });
+  // Burn the charge first, so a crash can never leave a free attempt. Charges and
+  // state are written together (and checked), so they can never disagree.
+  const previous = structuredClone(readRecord(doc));
+  await writeRecord(doc, { ...previous, charges: result.chargesAfter, state: result.stateAfter });
 
+  // Grant every gain or none. A grant that fails is not a gathering attempt, so the charge is refunded.
   const materialNames = {};
-  for (const gain of result.gains) {
-    const material = api.definitions.material.get(gain.materialId);
-    materialNames[gain.materialId] = material.name;
-    await adapter.giveMaterial(actor, material, gain.quantity);
+  try {
+    await grantAll(actor, result.gains, api.definitions);
+  } catch (error) {
+    let refunded = true;
+    try { await writeRecord(doc, previous); } catch { refunded = false; }
+    const undone = error.undoFailures?.length ? ` Some materials already given could not be taken back: ${error.undoFailures.join("; ")}.` : "";
+    throw new Error(
+      `gather: could not grant the materials (${error.message}). `
+      + (refunded
+        ? "The charge was refunded and nothing was given."
+        : `The charge could NOT be refunded: ${doc.name} now has ${result.chargesAfter} charge(s); restore it with api.refillNode(token, ${previous.charges}).`)
+      + undone,
+      { cause: error }
+    );
   }
+  for (const gain of result.gains) materialNames[gain.materialId] = api.definitions.material.get(gain.materialId).name;
 
   if (chat) {
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor }),
-      content: formatGatherSummary({ gathererName: actor.name, node, skillName: adapter.skillLabel(picked.skill), result, materialNames })
-    });
+    try {
+      await ChatMessage.create({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        content: formatGatherSummary({ gathererName: actor.name, node, skillName: adapter.skillLabel(picked.skill), result, materialNames })
+      });
+    } catch (error) {
+      // The gather itself succeeded; do not lose its result over a chat failure.
+      console.error(`${MODULE_ID} | gather succeeded but the chat summary failed`, error);
+    }
     console.log(`${MODULE_ID} | gather (GM only: these hidden rolls are never shown to players)`, result.hidden);
   }
 

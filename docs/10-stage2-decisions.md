@@ -100,8 +100,28 @@ Rule elements cannot apply a condition on a hit by themselves (`GrantItem` does 
 - Forced test degrees skip the roll and use the character's static skill modifier for the hidden rolls.
 - Hidden rolls are returned to the GM and logged to the console (not when `chat: false`); they never appear in chat.
 
+## When a grant fails (policy)
+- The charge is burned first, deliberately: a crash can then never leave a free attempt.
+- But a crash is not a gathering attempt. If granting materials throws, the **charge is refunded** and any materials already given in the same gather are **taken back** (a new stack is deleted, a topped-up stack returns to its old quantity), so a gather is all-or-nothing.
+- If the refund itself fails, the error says so and gives the exact `api.refillNode(token, n)` to repair it.
+- Charges and state are always written together and checked against the node schema, so a node can never be saved with 0 charges while "active" (or charges while "depleted").
+- A chat failure after a successful gather is logged; it does not undo or hide the result.
+
 ## Tools
 `gather`, `previewGather`, `nodeInfo`, `createNode`, `createAnchor`, `activateNode` (unhides the token), `refillNode`, `makeCorpseNode`, `clearNode`. Node tokens are kept out of the combat tracker.
 
 ## Deferred
 Corpse yield derived from creature level/traits, auto-creating corpse nodes on death, decay ticking, the click-on-token dialog and the player relay (Stages 6 and 10).
+
+# Notes for later stages
+
+## Stage 7 (and any placed or explored node): a dedicated "Resource Node" actor
+Stage 4's test token borrows whatever actor is handy, so it shows that actor's art and sheet. Real nodes should use one neutral PF2e **loot** actor.
+
+What the module needs:
+1. **One shared actor, found by flag, not name.** The adapter (the only file that knows PF2e's `loot` type) gets `createNodeActor()`, `isNodeActor(actor)` and `findNodeActor()`. The actor carries `flags.pathfinder-progress.nodeActor = true`. `ensureNodeActor()` reuses it, remembers its id in a world setting, and recreates it (with a GM notice) if it was deleted. Creation is GM-only.
+2. **Safe defaults on that actor.** Default ownership NONE so players cannot open its sheet (the click opens the gather dialog in Stage 10, and sheet rendering for node tokens is suppressed). A neutral name and image. Prototype token: unlinked, neutral disposition, name on hover, no vision, no bars, 1x1, rotation locked.
+3. **Per-nodeType token art.** `nodeType` gains an optional `img` (a path; default to Foundry's core `icons/...` so the module ships no art). `createNode` and `activateNode` set the TOKEN's texture from it, so one actor serves every nodeType. The token name defaults to the nodeType's name unless the GM named it.
+4. **A token builder.** `placeAnchor` and `placeNode(scene, { x, y, nodeType, tier })` create tokens from the shared actor, so GMs never hand-make them and Stage 7 can spawn explored nodes at anchor positions with the same call. Anchors (hidden) use it too.
+5. **Corpse nodes do not use it.** A corpse is the dead creature's own token and keeps its own actor.
+6. **Tests.** The token-data builder and the actor-data builder are pure and unit-tested; ensure/reuse/recreate runs against fake documents like `tests/gather-wiring.test.js`. If PF2e renames the `loot` type, only the adapter breaks, and `ensureNodeActor()` fails loudly.
