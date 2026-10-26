@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { STATIONS, TIER_RANGES } from "../scripts/config.js";
 import { feeForTier } from "../scripts/stations/fees.js";
 import { buildStationList, validateOwnedRecord } from "../scripts/stations/join.js";
-import { effectiveTown, evaluateForRecipe, evaluateStations, selectStation } from "../scripts/stations/reach.js";
+import { effectiveTown, evaluateForRecipe, evaluateStations, selectStation, withArticle } from "../scripts/stations/reach.js";
 import { prepareCraft } from "../scripts/crafting/prepare.js";
 import { formatSummary } from "../scripts/crafting/summary.js";
 import { formatError, loadDefinitions } from "../scripts/data/validate.js";
@@ -120,7 +120,14 @@ test("category mismatch is reported (and checked before tier)", () => {
   const stations = [station("apoth", "oakhaven", { category: "alchemy", tier: 1 })];
   const [v] = evaluateForRecipe(reach("aelwyn", stations, { aelwyn: "oakhaven" }), RECIPE);
   assert.equal(v.usable, false);
-  assert.match(v.reason, /it is a alchemy station, but the recipe needs smithing/);
+  assert.match(v.reason, /it is an alchemy station, but the recipe needs smithing/);
+});
+
+test("the article before a category agrees with it (a smithing, an alchemy)", () => {
+  assert.equal(withArticle("smithing"), "a smithing");
+  assert.equal(withArticle("alchemy"), "an alchemy");
+  assert.equal(withArticle("Enchanting"), "an Enchanting");
+  assert.equal(withArticle("tailoring"), "a tailoring");
 });
 
 test("a station whose tier is below the recipe minimum is reported", () => {
@@ -187,7 +194,7 @@ test("selection: with nothing usable, the error gives each station's reason", ()
   const { errors } = selectStation({ verdicts, recipe: RECIPE });
   assert.match(errors[0], /no usable smithing station \(tier 2\+\)/);
   assert.match(errors[0], /Redhollow Forge: you are in Oakhaven, but it is in Redhollow/);
-  assert.match(errors[0], /Apothecary: it is a alchemy station/);
+  assert.match(errors[0], /Apothecary: it is an alchemy station/);
   assert.match(errors[0], /Tiny Forge: its tier 1 is below/);
 });
 
@@ -427,7 +434,7 @@ test("prepare: an access list can lock the crafter out, leaving only the wrong-c
   const result = prepare({ locations: { aelwyn: "oakhaven" }, stations });
   assert.equal(result.ok, false);
   assert.match(result.errors[0], /Oakhaven Forge: you are not on its access list \(owner: Borin\)/);
-  assert.match(result.errors[0], /Oakhaven Apothecary: it is a alchemy station/);
+  assert.match(result.errors[0], /Oakhaven Apothecary: it is an alchemy station/);
 });
 
 test("the chat summary names the station used", () => {

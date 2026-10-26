@@ -6,6 +6,9 @@
  */
 import { resolveLayers } from "../data/resolver.js";
 
+/** "an alchemy", "a smithing": the indefinite article for a category name (simple vowel rule). */
+export const withArticle = word => `${/^[aeiou]/i.test(word) ? "an" : "a"} ${word}`;
+
 /** The town an actor is in, or null. Actor override > party location > nowhere. */
 export function effectiveTown(actorId, { actorOverrides = {}, partyTown } = {}) {
   const result = resolveLayers([
@@ -64,7 +67,7 @@ export function evaluateForRecipe(verdicts, recipe) {
   return verdicts.map(({ station, reachable, reason }) => {
     if (!reachable) return { station, reachable, usable: false, reason };
     if (station.category !== recipe.stationCategory) {
-      return { station, reachable, usable: false, reason: `it is a ${station.category} station, but the recipe needs ${recipe.stationCategory}` };
+      return { station, reachable, usable: false, reason: `it is ${withArticle(station.category)} station, but the recipe needs ${recipe.stationCategory}` };
     }
     if (station.tier < recipe.stationTierMin) {
       return { station, reachable, usable: false, reason: `its tier ${station.tier} is below the recipe's minimum of ${recipe.stationTierMin}` };
