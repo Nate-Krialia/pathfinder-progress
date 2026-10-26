@@ -48,6 +48,12 @@ Hooks.once("ready", async () => {
     uncraftable: new Set(),
     /** GM only. See scripts/crafting/craft.js. */
     craft: options => craft(options, api),
+    /** GM helper: put `quantity` units of a defined material into an actor's inventory. */
+    async giveMaterial(actor, materialId, quantity = 1) {
+      const material = api.definitions?.material.get(materialId);
+      if (!material) throw new Error(`giveMaterial: unknown material "${materialId}"`);
+      return adapter.giveMaterial(actor, material, quantity);
+    },
     /** Dry run: validates a selection and shows what would be made. */
     previewCraft: (actor, recipeId, selection) => previewCraft(actor, recipeId, selection, api),
     async reload() {

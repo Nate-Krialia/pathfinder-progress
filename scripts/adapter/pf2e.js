@@ -292,3 +292,22 @@ export async function rollCraftCheck(actor, dc) {
   if (!degree) throw new Error("adapter.rollCraftCheck: could not read the degree of success from PF2e's roll result");
   return { degree, total: result.total, dc };
 }
+
+/**
+ * Add `quantity` units of a material to an actor: tops up the existing stack
+ * if there is one, otherwise creates a "treasure" item carrying the flags.
+ */
+export async function giveMaterial(actor, material, quantity) {
+  const existing = getMaterialStacks(actor).find(s => s.materialId === material.id);
+  if (existing) {
+    await existing.item.update({ "system.quantity": existing.quantity + quantity });
+    return existing.item;
+  }
+  const [created] = await actor.createEmbeddedDocuments("Item", [{
+    name: material.name,
+    type: "treasure",
+    system: { quantity },
+    flags: { [MODULE_ID]: { material: { materialId: material.id, tier: material.tier } } }
+  }]);
+  return created;
+}
