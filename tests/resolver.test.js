@@ -20,9 +20,10 @@ test("recipe override beats material default (seed data)", () => {
   const silver = material.get("silver");
   const sword = recipe.get("longsword-basic");
   // Silver in the coating slot has a recipe override.
-  assert.deepEqual(resolveMaterialEffect(silver, "bonusDamage", sword, "coating"), { value: "+1d6 vs fiends", source: "recipe override" });
-  // The material's own default is "+1d4 vs fiends".
-  assert.equal(silver.effects.bonusDamage, "+1d4 vs fiends");
+  assert.deepEqual(resolveMaterialEffect(silver, "bonusDamage", sword, "coating"),
+    { value: { dice: "1d6", type: "spirit", versus: "fiend" }, source: "recipe override" });
+  // The material's own default is the weaker 1d4.
+  assert.equal(silver.effects.bonusDamage.dice, "1d4");
 });
 
 test("with no matching override, the material default is used", () => {
@@ -33,7 +34,8 @@ test("with no matching override, the material default is used", () => {
   assert.deepEqual(resolveMaterialEffect(silver, "basePower", sword, "blade"), { value: "T2", source: "material default" });
   // Different material in the overridden slot: override does not apply.
   const starmetal = material.get("starmetal");
-  assert.deepEqual(resolveMaterialEffect(starmetal, "bonusDamage", sword, "coating"), { value: "+1d6 vs fiends", source: "material default" });
+  assert.deepEqual(resolveMaterialEffect(starmetal, "bonusDamage", sword, "coating"),
+    { value: { dice: "1d6", type: "spirit", versus: "fiend" }, source: "material default" });
   // No recipe at all.
   assert.equal(resolveMaterialEffect(silver, "bonusDamage", null, "coating").source, "material default");
 });

@@ -2,6 +2,7 @@ import { MODULE_ID } from "./config.js";
 import * as adapter from "./adapter/pf2e.js";
 import { loadAll, reportErrors } from "./data/loader.js";
 import { resolveMaterialEffect } from "./data/resolver.js";
+import { craft, previewCraft } from "./crafting/craft.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
 Hooks.once("init", () => {
@@ -44,10 +45,16 @@ Hooks.once("ready", async () => {
     resolveMaterialEffect,
     definitions: null,
     errors: [],
+    uncraftable: new Set(),
+    /** GM only. See scripts/crafting/craft.js. */
+    craft: options => craft(options, api),
+    /** Dry run: validates a selection and shows what would be made. */
+    previewCraft: (actor, recipeId, selection) => previewCraft(actor, recipeId, selection, api),
     async reload() {
-      const { registry, errors } = await loadAll();
+      const { registry, errors, uncraftable } = await loadAll();
       api.definitions = registry;
       api.errors = errors;
+      api.uncraftable = uncraftable;
       reportErrors(errors);
       return { registry, errors };
     }

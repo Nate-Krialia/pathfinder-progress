@@ -5,7 +5,11 @@
   "tier": 3,
   "effects": {
     "basePower": "T3",
-    "bonusDamage": "+1d6 vs fiends",
-    "specialAbility": "Starforged edge (placeholder ability)"
+    "bonusDamage": { "dice": "1d6", "type": "spirit", "versus": "fiend" },
+    "specialAbility": {
+      "title": "Starforged Edge",
+      "text": "Placeholder ability text.",
+      "on": "hit"
+    }
   }
 }

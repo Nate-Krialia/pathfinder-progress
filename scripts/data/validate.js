@@ -9,7 +9,10 @@
  *
  * Every error names the pack, the entry, and the field.
  */
-import { BUILT_IN_ROLES, DEFINITION_KINDS, DEFINITION_SCHEMAS, LIVE_SCHEMAS } from "./schemas.js";
+import { SINGLE_SLOT_ROLES } from "../config.js";
+import { DEFINITION_KINDS, DEFINITION_SCHEMAS, LIVE_SCHEMAS } from "./schemas.js";
+import { BUILT_IN_ROLES, baseRoleFor, parseTier, roleSpec, rolesForCategory, slotRoles } from "./roles.js";
+import { resolveMaterialEffect } from "./resolver.js";
 import { check } from "./schema.js";
 
 export class DefinitionError extends Error {
@@ -55,11 +58,7 @@ export function validateRecord(kind, data, ctx) {
   return check(schema, data).map(e => mk(ctx, e.field, e.message));
 }
 
-export function rolesForCategory(category, customRoles = []) {
-  const roles = new Set(BUILT_IN_ROLES[category] ?? []);
-  for (const role of customRoles) if (role.appliesTo.includes(category)) roles.add(role.id);
-  return roles;
-}
+export { rolesForCategory };
 
 /**
  * Validate a whole set of definitions, including references between them.
@@ -106,35 +105,32 @@ export function loadDefinitions(sources) {
 
   const customRoles = unique.filter(r => r.kind === "customRole").map(r => r.data);
   const builtInNames = new Set(Object.values(BUILT_IN_ROLES).flat());
-  const allRoles = new Set([...builtInNames, ...customRoles.map(r => r.id)]);
-  const materialIds = new Set(unique.filter(r => r.kind === "material").map(r => r.data.id));
+  const materials = unique.filter(r => r.kind === "material").map(r => r.data);
+  const materialIds = new Set(materials.map(m => m.id));
 
   const bad = new Set();
   const flag = (rec, field, message) => { errors.push(mk(rec.ctx, field, message)); bad.add(rec); };
+  const flagAll = (rec, prefix, subErrors) => {
+    for (const e of subErrors) flag(rec, e.field === "(root)" ? prefix : `${prefix}.${e.field}`, e.message);
+  };
 
   for (const rec of unique) {
     const d = rec.data;
+
     if (rec.kind === "customRole" && builtInNames.has(d.id)) {
       flag(rec, "id", `"${d.id}" clashes with a built-in role name`);
     }
+
     if (rec.kind === "material") {
-      for (const role of Object.keys(d.effects)) {
-        if (!allRoles.has(role)) flag(rec, `effects.${role}`, `is not a known role (built-in or custom): "${role}"`);
+      for (const [role, value] of Object.entries(d.effects)) {
+        const spec = roleSpec(role, customRoles);
+        if (!spec) { flag(rec, `effects.${role}`, `is not a known role (built-in or custom): "${role}"`); continue; }
+        flagAll(rec, `effects.${role}`, check(spec, value));
       }
     }
-    if (rec.kind === "recipe") {
-      const roles = rolesForCategory(d.category, customRoles);
-      d.slots.forEach((slot, i) => {
-        if (!roles.has(slot.drives)) {
-          flag(rec, `slots[${i}].drives`, `role "${slot.drives}" is not valid for category "${d.category}" (valid: ${[...roles].join(", ") || "none"})`);
-        }
-      });
-      const slotNames = new Set(d.slots.map(s => s.name));
-      (d.overrides ?? []).forEach((o, i) => {
-        if (!materialIds.has(o.materialId)) flag(rec, `overrides[${i}].materialId`, `refers to unknown material "${o.materialId}"`);
-        if (!slotNames.has(o.slot)) flag(rec, `overrides[${i}].slot`, `refers to unknown slot "${o.slot}"`);
-      });
-    }
+
+    if (rec.kind === "recipe") validateRecipe(rec, { customRoles, materials, materialIds, flag, flagAll });
+
     if (rec.kind === "creatureYield") {
       d.yield.forEach((y, i) => {
         if (!materialIds.has(y.materialId)) flag(rec, `yield[${i}].materialId`, `refers to unknown material "${y.materialId}"`);
@@ -143,10 +139,83 @@ export function loadDefinitions(sources) {
   }
 
   const registry = Object.fromEntries(DEFINITION_KINDS.map(k => [k, new Map()]));
+  const contexts = new Map(); // id -> { pack, entry }, so later checks can name the source
   for (const rec of unique) {
-    if (!bad.has(rec)) registry[rec.kind].set(rec.data.id, rec.data);
+    if (bad.has(rec)) continue;
+    registry[rec.kind].set(rec.data.id, rec.data);
+    contexts.set(rec.data.id, rec.ctx);
   }
-  return { registry, errors };
+  return { registry, errors, contexts };
+}
+
+/** Cross-reference checks for one recipe: roles, slots, overrides and the output map. */
+function validateRecipe(rec, { customRoles, materials, materialIds, flag, flagAll }) {
+  const d = rec.data;
+  const validRoles = rolesForCategory(d.category, customRoles);
+
+  // Slots: every driven role must exist for this category, once per slot.
+  d.slots.forEach((slot, i) => {
+    const roles = slotRoles(slot);
+    if (new Set(roles).size !== roles.length) flag(rec, `slots[${i}].drives`, "lists the same role twice");
+    for (const role of roles) {
+      if (!validRoles.has(role)) {
+        flag(rec, `slots[${i}].drives`, `role "${role}" is not valid for category "${d.category}" (valid: ${[...validRoles].join(", ") || "none"})`);
+      }
+    }
+  });
+
+  // Roles that pick the output item can only be driven by one slot.
+  for (const role of SINGLE_SLOT_ROLES) {
+    const driving = d.slots.filter(slot => slotRoles(slot).includes(role));
+    if (driving.length > 1) flag(rec, "slots", `role "${role}" is driven by ${driving.length} slots (${driving.map(s => s.name).join(", ")}); only one is allowed`);
+  }
+
+  // Overrides.
+  (d.overrides ?? []).forEach((o, i) => {
+    if (!materialIds.has(o.materialId)) flag(rec, `overrides[${i}].materialId`, `refers to unknown material "${o.materialId}"`);
+    const slot = d.slots.find(s => s.name === o.slot);
+    if (!slot) { flag(rec, `overrides[${i}].slot`, `refers to unknown slot "${o.slot}"`); return; }
+    const roles = slotRoles(slot);
+    const role = o.role ?? (roles.length === 1 ? roles[0] : null);
+    if (!role) { flag(rec, `overrides[${i}].role`, `is required because slot "${slot.name}" drives several roles (${roles.join(", ")})`); return; }
+    if (!roles.includes(role)) { flag(rec, `overrides[${i}].role`, `"${role}" is not driven by slot "${slot.name}" (it drives: ${roles.join(", ")})`); return; }
+    const spec = roleSpec(role, customRoles);
+    if (spec) flagAll(rec, `overrides[${i}].effect`, check(spec, o.effect));
+  });
+
+  // Output map.
+  const baseRole = baseRoleFor(d);
+  const keys = Object.keys(d.output);
+  if (!baseRole) {
+    if (keys.length !== 1 || keys[0] !== "default") {
+      flag(rec, "output", `must be exactly { "default": <uuid> } because category "${d.category}" has no base role (set "baseRole" to choose one)`);
+    }
+    return;
+  }
+  if (keys.includes("default")) flag(rec, "output.default", `is not allowed: this recipe's output is picked by role "${baseRole}"`);
+
+  const baseSlots = d.slots.filter(slot => slotRoles(slot).includes(baseRole));
+  if (baseSlots.length !== 1) {
+    flag(rec, "slots", `exactly one slot must drive "${baseRole}" (found ${baseSlots.length})`);
+    return;
+  }
+  const baseSlot = baseSlots[0];
+  const baseSpec = roleSpec(baseRole, customRoles);
+
+  // Every tier a qualifying material can produce must have an output entry.
+  const needed = new Map(); // tier -> first material that needs it
+  for (const material of materials) {
+    if (material.tier < baseSlot.tierFloor) continue;
+    const resolved = resolveMaterialEffect(material, baseRole, d, baseSlot.name);
+    if (!resolved || check(baseSpec, resolved.value).length) continue;
+    const tier = parseTier(resolved.value);
+    if (!needed.has(tier)) needed.set(tier, material);
+  }
+  for (const [tier, material] of [...needed].sort((a, b) => a[0] - b[0])) {
+    if (!(String(tier) in d.output)) {
+      flag(rec, "output", `has no entry for tier ${tier} (needed because material "${material.id}" can fill slot "${baseSlot.name}" and yields T${tier})`);
+    }
+  }
 }
 
 /** Like loadDefinitions, but throws a DefinitionError listing every problem. */

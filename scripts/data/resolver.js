@@ -5,6 +5,8 @@
  * No Foundry globals (testable in Node).
  */
 
+import { slotRoles } from "./roles.js";
+
 /**
  * @param {Array<{source: string, value: any}>} layers  most specific first
  * @returns {{value: any, source: string} | null}  the first layer with a value
@@ -20,10 +22,15 @@ export function resolveLayers(layers) {
 
 /**
  * Effect of `material` for `role` when placed in `slotName` of `recipe`.
- * A recipe override for this material+slot beats the material's own default.
+ * A recipe override for this material+slot+role beats the material's own
+ * default. An override's `role` may be omitted when its slot drives one role.
  */
 export function resolveMaterialEffect(material, role, recipe, slotName) {
-  const override = recipe?.overrides?.find(o => o.materialId === material.id && o.slot === slotName);
+  const slot = recipe?.slots?.find(s => s.name === slotName);
+  const roles = slot ? slotRoles(slot) : [];
+  const soleRole = roles.length === 1 ? roles[0] : null;
+  const override = recipe?.overrides?.find(o =>
+    o.materialId === material.id && o.slot === slotName && (o.role ?? soleRole) === role);
   return resolveLayers([
     { source: "recipe override", value: override?.effect },
     { source: "material default", value: material.effects?.[role] }

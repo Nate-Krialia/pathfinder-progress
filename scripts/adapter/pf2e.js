@@ -9,6 +9,14 @@
  */
 import { MODULE_ID, TARGETS } from "../config.js";
 
+// Damage types ----------------------------------------------------------------
+// PF2e (Remaster) damage types. checkVersions() compares this with the live
+// CONFIG.PF2E.damageTypes so drift shows up as a warning, not a silent bug.
+export const DAMAGE_TYPES = [
+  "acid", "bleed", "bludgeoning", "cold", "electricity", "fire", "force", "mental",
+  "piercing", "poison", "slashing", "sonic", "spirit", "vitality", "void"
+];
+
 // Level-based DCs -----------------------------------------------------------
 // PF2e "DCs by Level" table (Core Rulebook, Table 10-5). It is fixed rules
 // data and the system does not expose it as a stable API, so it lives here.
@@ -90,5 +98,197 @@ export function checkVersions() {
   if (!versionAtLeast(game.version, TARGETS.foundry)) {
     warnings.push(`Built for Foundry ${TARGETS.foundry} or newer; running ${game.version}.`);
   }
+  const live = CONFIG.PF2E?.damageTypes;
+  if (live) {
+    const missing = DAMAGE_TYPES.filter(type => !(type in live));
+    if (missing.length) warnings.push(`Damage types not known to this PF2e version: ${missing.join(", ")}.`);
+  }
   return warnings;
+}
+
+// Crafted item data (pure: plain objects in, plain objects out) ---------------
+// The core code describes WHAT a crafted item gets; this section is the only
+// place that knows HOW PF2e expresses it (rule elements on system.rules).
+
+/**
+ * Selector that limits a rule to this one item's own damage rolls. PF2e's docs
+ * show both `{item|_id}` and `{item|id}`; confirm at the Stage 2 gate.
+ */
+export const ITEM_DAMAGE_SELECTOR = "{item|_id}-damage";
+
+export const DEGREES = ["criticalFailure", "failure", "success", "criticalSuccess"];
+
+/** Turn a raw PF2e degree (0 to 3, or a name) into one of DEGREES, else null. */
+export function normalizeDegree(raw) {
+  if (Number.isInteger(raw) && raw >= 0 && raw <= 3) return DEGREES[raw];
+  return DEGREES.includes(raw) ? raw : null;
+}
+
+/** Neutral description -> PF2e rule element JSON. */
+export function buildRuleElements(description) {
+  const rules = [];
+
+  for (const bonus of description.damageBonuses ?? []) {
+    const [count, die] = bonus.dice.split("d");
+    rules.push({
+      key: "DamageDice",
+      selector: ITEM_DAMAGE_SELECTOR,
+      diceNumber: Number(count),
+      dieSize: `d${die}`,
+      damageType: bonus.type,
+      ...(bonus.persistent ? { category: "persistent" } : {}),
+      ...(bonus.versus ? { predicate: [`target:trait:${bonus.versus}`] } : {}),
+      label: bonus.label ?? "Crafted"
+    });
+  }
+
+  for (const ability of description.abilities ?? []) {
+    rules.push({
+      key: "Note",
+      selector: ITEM_DAMAGE_SELECTOR,
+      title: ability.title,
+      text: ability.text,
+      outcome: ability.on === "criticalHit" ? ["criticalSuccess"] : ["success", "criticalSuccess"]
+    });
+  }
+
+  for (const resistance of description.resistances ?? []) {
+    rules.push({ key: "Resistance", type: resistance.type, value: resistance.value });
+  }
+
+  return rules;
+}
+
+const escapeHtml = text => String(text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/** A readable summary appended to the crafted item's description. */
+export function buildDescriptionHtml(description) {
+  const items = [];
+  for (const b of description.damageBonuses ?? []) {
+    const extra = [b.persistent ? "persistent" : null, b.versus ? `vs ${b.versus}` : null].filter(Boolean).join(", ");
+    items.push(`+${escapeHtml(b.dice)} ${escapeHtml(b.type)}${extra ? ` (${escapeHtml(extra)})` : ""}`);
+  }
+  for (const a of description.abilities ?? []) items.push(`<strong>${escapeHtml(a.title)}:</strong> ${a.text}`);
+  for (const r of description.resistances ?? []) items.push(`Resistance ${escapeHtml(r.type)} ${r.value}`);
+  if (description.spellSlots) items.push(`Spell slots: +${description.spellSlots}`);
+  if (!items.length) return "";
+  return `<hr><p><strong>Crafted properties</strong></p><ul>${items.map(i => `<li>${i}</li>`).join("")}</ul>`;
+}
+
+const FORBIDDEN_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Set a dotted path on a plain object. Only `system.*` (never rules) is allowed. */
+export function setPath(target, path, value) {
+  const segments = path.split(".");
+  if (segments[0] !== "system" || segments.length < 2 || segments[1] === "rules" || segments.some(seg => !seg || FORBIDDEN_SEGMENTS.has(seg))) {
+    throw new Error(`adapter: refusing to write to "${path}" (custom roles may only modify system.* other than system.rules)`);
+  }
+  let node = target;
+  for (const seg of segments.slice(0, -1)) {
+    if (typeof node[seg] !== "object" || node[seg] === null) node[seg] = {};
+    node = node[seg];
+  }
+  node[segments.at(-1)] = value;
+}
+
+/**
+ * Build the item data for a crafted item from the base item's source data.
+ * @param {object} baseData    item.toObject() of the output item
+ * @param {object} description neutral effects description from the plan
+ * @param {object} provenance  { recipeId, materials, crafter, degree }
+ * @param {{name?: string}} [options]
+ */
+export function buildCraftedItemData(baseData, description, provenance, options = {}) {
+  const data = structuredClone(baseData);
+  delete data._id;
+  delete data.folder;
+  delete data.ownership;
+  if (options.name) data.name = options.name;
+
+  data.system ??= {};
+  data.system.rules = [...(data.system.rules ?? []), ...buildRuleElements(description)];
+  data.system.quantity = 1;
+
+  const extra = buildDescriptionHtml(description);
+  if (extra) {
+    data.system.description ??= {};
+    data.system.description.value = `${data.system.description.value ?? ""}${extra}`;
+  }
+  for (const field of description.fields ?? []) setPath(data, field.path, field.value);
+
+  data.flags ??= {};
+  data.flags[MODULE_ID] = { ...(data.flags[MODULE_ID] ?? {}), crafted: provenance };
+  return data;
+}
+
+// Foundry-bound functions (thin; exercised by the in-Foundry gate) ------------
+
+/** Look an item up by UUID. Returns { found, name, type, isPhysical }. */
+export async function describeItemUuid(uuid) {
+  const doc = await fromUuid(uuid);
+  if (!doc) return { found: false };
+  return { found: true, name: doc.name, type: doc.type, isPhysical: doc.isOfType?.("physical") ?? false };
+}
+
+/** The PF2e item type a recipe category should produce, or null for "any physical item". */
+export function expectedItemType(category) {
+  if (category === "weapon") return "weapon";
+  if (category === "armor" || category === "robes") return "armor";
+  return null;
+}
+
+/** Find an item in the PF2e equipment compendium by exact name; returns its UUID(s). */
+export async function findItemUuid(name, packId = "pf2e.equipment-srd") {
+  const pack = game.packs.get(packId);
+  if (!pack) throw new Error(`adapter.findItemUuid: pack "${packId}" not found`);
+  const index = await pack.getIndex();
+  return index.filter(entry => entry.name === name).map(entry => `Compendium.${packId}.Item.${entry._id}`);
+}
+
+export async function loadItemSource(uuid) {
+  const doc = await fromUuid(uuid);
+  if (!doc) throw new Error(`adapter.loadItemSource: no item found for ${uuid}`);
+  return doc.toObject();
+}
+
+export async function createItemOnActor(actor, data) {
+  const [created] = await actor.createEmbeddedDocuments("Item", [data]);
+  return created;
+}
+
+/** Remove material units: byStack is { <itemId>: units }. Deletes a stack when it reaches 0. */
+export async function consumeMaterialStacks(actor, byStack) {
+  for (const [itemId, units] of Object.entries(byStack)) {
+    const item = actor.items.get(itemId);
+    if (!item) throw new Error(`adapter.consumeMaterialStacks: item ${itemId} not found on ${actor.name}`);
+    const quantity = item.system?.quantity ?? 1;
+    if (units >= quantity) await item.delete();
+    else await item.update({ "system.quantity": quantity - units });
+  }
+}
+
+export function canAffordGp(actor, gp) {
+  const coins = actor.inventory?.coins;
+  const held = coins?.goldValue ?? (coins?.copperValue !== undefined ? coins.copperValue / 100 : undefined);
+  if (held === undefined) throw new Error("adapter.canAffordGp: cannot read actor.inventory.coins (PF2e API changed?)");
+  return held >= gp;
+}
+
+export async function removeGp(actor, gp) {
+  if (!actor.inventory?.removeCoins) throw new Error("adapter.removeGp: actor.inventory.removeCoins is missing (PF2e API changed?)");
+  const removed = await actor.inventory.removeCoins({ gp });
+  if (removed === false) throw new Error(`adapter.removeGp: could not remove ${gp} gp from ${actor.name}`);
+}
+
+/**
+ * Roll the Crafting skill against a DC through PF2e's own check, so modifiers,
+ * dialogs and the chat card behave normally. Returns { degree, total, dc }.
+ */
+export async function rollCraftCheck(actor, dc) {
+  const crafting = actor.skills?.crafting;
+  if (!crafting?.check?.roll) throw new Error("adapter.rollCraftCheck: actor has no crafting skill check (PF2e API changed?)");
+  const result = await crafting.check.roll({ dc: { value: dc }, skipDialog: true });
+  const degree = normalizeDegree(result?.options?.degreeOfSuccess ?? result?.degreeOfSuccess);
+  if (!degree) throw new Error("adapter.rollCraftCheck: could not read the degree of success from PF2e's roll result");
+  return { degree, total: result.total, dc };
 }

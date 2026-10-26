@@ -1,0 +1,14 @@
+{
+  "kind": "material",
+  "id": "spider-fang",
+  "name": "Spider Fang",
+  "tier": 2,
+  "effects": {
+    "bonusDamage": { "dice": "1d4", "type": "poison" },
+    "specialAbility": {
+      "title": "Spider Venom",
+      "text": "On a hit, the target must succeed at a DC 18 Fortitude save or become sickened 1.",
+      "on": "hit"
+    }
+  }
+}

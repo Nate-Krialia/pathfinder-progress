@@ -3,14 +3,23 @@
   "id": "longsword-basic",
   "name": "Longsword (sample recipe)",
   "category": "weapon",
-  "itemTemplate": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER",
+  "output": {
+    "1": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00002",
+    "2": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00002",
+    "3": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00002"
+  },
+  "craftLevel": 3,
   "slots": [
     { "name": "blade", "drives": "basePower", "tierFloor": 1, "qty": 2 },
     { "name": "coating", "drives": "bonusDamage", "tierFloor": 2, "qty": 1 },
     { "name": "core", "drives": "specialAbility", "tierFloor": 3, "qty": 1 }
   ],
   "overrides": [
-    { "materialId": "silver", "slot": "coating", "effect": "+1d6 vs fiends" }
+    {
+      "materialId": "silver",
+      "slot": "coating",
+      "effect": { "dice": "1d6", "type": "spirit", "versus": "fiend" }
+    }
   ],
   "stationCategory": "smithing",
   "stationTierMin": 1,

@@ -18,9 +18,9 @@ test("the seed content passes validation with no errors", () => {
   const sources = seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }));
   const { registry, errors } = loadDefinitions(sources);
   assert.deepEqual(errors, []);
-  assert.equal(registry.material.size, 3);
-  assert.equal(registry.recipe.size, 1);
-  assert.ok(registry.material.has("iron") && registry.material.has("silver") && registry.material.has("starmetal"));
+  assert.equal(registry.material.size, 4);
+  assert.equal(registry.recipe.size, 2);
+  for (const id of ["iron", "silver", "starmetal", "spider-fang"]) assert.ok(registry.material.has(id), id);
 });
 
 test("a valid set loads into the registry by kind", () => {
@@ -53,7 +53,7 @@ const BAD_CASES = [
   ["tier out of range", { ...MATERIAL, tier: 9 }, "tier", /at most/],
   ["missing id", (() => { const m = clone(MATERIAL); delete m.id; return m; })(), "id", /required/],
   ["id not a slug", { ...MATERIAL, id: "Iron Ore!" }, "id", /lowercase slug/],
-  ["effect value is an array", { ...MATERIAL, effects: { basePower: ["T1"] } }, "effects.basePower", /number, a tier/],
+  ["effect value is an array", { ...MATERIAL, effects: { basePower: ["T1"] } }, "effects.basePower", /non-empty string/],
   ["unrecognised field", { ...MATERIAL, colour: "grey" }, "colour", /not a recognised field/],
   ["recipe with no slots", { ...RECIPE, slots: [] }, "slots", /at least 1/],
   ["recipe slot qty 0", { ...RECIPE, slots: [{ name: "edge", drives: "basePower", tierFloor: 1, qty: 0 }] }, "slots[0].qty", /at least 1/],
@@ -86,10 +86,10 @@ test("material effect with an unknown role is rejected", () => {
 });
 
 test("recipe slot driving a role invalid for its category is rejected", () => {
-  const bad = { ...RECIPE, slots: [{ name: "edge", drives: "spellSlots", tierFloor: 1, qty: 1 }] };
+  const bad = { ...RECIPE, slots: [...RECIPE.slots, { name: "extra", drives: "spellSlots", tierFloor: 1, qty: 1 }] };
   const { errors } = run(bad);
   assert.equal(errors.length, 1);
-  assertNamesAll(errors[0], { entry: "blade", field: "slots[0].drives" });
+  assertNamesAll(errors[0], { entry: "blade", field: "slots[1].drives" });
   assert.match(errors[0].message, /valid: basePower, bonusDamage, specialAbility/);
 });
 
@@ -119,13 +119,13 @@ test("a custom role without `modifies` is rejected", () => {
 test("a valid custom role makes a new role usable by materials and recipes", () => {
   const role = { kind: "customRole", id: "sheen", appliesTo: ["weapon"], modifies: "system.sheen", effect: 1 };
   const mat = { ...MATERIAL, effects: { basePower: "T1", sheen: 2 } };
-  const rec = { ...RECIPE, slots: [{ name: "edge", drives: "sheen", tierFloor: 1, qty: 1 }] };
+  const rec = { ...RECIPE, slots: [...RECIPE.slots, { name: "glow", drives: "sheen", tierFloor: 1, qty: 1 }] };
   const { errors } = run(role, mat, rec);
   assert.deepEqual(errors, []);
 });
 
 test("a custom role may not reuse a built-in role name", () => {
-  const { errors } = run({ kind: "customRole", id: "basePower", appliesTo: ["weapon"], modifies: "x", effect: 1 });
+  const { errors } = run({ kind: "customRole", id: "basePower", appliesTo: ["weapon"], modifies: "system.x", effect: 1 });
   assert.equal(errors.length, 1);
   assert.match(errors[0].message, /built-in/);
 });

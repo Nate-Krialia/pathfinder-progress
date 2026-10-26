@@ -6,21 +6,14 @@
  * Shapes are "indicative" in the spec; anything it leaves open is noted inline
  * and should be tightened as the owning stage is built.
  */
-import { ID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
-import { arr, bool, effect, int, num, obj, oneOf, optional, record, str, variant, any } from "./schema.js";
+import { CRAFT_LEVEL_RANGE, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
+import { any, arr, bool, int, num, obj, oneOf, optional, record, scalar, str, union, variant } from "./schema.js";
+export { BUILT_IN_ROLES } from "./roles.js";
 
 const idField = () => str({ pattern: ID_PATTERN, patternHint: "must be a lowercase slug (letters, digits, - or _)" });
 const tier = range => int({ min: range.min, max: range.max });
 const quantity = () => str({ pattern: QUANTITY_PATTERN, patternHint: 'must be a number or dice like "3" or "1d4"' });
 const kind = name => oneOf([name]);
-
-/** Built-in role vocabulary, by recipe category (docs/01-data-model.md). */
-export const BUILT_IN_ROLES = {
-  weapon: ["basePower", "bonusDamage", "specialAbility"],
-  armor: ["basePower", "resistance", "specialAbility"],
-  robes: ["basePower", "resistance", "specialAbility"],
-  focus: ["spellPower", "spellSlots", "specialAbility"]
-};
 
 // Definitions -----------------------------------------------------------------
 const material = obj({
@@ -28,22 +21,53 @@ const material = obj({
   id: idField(),
   name: str(),
   tier: tier(TIER_RANGES.material),
-  // Stage 1 accepts number | tier ("T2") | string; tightened in Stage 2.
-  effects: record(effect())
+  // role -> value. The value shape depends on the role (see roles.js), so it is
+  // checked in validate.js once custom roles are known.
+  effects: record(any()),
+  // Percent chance a unit is lost on a failed craft; beats the global default.
+  lossChance: optional(int({ min: 0, max: 100 }))
 });
+
+const OUTPUT_KEY = /^([1-9]\d*|default)$/;
 
 const recipe = obj({
   kind: kind("recipe"),
   id: idField(),
   name: str(),
   category: str(),
-  // Assumed to be a PF2e item UUID (the spec does not define it).
-  itemTemplate: str({ pattern: /^(Compendium|Item)\./, patternHint: 'must be an item UUID starting "Compendium." or "Item."' }),
+  // Output item by tier: { "1": uuid, "2": uuid } (or { "default": uuid } when no role picks the tier).
+  output: record(str({ pattern: ITEM_UUID_PATTERN, patternHint: 'must be an item UUID like "Compendium.pf2e.equipment-srd.Item.<id>"' }), {
+    refine(value, path, errors) {
+      const keys = Object.keys(value);
+      if (keys.length === 0) errors.push({ field: path, message: "must have at least one entry" });
+      for (const key of keys) {
+        if (!OUTPUT_KEY.test(key)) {
+          errors.push({ field: `${path}.${key}`, message: 'key must be a tier number like "2", or "default"' });
+        } else if (key !== "default" && (Number(key) < TIER_RANGES.material.min || Number(key) > TIER_RANGES.material.max)) {
+          errors.push({ field: `${path}.${key}`, message: `tier must be between ${TIER_RANGES.material.min} and ${TIER_RANGES.material.max}` });
+        }
+      }
+    }
+  }),
+  // Which role picks the output tier. Defaults by category (weapon/armor: basePower, focus: spellPower).
+  baseRole: optional(oneOf(["basePower", "spellPower"])),
+  // Craft DC = PF2e level DC for this level. Material quality never changes it.
+  craftLevel: int({ min: CRAFT_LEVEL_RANGE.min, max: CRAFT_LEVEL_RANGE.max }),
+  // Optional fixed name for the crafted item; defaults to the base item's name.
+  resultName: optional(str()),
+  // Removed in Stage 2; kept only to give a helpful error.
+  itemTemplate: optional(any({
+    refine(value, path, errors) {
+      errors.push({ field: path, message: 'was replaced by "output" (a map of tier to item UUID)' });
+    }
+  })),
   slots: arr(obj({
     name: str(),
-    drives: str(),
+    // One role, or several (e.g. a spider fang can drive bonusDamage AND specialAbility).
+    drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }),
     tierFloor: tier(TIER_RANGES.material),
-    qty: int({ min: 1 })
+    qty: int({ min: 1 }),
+    lossChance: optional(int({ min: 0, max: 100 }))
   }), {
     min: 1,
     refine(slots, path, errors) {
@@ -54,7 +78,8 @@ const recipe = obj({
       });
     }
   }),
-  overrides: optional(arr(obj({ materialId: idField(), slot: str(), effect: effect() }))),
+  // `role` is only needed when the slot drives more than one role.
+  overrides: optional(arr(obj({ materialId: idField(), slot: str(), role: optional(str()), effect: any() }))),
   stationCategory: str(),
   stationTierMin: tier(TIER_RANGES.station),
   skillWhitelist: arr(str(), { min: 1 }),
@@ -83,9 +108,18 @@ const customRole = obj({
   kind: kind("customRole"),
   id: str({ pattern: ROLE_ID_PATTERN, patternHint: 'must be camelCase like "weaponSheen"' }),
   appliesTo: arr(str(), { min: 1 }),
-  // The spec requires rejection on load if `modifies` is missing.
-  modifies: str(),
-  effect: effect()
+  // The spec requires rejection on load if `modifies` is missing. Only item
+  // fields under system.* may be modified, and never system.rules.
+  modifies: str({
+    pattern: /^system\.(?!rules(\.|$))[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/,
+    patternHint: 'must be an item field path like "system.bulk.value" (never system.rules)',
+    refine(value, path, errors) {
+      if (value.split(".").some(segment => ["__proto__", "constructor", "prototype"].includes(segment))) {
+        errors.push({ field: path, message: "may not contain __proto__, constructor or prototype" });
+      }
+    }
+  }),
+  effect: scalar()
 });
 
 // Public/fixed stations: fixed facts only. Owner/access live in the world list.

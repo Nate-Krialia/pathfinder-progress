@@ -14,12 +14,34 @@ export function seedRecords() {
 
 export const clone = v => JSON.parse(JSON.stringify(v));
 
+export const UUID = "Compendium.pf2e.equipment-srd.Item.AAAAAAAAAAAAAAAA";
+export const UUID_2 = "Compendium.pf2e.equipment-srd.Item.BBBBBBBBBBBBBBBB";
+
 export const MATERIAL = { kind: "material", id: "iron", name: "Iron", tier: 1, effects: { basePower: "T1" } };
-export const SILVER = { kind: "material", id: "silver", name: "Silver", tier: 2, effects: { basePower: "T2", bonusDamage: "+1d4 vs fiends" } };
+export const SILVER = {
+  kind: "material", id: "silver", name: "Silver", tier: 2,
+  effects: { basePower: "T2", bonusDamage: { dice: "1d4", type: "spirit", versus: "fiend" } }
+};
+export const FANG = {
+  kind: "material", id: "spider-fang", name: "Spider Fang", tier: 2,
+  effects: {
+    bonusDamage: { dice: "1d4", type: "poison" },
+    specialAbility: { title: "Spider Venom", text: "Fortitude DC 18 or sickened 1.", on: "hit" }
+  }
+};
 export const RECIPE = {
   kind: "recipe", id: "blade", name: "Blade", category: "weapon",
-  itemTemplate: "Item.abc",
+  output: { "1": UUID, "2": UUID_2 },
+  craftLevel: 1,
   slots: [{ name: "edge", drives: "basePower", tierFloor: 1, qty: 1 }],
   stationCategory: "smithing", stationTierMin: 1,
   skillWhitelist: ["crafting"], researchProject: { tier: 1 }
+};
+/** Dagger plus a fang slot that drives two roles. */
+export const FANG_RECIPE = {
+  ...RECIPE, id: "fang-dagger", name: "Fang Dagger",
+  slots: [
+    { name: "blade", drives: "basePower", tierFloor: 1, qty: 1 },
+    { name: "fang", drives: ["bonusDamage", "specialAbility"], tierFloor: 2, qty: 1 }
+  ]
 };

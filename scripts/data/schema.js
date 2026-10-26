@@ -124,6 +124,24 @@ export function validateValue(spec, value, path, errors) {
       break;
     }
 
+    case "scalar":
+      if (!["number", "string", "boolean"].includes(typeof value)
+        || (typeof value === "number" && !Number.isFinite(value))
+        || value === "") {
+        fail(errors, path, `must be a number, a text string, or true/false (got ${describe(value)})`);
+      }
+      break;
+
+    case "union": {
+      const matched = spec.of.some(option => {
+        const attempt = [];
+        validateValue({ ...option, optional: false }, value, path, attempt);
+        return attempt.length === 0;
+      });
+      if (!matched) fail(errors, path, spec.hint ?? `does not match any allowed form (got ${describe(value)})`);
+      break;
+    }
+
     case "any":
       break;
 
@@ -154,4 +172,6 @@ export const obj = (fields, opts = {}) => ({ type: "object", fields, ...opts });
 export const record = (of, opts = {}) => ({ type: "record", of, ...opts });
 export const variant = (key, variants, opts = {}) => ({ type: "variant", key, variants, ...opts });
 export const any = (opts = {}) => ({ type: "any", ...opts });
+export const scalar = (opts = {}) => ({ type: "scalar", ...opts });
+export const union = (of, opts = {}) => ({ type: "union", of, ...opts });
 export const optional = spec => ({ ...spec, optional: true });
