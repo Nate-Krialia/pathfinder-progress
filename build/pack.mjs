@@ -2,7 +2,7 @@
  * Builds the compendium packs.
  *
  *   content/definitions/*.json   public definitions (materials, node types, towns, stations, ...)
- *   content/recipes/*.json       recipes (the GM-only pack: players only ever get snapshots)
+ *   content/recipes/*.json       recipes (a pack hidden from players' interface; an honor system)
  *     -> ALL validated together (the build FAILS on any bad definition)
  *     -> wrapped as Journal entries (JSON in a Markdown page)
  *     -> compiled to packs/definitions and packs/recipes (LevelDB), then read back and counted

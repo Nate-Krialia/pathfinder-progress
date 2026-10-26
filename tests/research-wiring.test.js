@@ -157,6 +157,7 @@ test("one degree string applies to every day", async () => {
   const { actor, api } = await started();
   const result = await store.research({ actor, project: DAGGER, days: 3, degree: "success", chat: false }, api);
   assert.equal(result.project.progress, 3);
+  assert.deepEqual(result.results.map(r => [r.total, r.natural]), [[null, null], [null, null], [null, null]], "a forced degree has no roll");
 });
 
 test("not enough days: refused before any roll and NOTHING changes", async () => {
@@ -232,7 +233,7 @@ test("a real roll goes through PF2e without its own chat card, and the degree an
   actor.rolls.push(roll(2, 15, 16), roll(3, 25, 20));
   const result = await store.research({ actor, project: DAGGER, days: 2 }, api);
   assert.deepEqual(actor.rollParams.map(p => [p.dc.value, p.skipDialog, p.createMessage]), [[14, true, false], [14, true, false]]);
-  assert.deepEqual(result.results.map(r => [r.degree, r.total, r.delta]), [["success", 15, 1], ["criticalSuccess", 25, 2]]);
+  assert.deepEqual(result.results.map(r => [r.degree, r.total, r.natural, r.delta]), [["success", 15, 16, 1], ["criticalSuccess", 25, 20, 2]]);
   assert.match(env.chat[0].content, /Day 1: 15 vs DC 14: Success \(\+1\)/);
   assert.match(env.chat[0].content, /Day 2: 25 vs DC 14: Critical Success \(\+2\)/);
 });
@@ -489,7 +490,7 @@ test("a stored flag that is not a list is a loud error, never silently replaced"
   await assert.rejects(store.startProject(api, { actor, recipe: "longsword-basic" }), /"projects" flag is not a list/);
 });
 
-// The GM-only recipes pack ---------------------------------------------------------------------------------------------------
+// The recipes pack, hidden from players' interface (an honor system) -----------------------------------------------------------
 function fakePack({ documentName = "JournalEntry", visible = true, entries = [], fail = false } = {}) {
   return {
     documentName, visible,
@@ -501,7 +502,7 @@ function fakePack({ documentName = "JournalEntry", visible = true, entries = [],
 }
 const sampleText = '```json\n{"kind":"town","id":"oakhaven","name":"Oakhaven"}\n```';
 
-test("the loader reads the GM-only recipes pack for a GM", async () => {
+test("the loader reads the recipes pack for a GM", async () => {
   install({ packs: new Map([[PACKS.definitions, fakePack({ entries: [{ name: "Oakhaven", text: sampleText }] })], [PACKS.recipes, fakePack({ entries: [{ name: "R", text: sampleText }] })]]) });
   const { sources, problems } = await collectSources();
   assert.deepEqual(problems, []);
@@ -528,7 +529,7 @@ test("a GM IS told when a pack is missing or unreadable", async () => {
 });
 
 // Build and manifest guards ----------------------------------------------------------------------------------------------------
-test("MANIFEST GUARD: the recipes pack is declared GM-only (players and trusted players get NONE)", () => {
+test("MANIFEST GUARD: the recipes pack is hidden from players' interface (Players and Trusted NONE) and its label does not promise secrecy", () => {
   const manifest = JSON.parse(readFileSync("module.json", "utf8"));
   const recipes = manifest.packs.find(p => p.name === "recipes");
   assert.ok(recipes, "module.json must declare the recipes pack");
@@ -537,12 +538,14 @@ test("MANIFEST GUARD: the recipes pack is declared GM-only (players and trusted 
   assert.equal(recipes.ownership.PLAYER, "NONE");
   assert.equal(recipes.ownership.TRUSTED, "NONE");
   assert.equal(recipes.ownership.ASSISTANT, "OWNER");
+  assert.match(recipes.label, /hidden from players/, "the label says what it does");
+  assert.doesNotMatch(recipes.label, /secret|private|protected|gm only|secure/i, "the label must not imply secrecy");
   assert.equal(`${manifest.id}.${recipes.name}`, PACKS.recipes);
   const definitions = manifest.packs.find(p => p.name === "definitions");
   assert.notEqual(definitions.ownership?.PLAYER, "NONE", "the public pack must stay readable");
 });
 
-test("CONTENT GUARD: recipes live only in content/recipes, and nothing else does", () => {
+test("CONTENT GUARD: recipes live only in content/recipes (the pack hidden from players' interface)", () => {
   const kindsIn = dir => readdirSync(dir).filter(f => f.endsWith(".json")).map(f => JSON.parse(readFileSync(`${dir}/${f}`, "utf8")).kind);
   assert.deepEqual([...new Set(kindsIn("content/recipes"))], ["recipe"]);
   assert.ok(!kindsIn("content/definitions").includes("recipe"), "a recipe in the public pack would be readable by players");

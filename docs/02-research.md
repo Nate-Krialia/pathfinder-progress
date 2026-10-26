@@ -40,3 +40,5 @@ A project may list materials and a fee consumed at start or completion (required
 ## Notes
 - Days are reserved when the action is queued so players cannot over-book.
 - Resolution occurs via the GM-reviewed queue (see `08-foundry-integration.md`).
+- The project's goal (the recipe's name) is visible to the researcher. The recipe's contents are hidden from players' interface only, as an honor system: Foundry does not stop a player reading them from the browser console (see `10-stage2-decisions.md`).
+- Each research result records the natural d20 and the total, so a degree can be audited. The built shape of projects and the tier table is in `10-stage2-decisions.md`.

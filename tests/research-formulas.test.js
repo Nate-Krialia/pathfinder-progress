@@ -13,8 +13,8 @@ const dagger = registry.recipe.get("dagger-spider-fang");
 const longsword = registry.recipe.get("longsword-basic");
 const withRecipes = recipes => ({ recipe: new Map(recipes.map(r => [r.id, r])) });
 
-// Spoiler protection ---------------------------------------------------------------------------
-test("SPOILER GUARD: a snapshot has exactly the allowed keys and none of the hidden recipe fields", () => {
+// The display copy (snapshot) keeps hidden recipe fields out of players' actor flags -------------
+test("DISPLAY-COPY GUARD: a snapshot has exactly the allowed keys and none of the hidden recipe fields", () => {
   for (const recipe of [dagger, longsword]) {
     const snapshot = makeSnapshot(recipe);
     assert.deepEqual(Object.keys(snapshot).sort(), [...SNAPSHOT_KEYS].sort());
@@ -25,7 +25,7 @@ test("SPOILER GUARD: a snapshot has exactly the allowed keys and none of the hid
   }
 });
 
-test("SPOILER GUARD: nothing from the hidden fields leaks into the serialised snapshot", () => {
+test("DISPLAY-COPY GUARD: nothing from the hidden fields leaks into the serialised snapshot", () => {
   const text = JSON.stringify(makeSnapshot(longsword));
   assert.doesNotMatch(text, /Compendium|Longsword"|1d6|spirit|fiend|arcana|occultism/);
   assert.ok(longsword.overrides.length > 0, "sanity: the longsword really has overrides to leak");

@@ -36,6 +36,7 @@ Read this file first on every task. Then load only the system file(s) the task t
 - **All PF2e item/actor reading goes through one adapter file** (`adapter/pf2e.js` or equivalent). No other file touches PF2e data structures directly.
 - **Hidden rolls run on the GM client only.** Players must never see or influence them.
 - **Players cannot write world settings, scenes, or compendiums.** Any such write is relayed to the GM client (see `docs/08-foundry-integration.md`).
+- **Recipe visibility is an honor system, not secrecy.** The recipes pack is hidden from players' interface and the module's loader skips it for players, but Foundry does not enforce read access: a player using the browser console can read it (verified in Foundry 14.369, also for a world Journal set to None). Never describe it as secret, and never rely on it for anything that must stay hidden. See `docs/10-stage2-decisions.md`.
 - Each downtime day goes to exactly one activity (research, exploring, workshop upgrade).
 - Prefer Foundry-native building blocks: Items, compendium packs, flags, tokens, ApplicationV2, socketlib.
 - Keep tunable numbers in one config object/file, never hardcoded in logic.

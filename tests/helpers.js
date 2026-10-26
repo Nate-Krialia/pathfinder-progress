@@ -6,7 +6,7 @@ export const asPage = data => "```json\n" + JSON.stringify(data, null, 2) + "\n`
 
 export const source = (data, pack = "test.pack", entry = data?.id ?? "entry") => ({ pack, entry, text: asPage(data) });
 
-/** Every seed definition: the public ones and the (GM-only) recipes. */
+/** Every seed definition: the public ones and the recipes. */
 export function seedRecords() {
   return ["content/definitions", "content/recipes"].flatMap(dir =>
     readdirSync(dir).filter(f => f.endsWith(".json")).sort()

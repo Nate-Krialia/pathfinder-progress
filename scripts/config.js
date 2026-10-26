@@ -8,7 +8,7 @@ export const TARGETS = {
 
 export const PACKS = {
   definitions: `${MODULE_ID}.definitions`,
-  // GM-only: recipes are spoilers. Players hold a display copy only once they unlock a formula.
+  // Hidden from players' interface (an honor system: Foundry does not enforce read access). Players hold a display copy of a formula once they unlock it.
   recipes: `${MODULE_ID}.recipes`,
   crafted: `${MODULE_ID}.crafted-items`
 };

@@ -2,7 +2,8 @@
  * Formulas an actor holds. Pure; no Foundry globals.
  *
  * Crafting always uses the LIVE recipe; a formula only authorises it. The snapshot is a
- * display copy so players can read their own formulae (recipes live in a GM-only pack).
+ * display copy so the interface can show players their own formulae. Recipes live in a pack
+ * hidden from players' interface; that is an honor system, not access control.
  * It copies only what a player may know, never overrides, outputs, or research details.
  */
 

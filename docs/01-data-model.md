@@ -4,19 +4,24 @@
 
 | Data | Kind | Home |
 |---|---|---|
-| Material definitions, recipes, regions, spawn tables, creature yield overrides, custom roles | Definition | Compendium packs of flagged Journal entries (GM-editable, importable, shippable) |
+| Material definitions, regions, spawn tables, creature yield overrides, custom roles, towns, stations, node types | Definition | Compendium packs of flagged Journal entries (GM-editable, importable, shippable) |
+| Recipes | Definition | A separate Journal pack (`recipes`), **hidden from players' interface** (an honor system; see the note below) |
 | Crafted/archived finished items | Output | Separate Item compendium pack (compendiums hold one document type each) |
 | Material stacks a character owns | Live | Real PF2e Items in actor inventory carrying module flags |
-| Research / upgrade project | Live | Flag on the researcher's actor |
+| Research / upgrade project | Live | Flag on the researcher's actor (current shape: `10-stage2-decisions.md`) |
 | `pendingActions` queue | Live | Flag on each player's own actor |
 | Node (anchor or active) | Live | Token with module flags on its scene |
 | Corpse node | Live | Token/actor flags (creature that died) |
 | Player-owned station | Live | Flag on owner's actor |
 | Public/fixed station | Definition + live | Journal entry in compendium, location data |
 | Commission | Live | One world-level setting list (single source of truth); UI filters per player |
-| Formulae owned | Live | Flag on actor (owned copies) |
+| Formulae owned | Live | Flag on actor: `{ recipeId, access, source, snapshot }`; the snapshot is a display copy |
+
+**Visibility is an honor system.** Foundry does not enforce read permissions on compendium or world Journal contents: a player can read them from the browser console (verified in Foundry 14.369). "Hidden from players" here means hidden from the interface and skipped by the module's loader. It is not secrecy; do not rely on it for anything that must stay hidden.
 
 ## Records (shapes are indicative; finalize in code with validation)
+
+Shapes that changed while building (projects, formulas, nodes, stations, recipes) are recorded in `10-stage2-decisions.md`, which is newer than this file.
 
 **Material** (definition and item flag)
 ```

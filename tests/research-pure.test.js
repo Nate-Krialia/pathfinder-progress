@@ -254,9 +254,27 @@ test("the input project is never mutated", async () => {
   assert.equal(JSON.stringify(p), before);
 });
 
-test("rolled totals are carried into the results for the chat summary", async () => {
-  const result = await resolveResearch({ project: project(), skill: "crafting", days: 1, daysAvailable: 1, rollDay: async () => ({ degree: "success", total: 15 }) });
-  assert.equal(result.results[0].total, 15);
+test("rolled totals and natural d20s are carried into the results, so a degree can be audited", async () => {
+  const result = await resolveResearch({ project: project(), skill: "crafting", days: 1, daysAvailable: 1, rollDay: async () => ({ degree: "success", total: 15, natural: 16 }) });
+  assert.deepEqual([result.results[0].total, result.results[0].natural], [15, 16]);
+});
+
+test("a forced degree has no roll to audit: total and natural are null", async () => {
+  const result = await resolveResearch({ project: project(), skill: "crafting", days: 1, daysAvailable: 1, rollDay: fixed(["success"]) });
+  assert.deepEqual([result.results[0].total, result.results[0].natural], [null, null]);
+});
+
+test("audit: every simulated day's reported degree matches its natural d20, total and DC", async () => {
+  const rng = seeded(4242);
+  const modifier = 3, dc = 15;
+  const result = await resolveResearch({
+    project: project({ dc, threshold: 1_000_000 }), skill: "crafting", days: 2000, daysAvailable: 2000,
+    rollDay: async () => { const natural = rng(20); return { degree: DEGREE_NAMES[degreeIndex(natural, modifier, dc)], total: natural + modifier, natural }; }
+  });
+  for (const r of result.results) {
+    assert.equal(r.total - r.natural, modifier, "total = natural + modifier");
+    assert.equal(r.degree, DEGREE_NAMES[degreeIndex(r.natural, r.total - r.natural, dc)], `day ${r.day}: the degree must follow from the natural d20, the total and the DC`);
+  }
 });
 
 // Summary --------------------------------------------------------------------------------------------------------

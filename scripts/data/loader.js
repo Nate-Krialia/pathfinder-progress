@@ -15,8 +15,9 @@ export function packIds() {
 }
 
 /**
- * Read every definition pack. A pack this user may not read (the GM-only recipes pack,
- * for players) is skipped quietly: players never hold recipes, only snapshots of their formulae.
+ * Read every definition pack. A pack this user cannot see (the recipes pack, for players) is
+ * skipped quietly, so a player's client never loads recipes through this module. Foundry itself
+ * does not stop a player reading the pack from the console; this is an honor system.
  */
 export async function collectSources() {
   const sources = [];

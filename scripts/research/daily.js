@@ -12,7 +12,7 @@ import { applyProgress, deltaFor } from "./project.js";
  * @param {string} args.skill          the skill used for every day of this call
  * @param {number} args.days           how many days the researcher wants to spend (at most)
  * @param {number} args.daysAvailable  the downtime days the actor has
- * @param {(day: number) => Promise<{degree: string, total?: number}>} args.rollDay
+ * @param {(day: number) => Promise<{degree: string, total?: number, natural?: number}>} args.rollDay
  * @returns {Promise<{ok: false, errors: string[]} | {ok: true, project, results, daysSpent, daysRemaining, completed}>}
  */
 export async function resolveResearch({ project, skill, days, daysAvailable, rollDay, config = RESEARCH }) {
@@ -31,7 +31,12 @@ export async function resolveResearch({ project, skill, days, daysAvailable, rol
     const before = current.progress;
     const applied = applyProgress(current, { delta: deltaFor(rolled.degree, config), source: "research", skill, degree: rolled.degree }, config);
     current = applied.project;
-    results.push({ day, skill, degree: rolled.degree, total: rolled.total ?? null, delta: current.progress - before, progressAfter: current.progress });
+    results.push({
+      day, skill, degree: rolled.degree,
+      total: rolled.total ?? null,
+      natural: rolled.natural ?? null, // the natural d20, so the degree can be audited (null for a forced test degree)
+      delta: current.progress - before, progressAfter: current.progress
+    });
     if (applied.completed) break; // the goal is reached: the remaining days are not spent
   }
 

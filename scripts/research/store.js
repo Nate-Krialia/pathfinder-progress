@@ -159,7 +159,7 @@ export async function research({ actor, project: projectId, days: dayCount, skil
     ? async day => ({ degree: forced[day - 1] })
     : async () => {
       const roll = await adapter.rollSkillCheck(actor, picked.skill, project.dc, { createMessage: false });
-      return { degree: roll.degree, total: roll.total };
+      return { degree: roll.degree, total: roll.total, natural: roll.natural };
     };
 
   const available = readDays(actor);

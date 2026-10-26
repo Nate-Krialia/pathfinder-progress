@@ -115,11 +115,12 @@ Corpse yield derived from creature level/traits, auto-creating corpse nodes on d
 
 # Stage 5 decisions (research and formulae)
 
-## Spoiler protection (option A)
-- Recipes live in their own **GM-only compendium** (`pathfinder-progress.recipes`; manifest ownership: Players and Trusted Players NONE, Assistant OWNER). Everything else stays in the public `definitions` pack. Players' clients skip the recipes pack quietly.
-- A character holds a **display snapshot** of each formula it owns or is lent (name, category, craft level, slots with roles/tier floors/quantities, station). The snapshot deliberately excludes `overrides`, `output`, `skillWhitelist` and `researchProject`; a test guards that list.
+## Recipe visibility (an honor system, not secrecy)
+- Recipes live in their own compendium, `pathfinder-progress.recipes` (labelled "Recipes (hidden from players)"). The manifest sets Players and Trusted Players to NONE and Assistant to OWNER. That **hides it from players' interface**, and the module's loader skips it for non-GMs. Everything else stays in the public `definitions` pack.
+- **Foundry does not enforce this as access control.** Verified in Foundry 14.369 / PF2e 8.6.1 with a plain player account: `game.packs.get("pathfinder-progress.recipes").getDocuments()` returns the recipes with their full text, and a world Journal whose default ownership is None also delivers its full text to the player's client. Only the compiled pack files are protected from direct access (403 by URL). So a player using the browser console can read every recipe. **Decision: keep it as an honor system.** Do not describe recipes as secret, and do not rely on this for anything that must stay hidden.
+- The seed recipes in `content/recipes/` are also committed to the public repo and ship in the public release, so they are samples. Recipes you author for a campaign can live in a world Journal compendium (list its id under "Extra definition packs") for organisation; that is no more secret than the module's pack. Do not commit recipes you do not want public.
+- A character holds a **display snapshot** of each formula it owns or is lent (name, category, craft level, slots with roles/tier floors/quantities, station), so the interface can show a player their own formulae. The snapshot deliberately excludes `overrides`, `output`, `skillWhitelist` and `researchProject`; a test guards that list.
 - **Crafting always uses the live recipe.** A formula only authorises; editing a recipe applies at once. Snapshots are refreshed on GM load (with a notice) or with `api.refreshFormulas`. Editing hidden fields does not make a snapshot stale. A formula whose recipe is gone is **orphaned**: kept, reported, and crafting is refused.
-- **Limits of the protection:** it stops browsing inside Foundry. The seed recipes in `content/recipes/` are committed to the public repo and ship in the public release, so treat them as samples. Author your real campaign recipes in a **world Journal compendium** with Players set to None, list its id under "Extra definition packs", and do not commit them.
 
 ## Projects
 - Stored on the actor (`flags.pathfinder-progress.projects`): `{ id: "unlock-<recipeId>", goalName, outcome: { type: "unlockFormula", recipeId }, tier, dc, threshold, progress, skillWhitelist, status: active|complete|abandoned, log[] }`. `formulaId` was renamed `recipeId`. `upgradeStation` stays in the schema; starting one is refused until Stage 9.
@@ -128,6 +129,7 @@ Corpse yield derived from creature level/traits, auto-creating corpse nodes on d
 ## The daily check
 - One PF2e check per downtime day against the project DC; progress by degree (critical success 2, success 1, failure 0, critical failure 0). A critical failure can cost progress through `RESEARCH.critFailureSetback` (default 0, off); progress never goes below 0.
 - Research **stops when the project completes**; leftover days are not spent. One summary chat message per call (PF2e is asked not to post a card per day).
+- Each result in `research()`'s return value carries `degree`, `total`, `natural` (the natural d20) and `delta`, so a degree can be audited (forced test degrees have `null` for total and natural).
 - Progress, days and (on completion) the formula are saved in **one actor update**, so a failure part-way changes nothing.
 - `api.addProgress(actor, project, amount, reason)` is the hook for other sources; a reason is required and is logged. Practice and discovery are not built.
 
