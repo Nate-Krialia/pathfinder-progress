@@ -5,6 +5,7 @@
  */
 import { evaluateForRecipe, evaluateStations, selectStation } from "../stations/reach.js";
 import { planCraft } from "./plan.js";
+import { formulaRequirement } from "../research/formulas.js";
 
 /**
  * @param {object} args
@@ -18,18 +19,25 @@ import { planCraft } from "./plan.js";
  * @param {(actorId: string) => string|null} args.townOf
  * @param {(townId: string) => string} [args.townName]
  * @param {(actorId: string) => string} [args.nameOf]
+ * @param {object[]} args.formulas        the crafter's formula entries (owned and loaned)
+ * @param {string} [args.crafterName]
  * @param {string} [args.requestedStationId]
  * @param {object} [args.config]
  * @returns {{ ok: boolean, errors: string[], plan: object|null, stations: { verdicts: object[], chosen: object|null } }}
  */
 export function prepareCraft({
-  recipe, registry, selection, stacks, outputs, stations, crafterId, townOf, townName, nameOf, requestedStationId, config
+  recipe, registry, selection, stacks, outputs, stations, crafterId, townOf, townName, nameOf, requestedStationId, formulas, crafterName, config
 }) {
+  const formula = formulaRequirement(formulas ?? [], recipe, crafterName ?? nameOf?.(crafterId) ?? crafterId);
   const verdicts = evaluateForRecipe(evaluateStations({ crafterId, stations, townOf, townName, nameOf }), recipe);
   const picked = selectStation({ verdicts, recipe, requestedId: requestedStationId });
   const planned = planCraft({ recipe, registry, selection, stacks, outputs, station: picked.ok ? picked.station : undefined, config });
 
-  const errors = [...(picked.ok ? [] : picked.errors), ...(planned.ok ? [] : planned.errors)];
+  const errors = [...(formula.ok ? [] : [formula.error]), ...(picked.ok ? [] : picked.errors), ...(planned.ok ? [] : planned.errors)];
+  if (errors.length === 0) {
+    planned.plan.formulaAccess = formula.access;
+    planned.plan.provenance.formulaAccess = formula.access;
+  }
   return {
     ok: errors.length === 0,
     errors,

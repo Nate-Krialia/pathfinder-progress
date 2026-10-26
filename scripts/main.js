@@ -5,6 +5,7 @@ import { resolveMaterialEffect } from "./data/resolver.js";
 import { craft, previewCraft } from "./crafting/craft.js";
 import * as stations from "./stations/store.js";
 import * as gathering from "./gathering/store.js";
+import * as researchStore from "./research/store.js";
 import { STATION_KEYS } from "./config.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
@@ -100,6 +101,26 @@ Hooks.once("ready", async () => {
     refillNode: (node, charges) => gathering.refillNode(api, node, charges),
     makeCorpseNode: (node, spec) => gathering.makeCorpseNode(api, node, spec),
     clearNode: node => gathering.clearNode(node),
+    // Research and formulas (GM tools; see scripts/research/store.js)
+    /** Downtime days the actor has. Stage 6 replaces this counter with queue reservation. */
+    days: actor => researchStore.days(actor),
+    grantDays: (actor, n) => researchStore.grantDays(actor, n),
+    setDays: (actor, n) => researchStore.setDays(actor, n),
+    /** Start researching a recipe: { actor, recipe, dc?, threshold? } (dc and threshold tune one project). */
+    startProject: options => researchStore.startProject(api, options),
+    /** One check per day, up to `days` days; stops when the project completes. { actor, project, days, skill?, degree?, chat? } */
+    research: options => researchStore.research(options, api),
+    /** Progress, DC, your modifiers and the per-day odds. Without a project id, lists the actor's projects. */
+    projectInfo: (actor, projectId) => researchStore.projectInfo(api, actor, projectId),
+    /** The hook for other progress sources. A reason is required and is logged. */
+    addProgress: (actor, projectId, amount, reason, options) => researchStore.addProgress(api, actor, projectId, amount, reason, options),
+    abandonProject: (actor, projectId) => researchStore.abandonProject(actor, projectId),
+    grantFormula: (actor, recipeId, options) => researchStore.grantFormula(api, actor, recipeId, options),
+    removeFormula: (actor, recipeId) => researchStore.removeFormula(actor, recipeId),
+    /** Formulas an actor holds, and whether each copy is ok, stale, or orphaned. */
+    formulasFor: actor => researchStore.formulasFor(api, actor),
+    refreshFormulas: actor => researchStore.refreshFormulas(api, actor),
+    formulaNotices: [],
     /** GM only. See scripts/crafting/craft.js. */
     craft: options => craft(options, api),
     /** GM helper: put `quantity` units of a defined material into an actor's inventory. */
@@ -119,6 +140,7 @@ Hooks.once("ready", async () => {
       api.uncraftable = uncraftable;
       api.resolvedOutputs = resolved;
       reportErrors(api.errors);
+      api.formulaNotices = await researchStore.refreshAllFormulas(api);
       return { registry, errors: api.errors };
     }
   };

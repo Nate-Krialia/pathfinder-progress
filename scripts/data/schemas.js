@@ -238,11 +238,20 @@ const node = obj({
   }
 });
 
+const projectLogEntry = obj({
+  source: oneOf(["research", "addProgress", "gm"]),
+  delta: int(),
+  skill: optional(str()),
+  degree: optional(str()),
+  note: optional(str())
+});
+
+// A research project, stored in the researcher's actor flag (the actor is its owner).
 const project = obj({
   id: str(),
-  owner: str(),
+  goalName: str(),
   outcome: variant("type", {
-    unlockFormula: { formulaId: idField() },
+    unlockFormula: { recipeId: idField() },
     upgradeStation: { stationId: str(), fromTier: tier(TIER_RANGES.station), toTier: tier(TIER_RANGES.station) }
   }),
   tier: tier(TIER_RANGES.research),
@@ -252,7 +261,36 @@ const project = obj({
   skillWhitelist: arr(str(), { min: 1 }),
   materials: optional(arr(obj({ materialId: idField(), qty: int({ min: 1 }) }))),
   fee: optional(num({ min: 0 })),
-  status: str()
+  status: oneOf(["active", "complete", "abandoned"]),
+  log: arr(projectLogEntry)
+}, {
+  refine(value, path, errors) {
+    if (value.status === "active" && value.progress >= value.threshold) {
+      errors.push({ field: "status", message: `is "active" but progress ${value.progress} has reached the threshold ${value.threshold} (it should be complete)` });
+    }
+    if (value.status === "complete" && value.progress < value.threshold) {
+      errors.push({ field: "status", message: `is "complete" but progress ${value.progress} is below the threshold ${value.threshold}` });
+    }
+  }
+});
+
+// What a player may read of a formula they hold: enough to craft, nothing about
+// hidden effects, output items, or how it is researched.
+const formulaSnapshot = obj({
+  name: str(),
+  category: str(),
+  craftLevel: int({ min: CRAFT_LEVEL_RANGE.min, max: CRAFT_LEVEL_RANGE.max }),
+  slots: arr(obj({ name: str(), drives: arr(str(), { min: 1 }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
+  stationCategory: str(),
+  stationTierMin: tier(TIER_RANGES.station)
+});
+
+// A formula an actor holds. "loan" is in the schema now; the loan flow arrives in Stage 8.
+const formula = obj({
+  recipeId: idField(),
+  access: oneOf(["owned", "loan"]),
+  source: str(),
+  snapshot: optional(formulaSnapshot)
 });
 
 // A full station record (player-owned, or the live form of a public one).
@@ -298,6 +336,6 @@ const pendingAction = obj({
   submittedAt: num({ min: 0 })
 });
 
-export const LIVE_SCHEMAS = { node, project, stationRecord, stationState, commission, pendingAction };
+export const LIVE_SCHEMAS = { node, project, formula, stationRecord, stationState, commission, pendingAction };
 
 export const DEFINITION_KINDS = Object.keys(DEFINITION_SCHEMAS);

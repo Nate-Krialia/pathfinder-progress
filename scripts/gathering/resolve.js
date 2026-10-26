@@ -4,6 +4,7 @@
  * (it only needs to run this on the GM client with the roller's visible result).
  */
 import { rollQuantity } from "./dice.js";
+import { degreeCounts } from "../checks.js";
 
 /** Why this node cannot be gathered right now, or null. Checked BEFORE any dice. */
 export function checkGatherable(node) {
@@ -13,15 +14,15 @@ export function checkGatherable(node) {
 }
 
 /** Pick the skill. Never guesses: with several allowed skills one must be named. */
-export function pickSkill(allowed, requested, typeName = "this") {
+export function pickSkill(allowed, requested, typeName = "this", noun = "nodes") {
   if (requested) {
     if (!allowed.includes(requested)) {
-      return { ok: false, error: `skill "${requested}" is not allowed for ${typeName} nodes (allowed: ${allowed.join(", ")})` };
+      return { ok: false, error: `skill "${requested}" is not allowed for ${typeName} ${noun} (allowed: ${allowed.join(", ")})` };
     }
     return { ok: true, skill: requested };
   }
   if (allowed.length === 1) return { ok: true, skill: allowed[0] };
-  return { ok: false, error: `${typeName} nodes allow several skills (${allowed.join(", ")}); choose one with skill: "<name>"` };
+  return { ok: false, error: `${typeName} ${noun} allow several skills (${allowed.join(", ")}); choose one with skill: "<name>"` };
 }
 
 /** Chance that d20 + modifier meets or beats dc (a hidden rung roll). */
@@ -40,15 +41,8 @@ export function neededD20(modifier, dc) {
  * a natural 20 moves it up a step, a natural 1 down a step. Exact, by enumeration.
  */
 export function visiblePassChance(modifier, dc) {
-  let passes = 0;
-  for (let natural = 1; natural <= 20; natural++) {
-    const total = natural + modifier;
-    let degree = total >= dc + 10 ? 3 : total >= dc ? 2 : total <= dc - 10 ? 0 : 1;
-    if (natural === 20) degree = Math.min(3, degree + 1);
-    if (natural === 1) degree = Math.max(0, degree - 1);
-    if (degree >= 2) passes++;
-  }
-  return passes / 20;
+  const counts = degreeCounts(modifier, dc);
+  return (counts.success + counts.criticalSuccess) / 20;
 }
 
 /**

@@ -11,23 +11,36 @@ import { formatError, loadDefinitions } from "./validate.js";
 export function packIds() {
   const extra = (game.settings.get(MODULE_ID, "extraPacks") ?? "")
     .split(",").map(s => s.trim()).filter(Boolean);
-  return [PACKS.definitions, ...extra];
+  return [PACKS.definitions, PACKS.recipes, ...extra];
 }
 
-async function collectSources() {
+/**
+ * Read every definition pack. A pack this user may not read (the GM-only recipes pack,
+ * for players) is skipped quietly: players never hold recipes, only snapshots of their formulae.
+ */
+export async function collectSources() {
   const sources = [];
   const problems = [];
   for (const id of packIds()) {
     const pack = game.packs.get(id);
     if (!pack) {
-      problems.push({ pack: id, entry: "(pack)", field: "(pack)", message: "was not found; check the pack id" });
-      continue;
+      if (game.user.isGM) problems.push({ pack: id, entry: "(pack)", field: "(pack)", message: "was not found; check the pack id" });
+      continue; // players are not shown configuration problems
     }
     if (pack.documentName !== "JournalEntry") {
       problems.push({ pack: id, entry: "(pack)", field: "(pack)", message: `must be a Journal Entry pack (is ${pack.documentName})` });
       continue;
     }
-    for (const entry of await pack.getDocuments()) {
+    if (!game.user.isGM && pack.visible === false) continue;
+    let documents;
+    try {
+      documents = await pack.getDocuments();
+    } catch (error) {
+      if (!game.user.isGM) continue; // a player who cannot read the pack
+      problems.push({ pack: id, entry: "(pack)", field: "(pack)", message: `could not be read: ${error.message}` });
+      continue;
+    }
+    for (const entry of documents) {
       for (const page of entry.pages) {
         if (page.type !== "text") continue;
         const label = entry.pages.size > 1 ? `${entry.name} / ${page.name}` : entry.name;

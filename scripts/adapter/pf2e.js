@@ -343,13 +343,14 @@ export function readNaturalD20(roll) {
 
 /**
  * Roll a skill check against a DC through PF2e's own check, so modifiers,
- * dialogs and the chat card behave normally.
+ * dialogs and the chat card behave normally. Pass { createMessage: false } to ask PF2e not to
+ * post its own chat card (research posts one summary instead).
  * Returns { degree, total, natural, modifier, dc }, where modifier = total - natural.
  */
-export async function rollSkillCheck(actor, slug, dc) {
+export async function rollSkillCheck(actor, slug, dc, { createMessage } = {}) {
   const skill = actor.skills?.[slug];
   if (!skill?.check?.roll) throw new Error(`adapter.rollSkillCheck: ${actor.name} has no "${slug}" skill check (PF2e API changed?)`);
-  const result = await skill.check.roll({ dc: { value: dc }, skipDialog: true });
+  const result = await skill.check.roll({ dc: { value: dc }, skipDialog: true, ...(createMessage === false ? { createMessage: false } : {}) });
   const degree = normalizeDegree(result?.options?.degreeOfSuccess ?? result?.degreeOfSuccess);
   if (!degree) throw new Error("adapter.rollSkillCheck: could not read the degree of success from PF2e's roll result");
   const natural = readNaturalD20(result);

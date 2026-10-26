@@ -2,7 +2,7 @@
   "id": "pathfinder-progress",
   "title": "Pathfinder Progress",
   "description": "Use-based skill mastery, gathering, and crafting for Pathfinder 2e.",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "compatibility": {
     "minimum": "14",
     "verified": "14.369"
@@ -44,6 +44,18 @@
       "type": "JournalEntry",
       "path": "packs/definitions",
       "system": "pf2e"
+    },
+    {
+      "name": "recipes",
+      "label": "Pathfinder Progress: Recipes (GM only)",
+      "type": "JournalEntry",
+      "path": "packs/recipes",
+      "system": "pf2e",
+      "ownership": {
+        "PLAYER": "NONE",
+        "TRUSTED": "NONE",
+        "ASSISTANT": "OWNER"
+      }
     },
     {
       "name": "crafted-items",

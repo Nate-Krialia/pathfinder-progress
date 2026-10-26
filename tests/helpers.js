@@ -6,10 +6,11 @@ export const asPage = data => "```json\n" + JSON.stringify(data, null, 2) + "\n`
 
 export const source = (data, pack = "test.pack", entry = data?.id ?? "entry") => ({ pack, entry, text: asPage(data) });
 
+/** Every seed definition: the public ones and the (GM-only) recipes. */
 export function seedRecords() {
-  const dir = "content/definitions";
-  return readdirSync(dir).filter(f => f.endsWith(".json")).sort()
-    .map(file => ({ file, data: JSON.parse(readFileSync(join(dir, file), "utf8")) }));
+  return ["content/definitions", "content/recipes"].flatMap(dir =>
+    readdirSync(dir).filter(f => f.endsWith(".json")).sort()
+      .map(file => ({ file, data: JSON.parse(readFileSync(join(dir, file), "utf8")) })));
 }
 
 export const clone = v => JSON.parse(JSON.stringify(v));

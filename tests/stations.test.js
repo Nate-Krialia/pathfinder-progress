@@ -360,13 +360,14 @@ const OUTPUTS = { "1": UUID, "2": UUID_2, "3": UUID };
 const DAGGER_STACKS = [{ stackId: "i", materialId: "iron", quantity: 5 }, { stackId: "f", materialId: "spider-fang", quantity: 5 }];
 const DAGGER_SEL = { blade: "iron", fang: "spider-fang" };
 
-function prepare({ recipeId = "dagger-spider-fang", locations, stations, requestedStationId, selection = DAGGER_SEL, stacks = DAGGER_STACKS }) {
+function prepare({ recipeId = "dagger-spider-fang", locations, stations, requestedStationId, selection = DAGGER_SEL, stacks = DAGGER_STACKS, formulas }) {
   const registry = seed();
   const list = stations ?? buildStationList({ definitions: registry.station, towns: registry.town }).stations;
   return prepareCraft({
     recipe: registry.recipe.get(recipeId), registry, selection, stacks, outputs: OUTPUTS,
     stations: list, crafterId: "aelwyn", townOf: id => locations[id] ?? null,
-    townName: id => TOWNS[id] ?? id, nameOf: id => NAMES[id] ?? id, requestedStationId
+    townName: id => TOWNS[id] ?? id, nameOf: id => NAMES[id] ?? id, requestedStationId,
+    formulas: formulas ?? [{ recipeId, access: "owned", source: "test" }], crafterName: "Aelwyn"
   });
 }
 

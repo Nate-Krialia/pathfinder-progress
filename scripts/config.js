@@ -8,6 +8,8 @@ export const TARGETS = {
 
 export const PACKS = {
   definitions: `${MODULE_ID}.definitions`,
+  // GM-only: recipes are spoilers. Players hold a display copy only once they unlock a formula.
+  recipes: `${MODULE_ID}.recipes`,
   crafted: `${MODULE_ID}.crafted-items`
 };
 
@@ -81,3 +83,28 @@ export const GATHERING = {
 
 /** The token flag that holds a node record. */
 export const NODE_FLAG = "node";
+
+/** Research (docs/02-research.md). All numbers are placeholders. */
+export const RESEARCH = {
+  // By project tier: the DC is the recipe's level DC plus dcOffset; threshold is the progress needed.
+  tiers: {
+    1: { dcOffset: -2, threshold: 8 },
+    2: { dcOffset: 0, threshold: 12 },
+    3: { dcOffset: 2, threshold: 18 },
+    4: { dcOffset: 4, threshold: 26 },
+    5: { dcOffset: 6, threshold: 40 }
+  },
+  // Progress gained by one daily check, by degree of success.
+  progressByDegree: { criticalSuccess: 2, success: 1, failure: 0, criticalFailure: 0 },
+  // Progress LOST on a critical failure (never below 0). 0 = no setback.
+  critFailureSetback: 0,
+  // Newest log entries kept on a project.
+  maxLog: 50
+};
+
+/** Actor flag names used by research. */
+export const RESEARCH_KEYS = {
+  projectsFlag: "projects",
+  formulasFlag: "formulas",
+  daysFlag: "downtimeDays"
+};

@@ -10,6 +10,7 @@ import { resolveOutcome } from "./outcome.js";
 import { formatSummary } from "./summary.js";
 import { prepareCraft } from "./prepare.js";
 import { actorNameOf, readStations, townOfActor } from "../stations/store.js";
+import { readFormulaList } from "../research/store.js";
 
 const d100 = () => Math.floor(CONFIG.Dice.randomUniform() * 100) + 1;
 
@@ -23,7 +24,11 @@ function stacksFor(actor) {
  */
 export function previewCraft(actor, recipeId, selection, api, stationId) {
   const recipe = api.definitions?.recipe.get(recipeId);
-  if (!recipe) return { ok: false, errors: [`unknown recipe "${recipeId}"`], plan: null, stations: { verdicts: [], chosen: null } };
+  if (!recipe) {
+    const orphaned = readFormulaList(actor).some(entry => entry.recipeId === recipeId);
+    const hint = orphaned ? `; ${actor.name} holds an orphaned formula for it (its recipe no longer exists), so the GM should remove it with api.removeFormula or restore the recipe` : "";
+    return { ok: false, errors: [`unknown recipe "${recipeId}"${hint}`], plan: null, stations: { verdicts: [], chosen: null } };
+  }
   if (api.uncraftable?.has(recipeId)) {
     return { ok: false, errors: [`recipe "${recipeId}" is uncraftable: its output item could not be resolved (see the console errors)`], plan: null, stations: { verdicts: [], chosen: null } };
   }
@@ -39,7 +44,9 @@ export function previewCraft(actor, recipeId, selection, api, stationId) {
     townOf: townOfActor,
     townName: id => api.definitions.town.get(id)?.name ?? id,
     nameOf: actorNameOf,
-    requestedStationId: stationId
+    requestedStationId: stationId,
+    formulas: readFormulaList(actor),
+    crafterName: actor.name
   });
 }
 

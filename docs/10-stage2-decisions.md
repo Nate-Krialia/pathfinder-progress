@@ -113,6 +113,29 @@ Rule elements cannot apply a condition on a hit by themselves (`GrantItem` does 
 ## Deferred
 Corpse yield derived from creature level/traits, auto-creating corpse nodes on death, decay ticking, the click-on-token dialog and the player relay (Stages 6 and 10).
 
+# Stage 5 decisions (research and formulae)
+
+## Spoiler protection (option A)
+- Recipes live in their own **GM-only compendium** (`pathfinder-progress.recipes`; manifest ownership: Players and Trusted Players NONE, Assistant OWNER). Everything else stays in the public `definitions` pack. Players' clients skip the recipes pack quietly.
+- A character holds a **display snapshot** of each formula it owns or is lent (name, category, craft level, slots with roles/tier floors/quantities, station). The snapshot deliberately excludes `overrides`, `output`, `skillWhitelist` and `researchProject`; a test guards that list.
+- **Crafting always uses the live recipe.** A formula only authorises; editing a recipe applies at once. Snapshots are refreshed on GM load (with a notice) or with `api.refreshFormulas`. Editing hidden fields does not make a snapshot stale. A formula whose recipe is gone is **orphaned**: kept, reported, and crafting is refused.
+- **Limits of the protection:** it stops browsing inside Foundry. The seed recipes in `content/recipes/` are committed to the public repo and ship in the public release, so treat them as samples. Author your real campaign recipes in a **world Journal compendium** with Players set to None, list its id under "Extra definition packs", and do not commit them.
+
+## Projects
+- Stored on the actor (`flags.pathfinder-progress.projects`): `{ id: "unlock-<recipeId>", goalName, outcome: { type: "unlockFormula", recipeId }, tier, dc, threshold, progress, skillWhitelist, status: active|complete|abandoned, log[] }`. `formulaId` was renamed `recipeId`. `upgradeStation` stays in the schema; starting one is refused until Stage 9.
+- At start: tier = `recipe.researchProject.tier`; DC = `levelDC(recipe.craftLevel)` + the tier's offset; threshold from the tier table (`RESEARCH.tiers`, placeholders 8/12/18/26/40, offsets -2/0/+2/+4/+6); skills = `recipe.skillWhitelist`. These are stored, so later edits do not change a running project. `startProject` accepts `dc` and `threshold` overrides for tuning one project.
+
+## The daily check
+- One PF2e check per downtime day against the project DC; progress by degree (critical success 2, success 1, failure 0, critical failure 0). A critical failure can cost progress through `RESEARCH.critFailureSetback` (default 0, off); progress never goes below 0.
+- Research **stops when the project completes**; leftover days are not spent. One summary chat message per call (PF2e is asked not to post a card per day).
+- Progress, days and (on completion) the formula are saved in **one actor update**, so a failure part-way changes nothing.
+- `api.addProgress(actor, project, amount, reason)` is the hook for other sources; a reason is required and is logged. Practice and discovery are not built.
+
+## Days and formulas
+- Days: actor flag `downtimeDays`; `grantDays` (positive), `setDays` (0 or more); research needs the days up front and can never take the balance below 0. Stage 6 replaces this with queue reservation.
+- Formulas: actor flag `formulas` = `{ recipeId, access: "owned" | "loan", source, snapshot }`. One entry per recipe: owned replaces a loan, a loan never replaces owned. A loan counts as having the formula (the loan flow is Stage 8); plan and provenance record `formulaAccess`.
+- Granting an owned formula closes any running project for it.
+
 # Notes for later stages
 
 ## Stage 7 (and any placed or explored node): a dedicated "Resource Node" actor
