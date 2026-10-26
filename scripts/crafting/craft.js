@@ -20,7 +20,7 @@ export function previewCraft(actor, recipeId, selection, api) {
   const recipe = api.definitions?.recipe.get(recipeId);
   if (!recipe) return { ok: false, errors: [`unknown recipe "${recipeId}"`] };
   if (api.uncraftable?.has(recipeId)) return { ok: false, errors: [`recipe "${recipeId}" is uncraftable: its output item could not be resolved (see the console errors)`] };
-  return planCraft({ recipe, registry: api.definitions, selection, stacks: stacksFor(actor) });
+  return planCraft({ recipe, registry: api.definitions, selection, stacks: stacksFor(actor), outputs: api.resolvedOutputs?.get(recipeId) });
 }
 
 /**

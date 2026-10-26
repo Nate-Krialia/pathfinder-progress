@@ -4,9 +4,9 @@
   "name": "Spider Fang Dagger",
   "category": "weapon",
   "output": {
-    "1": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00001",
-    "2": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00001",
-    "3": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00001"
+    "1": "Dagger",
+    "2": "Dagger",
+    "3": "Dagger"
   },
   "craftLevel": 2,
   "resultName": "Spider Fang Dagger",

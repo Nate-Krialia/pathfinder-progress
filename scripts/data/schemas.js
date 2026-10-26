@@ -7,6 +7,7 @@
  * and should be tightened as the owning stage is built.
  */
 import { CRAFT_LEVEL_RANGE, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
+import { looksLikeUuid } from "./outputRefs.js";
 import { any, arr, bool, int, num, obj, oneOf, optional, record, scalar, str, union, variant } from "./schema.js";
 export { BUILT_IN_ROLES } from "./roles.js";
 
@@ -35,8 +36,16 @@ const recipe = obj({
   id: idField(),
   name: str(),
   category: str(),
-  // Output item by tier: { "1": uuid, "2": uuid } (or { "default": uuid } when no role picks the tier).
-  output: record(str({ pattern: ITEM_UUID_PATTERN, patternHint: 'must be an item UUID like "Compendium.pf2e.equipment-srd.Item.<id>"' }), {
+  // Output item by tier: { "1": ref, "2": ref }, or { "default": ref } when no role picks the tier.
+  // A ref is an item name ("Dagger"), "Pack: Name", or a full UUID. Names are
+  // resolved against the item packs at ready time (see data/outputRefs.js).
+  output: record(str({
+    refine(value, path, errors) {
+      if (looksLikeUuid(value) && !ITEM_UUID_PATTERN.test(value.trim())) {
+        errors.push({ field: path, message: `looks like an item UUID but is malformed (expected "Compendium.<package>.<pack>.Item.<16-character id>"); to reference an item by name, write just the name` });
+      }
+    }
+  }), {
     refine(value, path, errors) {
       const keys = Object.keys(value);
       if (keys.length === 0) errors.push({ field: path, message: "must have at least one entry" });

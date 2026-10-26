@@ -27,6 +27,15 @@ Hooks.once("init", () => {
   });
 
   // Downtime system
+  game.settings.register(MODULE_ID, "itemPacks", {
+    name: "Item packs for recipe outputs",
+    hint: 'Comma-separated Item compendium ids searched when a recipe names its output item (e.g. "Dagger"). "world.*" means every world Item compendium.',
+    scope: "world",
+    config: true,
+    type: String,
+    default: "pf2e.equipment-srd, world.*"
+  });
+
   game.settings.register(MODULE_ID, "extraPacks", {
     name: "Extra definition packs",
     hint: "Comma-separated ids of extra Journal Entry compendiums to load definitions from (e.g. world.my-materials).",
@@ -46,6 +55,7 @@ Hooks.once("ready", async () => {
     definitions: null,
     errors: [],
     uncraftable: new Set(),
+    resolvedOutputs: new Map(),
     /** GM only. See scripts/crafting/craft.js. */
     craft: options => craft(options, api),
     /** GM helper: put `quantity` units of a defined material into an actor's inventory. */
@@ -56,11 +66,13 @@ Hooks.once("ready", async () => {
     },
     /** Dry run: validates a selection and shows what would be made. */
     previewCraft: (actor, recipeId, selection) => previewCraft(actor, recipeId, selection, api),
-    async reload() {
-      const { registry, errors, uncraftable } = await loadAll();
+    /** Reload definitions. Pass { fresh: true } to also forget cached item lookups. */
+    async reload(options) {
+      const { registry, errors, uncraftable, resolved } = await loadAll(options);
       api.definitions = registry;
       api.errors = errors;
       api.uncraftable = uncraftable;
+      api.resolvedOutputs = resolved;
       reportErrors(errors);
       return { registry, errors };
     }

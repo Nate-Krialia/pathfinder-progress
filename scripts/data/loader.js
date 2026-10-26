@@ -4,7 +4,8 @@
  * any packs named in the "extraPacks" setting) and validates them together.
  */
 import { MODULE_ID, PACKS } from "../config.js";
-import { describeItemUuid, expectedItemType } from "../adapter/pf2e.js";
+import { clearItemIndexCache, describeItemUuid, expectedItemType, listItemPackIds, loadItemPackSources } from "../adapter/pf2e.js";
+import { createRefCache, expandPackPatterns, parsePackList, resolveRefCached } from "./outputRefs.js";
 import { formatError, loadDefinitions } from "./validate.js";
 
 export function packIds() {
@@ -37,44 +38,71 @@ async function collectSources() {
   return { sources, problems };
 }
 
+const refCache = createRefCache();
+
+/** Forget resolved output references and pack indexes (done by reload({ fresh: true })). */
+export function clearOutputCache() {
+  refCache.clear();
+  clearItemIndexCache();
+}
+
 /**
- * Confirm each recipe's output UUIDs point at real PF2e items of a sensible
- * type. A recipe with a bad output is marked uncraftable (other recipes are
- * unaffected). Returns { errors, uncraftable }.
+ * Resolve each recipe's output references (names, "Pack: Name" or UUIDs) to
+ * real PF2e items, and check their type. A recipe with ANY unresolved output
+ * is uncraftable; other recipes are unaffected. Never guesses: no match or
+ * several matches is an error naming the recipe, the reference and what was found.
+ * Returns { errors, uncraftable, resolved } where resolved is recipeId -> { tier: uuid }.
  */
 export async function checkOutputs(registry, contexts) {
   const errors = [];
   const uncraftable = new Set();
+  const resolved = new Map();
+
+  const { ids, missing } = expandPackPatterns(parsePackList(game.settings.get(MODULE_ID, "itemPacks")), listItemPackIds());
+  for (const id of missing) {
+    errors.push({ pack: "(settings)", entry: "Item packs", field: "itemPacks", message: `names pack "${id}", which was not found` });
+  }
+  const sources = await loadItemPackSources(ids);
+
   for (const recipe of registry.recipe.values()) {
     const ctx = contexts.get(recipe.id) ?? { pack: "(unknown pack)", entry: recipe.id };
     const wanted = expectedItemType(recipe.category);
-    for (const [tier, uuid] of Object.entries(recipe.output)) {
+    const outputs = {};
+
+    for (const [tier, ref] of Object.entries(recipe.output)) {
       const field = `output.${tier}`;
+      const fail = message => {
+        errors.push({ ...ctx, field, message: `${message}; recipe "${recipe.id}" is uncraftable until fixed` });
+        uncraftable.add(recipe.id);
+      };
+
+      const result = resolveRefCached(ref, sources, refCache);
+      if (!result.ok) { fail(`output "${ref}": ${result.message}`); continue; }
+
       let info;
       try {
-        info = await describeItemUuid(uuid);
+        info = await describeItemUuid(result.uuid);
       } catch (err) {
         info = { found: false, error: err.message };
       }
-      let problem = null;
-      if (!info.found) problem = `item ${uuid} was not found${info.error ? ` (${info.error})` : ""}`;
-      else if (!info.isPhysical) problem = `item "${info.name}" is a ${info.type}, not a physical item`;
-      else if (wanted && info.type !== wanted) problem = `item "${info.name}" is a ${info.type}, but a ${recipe.category} recipe needs a ${wanted}`;
-      if (problem) {
-        errors.push({ ...ctx, field, message: `${problem}; recipe "${recipe.id}" is uncraftable until fixed` });
-        uncraftable.add(recipe.id);
-      }
+      if (!info.found) fail(`output "${ref}": item ${result.uuid} was not found${info.error ? ` (${info.error})` : ""}`);
+      else if (!info.isPhysical) fail(`output "${ref}": "${info.name}" is a ${info.type}, not a physical item`);
+      else if (wanted && info.type !== wanted) fail(`output "${ref}": "${info.name}" is a ${info.type}, but a ${recipe.category} recipe needs a ${wanted}`);
+      else outputs[tier] = result.uuid;
     }
+
+    if (!uncraftable.has(recipe.id)) resolved.set(recipe.id, outputs);
   }
-  return { errors, uncraftable };
+  return { errors, uncraftable, resolved };
 }
 
-/** Load and validate everything. Returns { registry, errors, contexts, uncraftable }. Never throws. */
-export async function loadAll() {
+/** Load and validate everything. Returns { registry, errors, contexts, uncraftable, resolved }. Never throws. */
+export async function loadAll({ fresh = false } = {}) {
+  if (fresh) clearOutputCache();
   const { sources, problems } = await collectSources();
   const { registry, errors, contexts } = loadDefinitions(sources);
   const outputs = await checkOutputs(registry, contexts);
-  return { registry, errors: [...problems, ...errors, ...outputs.errors], contexts, uncraftable: outputs.uncraftable };
+  return { registry, errors: [...problems, ...errors, ...outputs.errors], contexts, uncraftable: outputs.uncraftable, resolved: outputs.resolved };
 }
 
 /** Report errors loudly: console for everyone, a notification for the GM. */

@@ -4,9 +4,9 @@
   "name": "Longsword (sample recipe)",
   "category": "weapon",
   "output": {
-    "1": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00002",
-    "2": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00002",
-    "3": "Compendium.pf2e.equipment-srd.Item.PLACEHOLDER00002"
+    "1": "Longsword",
+    "2": "Longsword",
+    "3": "Longsword"
   },
   "craftLevel": 3,
   "slots": [

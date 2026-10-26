@@ -245,6 +245,36 @@ export async function findItemUuid(name, packId = "pf2e.equipment-srd") {
   return index.filter(entry => entry.name === name).map(entry => `Compendium.${packId}.Item.${entry._id}`);
 }
 
+/** Ids of every Item compendium in this world (PF2e's, other modules', and world packs). */
+export function listItemPackIds() {
+  return game.packs.filter(pack => pack.documentName === "Item").map(pack => pack.collection);
+}
+
+const packIndexCache = new Map();
+
+/** Forget cached pack indexes (call when the item packs may have changed). */
+export function clearItemIndexCache() {
+  packIndexCache.clear();
+}
+
+/**
+ * Index the named Item packs for name lookup: [{ id, label, entries: [{ name, uuid, type }] }].
+ * Indexes are cached for the session; unknown ids are skipped (the caller reports them).
+ */
+export async function loadItemPackSources(packIds) {
+  const sources = [];
+  for (const id of packIds) {
+    const pack = game.packs.get(id);
+    if (!pack) continue;
+    if (!packIndexCache.has(id)) {
+      const index = await pack.getIndex();
+      packIndexCache.set(id, index.map(entry => ({ name: entry.name, uuid: `Compendium.${id}.Item.${entry._id}`, type: entry.type })));
+    }
+    sources.push({ id, label: pack.title, entries: packIndexCache.get(id) });
+  }
+  return sources;
+}
+
 export async function loadItemSource(uuid) {
   const doc = await fromUuid(uuid);
   if (!doc) throw new Error(`adapter.loadItemSource: no item found for ${uuid}`);

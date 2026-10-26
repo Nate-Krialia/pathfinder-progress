@@ -1,13 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadDefinitions } from "../scripts/data/validate.js";
-import { planCraft } from "../scripts/crafting/plan.js";
+import { planCraft as basePlanCraft } from "../scripts/crafting/plan.js";
 import { CRAFTING } from "../scripts/config.js";
 import { asPage, seedRecords, UUID, UUID_2, MATERIAL, SILVER, RECIPE } from "./helpers.js";
 
 const seed = () => loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
 const build = (...records) => loadDefinitions(records.map(r => ({ pack: "t", entry: r.id, text: asPage(r) })));
 const stack = (stackId, materialId, quantity) => ({ stackId, materialId, quantity });
+
+// The seed recipes name their outputs ("Dagger"); the loader resolves them to UUIDs.
+const RESOLVED = { "1": UUID, "2": UUID_2, "3": UUID };
+const planCraft = args => basePlanCraft({ outputs: RESOLVED, ...args });
 
 test("seed: a spider fang dagger plans with poison damage and the venom ability", () => {
   const registry = seed();
@@ -20,7 +24,8 @@ test("seed: a spider fang dagger plans with poison damage and the venom ability"
   assert.ok(result.ok, result.errors?.join(" | "));
   const { plan } = result;
   assert.equal(plan.baseTier, 1);
-  assert.equal(plan.outputUuid, registry.recipe.get("dagger-spider-fang").output["1"]);
+  assert.equal(plan.outputUuid, UUID);
+  assert.equal(plan.outputRef, "Dagger");
   assert.equal(plan.craftLevel, 2);
   assert.equal(plan.resultName, "Spider Fang Dagger");
   assert.equal(plan.fee, CRAFTING.stubFeeGp);
@@ -40,7 +45,7 @@ test("the blade material's tier picks the output item", () => {
   const stacks = [stack("a", "silver", 1), stack("b", "spider-fang", 1)];
   const plan = planCraft({ recipe, registry, selection: { blade: "silver", fang: "spider-fang" }, stacks }).plan;
   assert.equal(plan.baseTier, 2);
-  assert.equal(plan.outputUuid, recipe.output["2"]);
+  assert.equal(plan.outputUuid, UUID_2);
 });
 
 test("a recipe override can remap a material's tier, changing the output item", () => {
@@ -174,4 +179,28 @@ test("the fee comes from config, and a custom config is honoured", () => {
   const args = { recipe, registry, selection: { blade: "iron", fang: "spider-fang" }, stacks: [stack("i", "iron", 1), stack("f", "spider-fang", 1)] };
   assert.equal(planCraft(args).plan.fee, 1);
   assert.equal(planCraft({ ...args, config: { ...CRAFTING, stubFeeGp: 7 } }).plan.fee, 7);
+});
+
+// Output references ---------------------------------------------------------------
+test("a name that has not been resolved blocks the craft with a clear message", () => {
+  const registry = seed();
+  const recipe = registry.recipe.get("dagger-spider-fang");
+  const result = basePlanCraft({ recipe, registry, selection: { blade: "iron", fang: "spider-fang" },
+    stacks: [stack("i", "iron", 1), stack("f", "spider-fang", 1)] });
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("|"), /output "Dagger" has not been resolved/);
+});
+
+test("a raw UUID output needs no resolution", () => {
+  const { registry } = build(MATERIAL, { ...RECIPE, id: "raw", output: { "1": UUID } });
+  const result = basePlanCraft({ recipe: registry.recipe.get("raw"), registry, selection: { edge: "iron" }, stacks: [stack("i", "iron", 1)] });
+  assert.ok(result.ok, result.errors?.join("|"));
+  assert.equal(result.plan.outputUuid, UUID);
+});
+
+test("the resolved UUID wins over the raw reference text", () => {
+  const registry = seed();
+  const result = basePlanCraft({ recipe: registry.recipe.get("dagger-spider-fang"), registry, selection: { blade: "iron", fang: "spider-fang" },
+    stacks: [stack("i", "iron", 1), stack("f", "spider-fang", 1)], outputs: { "1": UUID_2 } });
+  assert.equal(result.plan.outputUuid, UUID_2);
 });

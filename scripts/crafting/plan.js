@@ -9,6 +9,7 @@
 import { CRAFTING } from "../config.js";
 import { baseRoleFor, parseTier, slotRoles } from "../data/roles.js";
 import { resolveMaterialEffect } from "../data/resolver.js";
+import { isUuid } from "../data/outputRefs.js";
 
 const emptyDescription = () => ({
   baseTier: null,
@@ -25,10 +26,12 @@ const emptyDescription = () => ({
  * @param {object} args.registry   the loaded definitions registry
  * @param {Object<string,string>} args.selection  slot name -> material id
  * @param {Array<{stackId: string, materialId: string, quantity: number}>} args.stacks  the crafter's material stacks
+ * @param {Object<string,string>} [args.outputs]  the recipe's output refs resolved to UUIDs, by tier key
+ *        (from the loader). A ref that is already a UUID needs no entry.
  * @param {object} [args.config]
  * @returns {{ ok: true, plan: object } | { ok: false, errors: string[] }}
  */
-export function planCraft({ recipe, registry, selection, stacks, config = CRAFTING }) {
+export function planCraft({ recipe, registry, selection, stacks, outputs, config = CRAFTING }) {
   const errors = [];
   const remaining = new Map(stacks.map(s => [s.stackId, s.quantity]));
   const customRoles = [...registry.customRole.values()];
@@ -107,14 +110,17 @@ export function planCraft({ recipe, registry, selection, stacks, config = CRAFTI
   }
 
   // Pick the output item.
+  const outputKey = baseRole ? (description.baseTier === null ? null : String(description.baseTier)) : "default";
+  let outputRef = null;
   let outputUuid = null;
-  if (baseRole) {
-    if (description.baseTier !== null) {
-      outputUuid = recipe.output[String(description.baseTier)];
-      if (!outputUuid) errors.push(`recipe has no output item for tier ${description.baseTier}`);
+  if (outputKey !== null) {
+    outputRef = recipe.output[outputKey];
+    if (!outputRef) {
+      errors.push(`recipe has no output item for tier ${description.baseTier}`);
+    } else {
+      outputUuid = outputs?.[outputKey] ?? (isUuid(outputRef) ? outputRef.trim() : null);
+      if (!outputUuid) errors.push(`output "${outputRef}" has not been resolved to a PF2e item (reload the module definitions and check the console)`);
     }
-  } else {
-    outputUuid = recipe.output.default;
   }
 
   if (errors.length) return { ok: false, errors };
@@ -127,6 +133,7 @@ export function planCraft({ recipe, registry, selection, stacks, config = CRAFTI
       resultName: recipe.resultName ?? null,
       craftLevel: recipe.craftLevel,
       baseTier: description.baseTier,
+      outputRef,
       outputUuid,
       uses,
       description,
