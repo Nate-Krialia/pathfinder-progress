@@ -11,7 +11,8 @@ const stack = (stackId, materialId, quantity) => ({ stackId, materialId, quantit
 
 // The seed recipes name their outputs ("Dagger"); the loader resolves them to UUIDs.
 const RESOLVED = { "1": UUID, "2": UUID_2, "3": UUID };
-const planCraft = args => basePlanCraft({ outputs: RESOLVED, ...args });
+const STATION = { id: "forge", name: "Forge", category: "smithing", tier: 1 };
+const planCraft = args => basePlanCraft({ outputs: RESOLVED, station: STATION, ...args });
 
 test("seed: a spider fang dagger plans with poison damage and the venom ability", () => {
   const registry = seed();
@@ -28,7 +29,9 @@ test("seed: a spider fang dagger plans with poison damage and the venom ability"
   assert.equal(plan.outputRef, "Dagger");
   assert.equal(plan.craftLevel, 2);
   assert.equal(plan.resultName, "Spider Fang Dagger");
-  assert.equal(plan.fee, CRAFTING.stubFeeGp);
+  assert.equal(plan.fee, 1);
+  assert.deepEqual(plan.station, STATION);
+  assert.equal(plan.provenance.stationId, "forge");
   // One fang feeds BOTH roles.
   assert.equal(plan.description.damageBonuses.length, 1);
   assert.deepEqual(
@@ -173,12 +176,23 @@ test("a recipe with no base role uses the default output", () => {
   assert.equal(plan.baseTier, null);
 });
 
-test("the fee comes from config, and a custom config is honoured", () => {
+test("the fee comes from the chosen station's tier", () => {
   const registry = seed();
   const recipe = registry.recipe.get("dagger-spider-fang");
   const args = { recipe, registry, selection: { blade: "iron", fang: "spider-fang" }, stacks: [stack("i", "iron", 1), stack("f", "spider-fang", 1)] };
   assert.equal(planCraft(args).plan.fee, 1);
-  assert.equal(planCraft({ ...args, config: { ...CRAFTING, stubFeeGp: 7 } }).plan.fee, 7);
+  assert.equal(planCraft({ ...args, station: { ...STATION, tier: 2 } }).plan.fee, 5);
+  assert.equal(planCraft({ ...args, station: { ...STATION, tier: 5 } }).plan.fee, 300);
+});
+
+test("without a station the plan has no fee or station yet", () => {
+  const registry = seed();
+  const recipe = registry.recipe.get("dagger-spider-fang");
+  const result = basePlanCraft({ recipe, registry, outputs: RESOLVED, selection: { blade: "iron", fang: "spider-fang" },
+    stacks: [stack("i", "iron", 1), stack("f", "spider-fang", 1)] });
+  assert.ok(result.ok);
+  assert.equal(result.plan.fee, null);
+  assert.equal(result.plan.station, null);
 });
 
 // Output references ---------------------------------------------------------------

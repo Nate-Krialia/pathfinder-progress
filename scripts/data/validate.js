@@ -107,6 +107,7 @@ export function loadDefinitions(sources) {
   const builtInNames = new Set(Object.values(BUILT_IN_ROLES).flat());
   const materials = unique.filter(r => r.kind === "material").map(r => r.data);
   const materialIds = new Set(materials.map(m => m.id));
+  const townIds = new Set(unique.filter(r => r.kind === "town").map(r => r.data.id));
 
   const bad = new Set();
   const flag = (rec, field, message) => { errors.push(mk(rec.ctx, field, message)); bad.add(rec); };
@@ -130,6 +131,10 @@ export function loadDefinitions(sources) {
     }
 
     if (rec.kind === "recipe") validateRecipe(rec, { customRoles, materials, materialIds, flag, flagAll });
+
+    if (rec.kind === "station" && !townIds.has(d.town)) {
+      flag(rec, "town", `town "${d.town}" is not defined (known towns: ${[...townIds].join(", ") || "none"})`);
+    }
 
     if (rec.kind === "creatureYield") {
       d.yield.forEach((y, i) => {

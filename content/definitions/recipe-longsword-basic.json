@@ -22,7 +22,7 @@
     }
   ],
   "stationCategory": "smithing",
-  "stationTierMin": 1,
+  "stationTierMin": 2,
   "skillWhitelist": ["arcana", "crafting", "occultism"],
   "researchProject": { "tier": 2 }
 }

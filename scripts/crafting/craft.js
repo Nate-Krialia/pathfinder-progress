@@ -8,6 +8,8 @@ import * as adapter from "../adapter/pf2e.js";
 import { planCraft } from "./plan.js";
 import { resolveOutcome } from "./outcome.js";
 import { formatSummary } from "./summary.js";
+import { prepareCraft } from "./prepare.js";
+import { actorNameOf, readStations, townOfActor } from "../stations/store.js";
 
 const d100 = () => Math.ceil(CONFIG.Dice.randomUniform() * 100);
 
@@ -15,12 +17,30 @@ function stacksFor(actor) {
   return adapter.getMaterialStacks(actor).map(s => ({ stackId: s.item.id, materialId: s.materialId, quantity: s.quantity }));
 }
 
-/** Dry run: validate a selection and show what would be made. Changes nothing. */
-export function previewCraft(actor, recipeId, selection, api) {
+/**
+ * Dry run: check materials, station and fee, and show what would be made.
+ * Changes nothing. Returns { ok, errors, plan, stations: { verdicts, chosen } }.
+ */
+export function previewCraft(actor, recipeId, selection, api, stationId) {
   const recipe = api.definitions?.recipe.get(recipeId);
-  if (!recipe) return { ok: false, errors: [`unknown recipe "${recipeId}"`] };
-  if (api.uncraftable?.has(recipeId)) return { ok: false, errors: [`recipe "${recipeId}" is uncraftable: its output item could not be resolved (see the console errors)`] };
-  return planCraft({ recipe, registry: api.definitions, selection, stacks: stacksFor(actor), outputs: api.resolvedOutputs?.get(recipeId) });
+  if (!recipe) return { ok: false, errors: [`unknown recipe "${recipeId}"`], plan: null, stations: { verdicts: [], chosen: null } };
+  if (api.uncraftable?.has(recipeId)) {
+    return { ok: false, errors: [`recipe "${recipeId}" is uncraftable: its output item could not be resolved (see the console errors)`], plan: null, stations: { verdicts: [], chosen: null } };
+  }
+  const { stations } = readStations(api);
+  return prepareCraft({
+    recipe,
+    registry: api.definitions,
+    selection,
+    stacks: stacksFor(actor),
+    outputs: api.resolvedOutputs?.get(recipeId),
+    stations,
+    crafterId: actor.id,
+    townOf: townOfActor,
+    townName: id => api.definitions.town.get(id)?.name ?? id,
+    nameOf: actorNameOf,
+    requestedStationId: stationId
+  });
 }
 
 /**
@@ -29,12 +49,13 @@ export function previewCraft(actor, recipeId, selection, api) {
  * @param {Actor} options.actor
  * @param {string} options.recipeId
  * @param {Object<string,string>} options.selection  slot name -> material id
+ * @param {string} [options.station]  station id; needed only when several stations are usable
  * @param {string} [options.degree]  TEST OVERRIDE: skip the roll and force a degree
  */
-export async function craft({ actor, recipeId, selection, degree: forcedDegree }, api) {
+export async function craft({ actor, recipeId, selection, station, degree: forcedDegree }, api) {
   if (!game.user.isGM) throw new Error("craft: only the GM client can run a craft (hidden rolls). Player requests arrive in a later stage.");
 
-  const preview = previewCraft(actor, recipeId, selection, api);
+  const preview = previewCraft(actor, recipeId, selection, api, station);
   if (!preview.ok) throw new Error(`craft: cannot craft:\n- ${preview.errors.join("\n- ")}`);
   const { plan } = preview;
 

@@ -1,0 +1,8 @@
+{
+  "kind": "station",
+  "id": "redhollow-forge",
+  "name": "Redhollow Forge",
+  "category": "smithing",
+  "tier": 1,
+  "town": "redhollow"
+}

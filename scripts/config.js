@@ -47,9 +47,15 @@ export const CRAFTING = {
   // Percent chance that one material unit is lost on a failed craft (1 to 100 on a d100).
   lossChance: 50,
   // "Thrifty craft" is UNCONFIRMED in the spec, so it ships off.
-  thrifty: { enabled: false, refundFraction: 0.5 },
-  // Fixed fee in gold pieces until stations (Stage 3) set it by tier.
-  stubFeeGp: 1
+  thrifty: { enabled: false, refundFraction: 0.5 }
+};
+
+/** Stations (docs/07-stations.md). All numbers are placeholders. */
+export const STATIONS = {
+  // Fee in gold pieces, a pure function of the STATION's tier. Spent on every craft; not paid to the owner.
+  feeByTier: { 1: 1, 2: 5, 3: 20, 4: 80, 5: 300 },
+  // Highest tier a carried (portable) station may have.
+  portableTierCap: 2
 };
 
 /** Item UUIDs: "Compendium.<package>.<pack>.Item.<16-char id>" or "Item.<16-char id>". */
@@ -57,3 +63,11 @@ export const ITEM_UUID_PATTERN = /^(Compendium\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.
 
 /** Trait slugs used in "versus" predicates, e.g. "fiend". */
 export const TRAIT_SLUG_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+/** World setting and actor flag names used by the station system. */
+export const STATION_KEYS = {
+  partyLocationSetting: "partyLocation",
+  stationStateSetting: "stationState",
+  actorLocationFlag: "location",
+  actorStationsFlag: "stations"
+};

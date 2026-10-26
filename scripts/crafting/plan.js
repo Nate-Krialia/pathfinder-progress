@@ -10,6 +10,7 @@ import { CRAFTING } from "../config.js";
 import { baseRoleFor, parseTier, slotRoles } from "../data/roles.js";
 import { resolveMaterialEffect } from "../data/resolver.js";
 import { isUuid } from "../data/outputRefs.js";
+import { feeForTier } from "../stations/fees.js";
 
 const emptyDescription = () => ({
   baseTier: null,
@@ -26,12 +27,13 @@ const emptyDescription = () => ({
  * @param {object} args.registry   the loaded definitions registry
  * @param {Object<string,string>} args.selection  slot name -> material id
  * @param {Array<{stackId: string, materialId: string, quantity: number}>} args.stacks  the crafter's material stacks
+ * @param {object} [args.station]  the chosen normalised station; sets the fee. Without one, plan.fee is null.
  * @param {Object<string,string>} [args.outputs]  the recipe's output refs resolved to UUIDs, by tier key
  *        (from the loader). A ref that is already a UUID needs no entry.
  * @param {object} [args.config]
  * @returns {{ ok: true, plan: object } | { ok: false, errors: string[] }}
  */
-export function planCraft({ recipe, registry, selection, stacks, outputs, config = CRAFTING }) {
+export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING }) {
   const errors = [];
   const remaining = new Map(stacks.map(s => [s.stackId, s.quantity]));
   const customRoles = [...registry.customRole.values()];
@@ -137,9 +139,11 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, config
       outputUuid,
       uses,
       description,
-      fee: config.stubFeeGp,
+      station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null,
+      fee: station ? feeForTier(station.tier) : null,
       provenance: {
         recipeId: recipe.id,
+        stationId: station?.id ?? null,
         materials: uses.map(u => ({ slot: u.slot, materialId: u.materialId, units: u.units }))
       }
     }

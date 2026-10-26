@@ -1,0 +1,8 @@
+{
+  "kind": "station",
+  "id": "oakhaven-forge",
+  "name": "Oakhaven Forge",
+  "category": "smithing",
+  "tier": 2,
+  "town": "oakhaven"
+}

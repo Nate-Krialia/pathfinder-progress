@@ -131,6 +131,13 @@ const customRole = obj({
   effect: scalar()
 });
 
+// A named place. Stations refer to towns by id so a typo fails loudly.
+const town = obj({
+  kind: kind("town"),
+  id: idField(),
+  name: str()
+});
+
 // Public/fixed stations: fixed facts only. Owner/access live in the world list.
 const stationDef = obj({
   kind: kind("station"),
@@ -141,7 +148,7 @@ const stationDef = obj({
   town: str()
 });
 
-export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, station: stationDef };
+export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef };
 
 // Live records ----------------------------------------------------------------
 const ladderRung = obj({
@@ -200,11 +207,13 @@ const stationRecord = obj({
   access: arr(str())
 });
 
-// World-level list entry holding owner/access for a public station definition.
-const stationAccess = obj({
+// World-level state for a public station definition: who owns it, who may use it,
+// and (for Stage 9 upgrades) a tier that overrides the read-only compendium's.
+const stationState = obj({
   stationId: idField(),
   owner: optional(str()),
-  access: arr(str())
+  access: arr(str()),
+  tier: optional(tier(TIER_RANGES.station))
 });
 
 const commission = obj({
@@ -230,6 +239,6 @@ const pendingAction = obj({
   submittedAt: num({ min: 0 })
 });
 
-export const LIVE_SCHEMAS = { node, project, stationRecord, stationAccess, commission, pendingAction };
+export const LIVE_SCHEMAS = { node, project, stationRecord, stationState, commission, pendingAction };
 
 export const DEFINITION_KINDS = Object.keys(DEFINITION_SCHEMAS);

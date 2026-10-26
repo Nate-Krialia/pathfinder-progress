@@ -3,6 +3,8 @@ import * as adapter from "./adapter/pf2e.js";
 import { loadAll, reportErrors } from "./data/loader.js";
 import { resolveMaterialEffect } from "./data/resolver.js";
 import { craft, previewCraft } from "./crafting/craft.js";
+import * as stations from "./stations/store.js";
+import { STATION_KEYS } from "./config.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
 Hooks.once("init", () => {
@@ -36,6 +38,22 @@ Hooks.once("init", () => {
     default: "pf2e.equipment-srd, world.*"
   });
 
+  game.settings.register(MODULE_ID, STATION_KEYS.partyLocationSetting, {
+    name: "Party location",
+    hint: 'The town the party is in (a town id such as "oakhaven"). Decides which stations are reachable. Normally set with the console tool api.setLocation().',
+    scope: "world",
+    config: true,
+    type: String,
+    default: ""
+  });
+
+  game.settings.register(MODULE_ID, STATION_KEYS.stationStateSetting, {
+    scope: "world",
+    config: false,
+    type: new foundry.data.fields.ArrayField(new foundry.data.fields.ObjectField()),
+    default: []
+  });
+
   game.settings.register(MODULE_ID, "extraPacks", {
     name: "Extra definition packs",
     hint: "Comma-separated ids of extra Journal Entry compendiums to load definitions from (e.g. world.my-materials).",
@@ -56,6 +74,17 @@ Hooks.once("ready", async () => {
     errors: [],
     uncraftable: new Set(),
     resolvedOutputs: new Map(),
+    contexts: new Map(),
+    // Stations (GM tools; see scripts/stations/store.js)
+    /** Which stations can this actor reach? Pass a recipe id to include category/tier checks. */
+    stationsFor: (actor, recipeId) => stations.stationRows(api, actor, recipeId),
+    setLocation: townId => stations.setLocation(api, townId),
+    setActorLocation: (actor, townId) => stations.setActorLocation(api, actor, townId),
+    setStationState: (stationId, state) => stations.setStationState(api, stationId, state),
+    clearStationState: stationId => stations.clearStationState(stationId),
+    giveStation: (actor, spec) => stations.giveStation(api, actor, spec),
+    removeStation: (actor, stationId) => stations.removeStation(actor, stationId),
+    transferStation: (stationId, toActor) => stations.transferStation(api, stationId, toActor),
     /** GM only. See scripts/crafting/craft.js. */
     craft: options => craft(options, api),
     /** GM helper: put `quantity` units of a defined material into an actor's inventory. */
@@ -65,16 +94,17 @@ Hooks.once("ready", async () => {
       return adapter.giveMaterial(actor, material, quantity);
     },
     /** Dry run: validates a selection and shows what would be made. */
-    previewCraft: (actor, recipeId, selection) => previewCraft(actor, recipeId, selection, api),
+    previewCraft: (actor, recipeId, selection, stationId) => previewCraft(actor, recipeId, selection, api, stationId),
     /** Reload definitions. Pass { fresh: true } to also forget cached item lookups. */
     async reload(options) {
-      const { registry, errors, uncraftable, resolved } = await loadAll(options);
+      const { registry, errors, uncraftable, resolved, contexts } = await loadAll(options);
       api.definitions = registry;
-      api.errors = errors;
+      api.contexts = contexts;
+      api.errors = [...errors, ...stations.readStations(api).errors];
       api.uncraftable = uncraftable;
       api.resolvedOutputs = resolved;
-      reportErrors(errors);
-      return { registry, errors };
+      reportErrors(api.errors);
+      return { registry, errors: api.errors };
     }
   };
   game.modules.get(MODULE_ID).api = api;

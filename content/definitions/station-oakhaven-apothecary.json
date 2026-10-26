@@ -1,0 +1,8 @@
+{
+  "kind": "station",
+  "id": "oakhaven-apothecary",
+  "name": "Oakhaven Apothecary",
+  "category": "alchemy",
+  "tier": 1,
+  "town": "oakhaven"
+}

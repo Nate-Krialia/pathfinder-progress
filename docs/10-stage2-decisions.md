@@ -48,6 +48,32 @@ Rule elements cannot apply a condition on a hit by themselves (`GrantItem` does 
 
 ## Craft rules as built
 - Loss chance per unit: slot override > material override > default (50%). A unit is lost when its d100 is <= the chance.
-- The fee is spent on every degree. Stage 2 uses a fixed stub (`CRAFTING.stubFeeGp`); Stage 3 replaces it.
+- The fee is spent on every degree. It comes from the station's tier (Stage 3; the Stage 2 `stubFeeGp` is gone).
 - **Thrifty craft is OFF** (`CRAFTING.thrifty.enabled`) until confirmed.
 - Stage 2 entry point is GM-only: `api.craft({ actor, recipeId, selection, degree? })`. `degree` forces a result for testing. Player-facing flow comes in later stages.
+
+# Stage 3 decisions (stations)
+
+## Locations without a map
+- A **town** is a definition kind (`{ kind: "town", id, name }`). A station's `town` must name a defined town, so a typo fails at load.
+- A crafter's location is resolved most-specific-first: **actor override** (flag `location`) > **party location** (world setting `partyLocation`) > nowhere. Set them with `api.setLocation(townId)` and `api.setActorLocation(actor, townId | null)`.
+
+## Where station data lives, and the join
+- Compendium `station` definition: fixed facts `{ id, name, category, tier, town }`. Public unless the world state says otherwise.
+- World setting `stationState`: `{ stationId, owner?, access[], tier? }` per public station. `tier` (optional) overrides the read-only compendium tier, so Stage 9 upgrades have somewhere to write.
+- Actor flag `stations`: player-owned workshops and carried kits as full records. A record's `owner` (and a kit's `holder`) must be the actor that stores it.
+- `buildStationList` joins them. Problems are reported with pack/entry/field and the station is left out. A broken state entry removes its station entirely (**fail closed**), so a private workshop can never fall back to public.
+
+## Reach rules
+- **fixed:** crafter is in the station's town AND (no owner, or is the owner, or is on `access`).
+- **carried:** the holder always; otherwise someone on `access` who is in the same place as the holder ("no location" counts as together).
+- The station must also match the recipe's `stationCategory` and have tier >= `stationTierMin`.
+
+## Choosing a station and the fee
+- Exactly one usable station is chosen automatically. Several: the caller must pass `station: "<id>"` (never guessed). None: the error gives each station's reason.
+- Fee = `STATIONS.feeByTier[station tier]` (placeholders 1/5/20/80/300 gp). It is spent on every degree and is **not** paid to the owner.
+- Carried kits above `STATIONS.portableTierCap` (2) are an **error and excluded**, never clamped.
+- The chosen station is recorded in the summary and the crafted item's provenance.
+
+## GM console tools
+`stationsFor(actor, recipeId?)`, `setLocation`, `setActorLocation`, `setStationState`, `clearStationState`, `giveStation`, `removeStation`, `transferStation`. All writes are GM-only and validated before anything is saved.
