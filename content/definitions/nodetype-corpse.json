@@ -1,0 +1,7 @@
+{
+  "kind": "nodeType",
+  "id": "corpse",
+  "name": "Corpse",
+  "skills": ["medicine", "survival", "nature"],
+  "charges": 2
+}

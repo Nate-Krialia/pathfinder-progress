@@ -1,0 +1,13 @@
+{
+  "kind": "nodeType",
+  "id": "herb",
+  "name": "Herb Patch",
+  "skills": ["nature", "survival"],
+  "charges": 3,
+  "ladders": {
+    "1": [
+      { "materialId": "moonpetal", "dcOffset": 0, "quantity": "1d4", "guaranteed": true },
+      { "materialId": "wyrmroot", "dcOffset": 6, "quantity": "1d2" }
+    ]
+  }
+}

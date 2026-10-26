@@ -11,7 +11,7 @@ import { formatSummary } from "./summary.js";
 import { prepareCraft } from "./prepare.js";
 import { actorNameOf, readStations, townOfActor } from "../stations/store.js";
 
-const d100 = () => Math.ceil(CONFIG.Dice.randomUniform() * 100);
+const d100 = () => Math.floor(CONFIG.Dice.randomUniform() * 100) + 1;
 
 function stacksFor(actor) {
   return adapter.getMaterialStacks(actor).map(s => ({ stackId: s.item.id, materialId: s.materialId, quantity: s.quantity }));

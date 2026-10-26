@@ -4,10 +4,12 @@ import { loadAll, reportErrors } from "./data/loader.js";
 import { resolveMaterialEffect } from "./data/resolver.js";
 import { craft, previewCraft } from "./crafting/craft.js";
 import * as stations from "./stations/store.js";
+import * as gathering from "./gathering/store.js";
 import { STATION_KEYS } from "./config.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
 Hooks.once("init", () => {
+  gathering.registerNodeHooks();
   // Skill XP track
   game.settings.register(MODULE_ID, "paused", {
     name: "Pause XP awards",
@@ -85,6 +87,19 @@ Hooks.once("ready", async () => {
     giveStation: (actor, spec) => stations.giveStation(api, actor, spec),
     removeStation: (actor, stationId) => stations.removeStation(actor, stationId),
     transferStation: (stationId, toActor) => stations.transferStation(api, stationId, toActor),
+    // Gathering (GM tools; see scripts/gathering/store.js)
+    /** Gather from a node token. GM only. Options: { actor, node, skill?, degree?, chat? } */
+    gather: options => gathering.gather(options, api),
+    /** Dry run: DCs, your modifier and the odds. Spends nothing. */
+    previewGather: (actor, node, skill) => gathering.previewGather(api, actor, node, skill),
+    /** The resolved node with absolute DCs. */
+    nodeInfo: node => gathering.nodeInfo(api, node),
+    createNode: (node, spec) => gathering.createNode(api, node, spec),
+    createAnchor: (node, spec) => gathering.createAnchor(api, node, spec),
+    activateNode: (node, spec) => gathering.activateNode(api, node, spec),
+    refillNode: (node, charges) => gathering.refillNode(api, node, charges),
+    makeCorpseNode: (node, spec) => gathering.makeCorpseNode(api, node, spec),
+    clearNode: node => gathering.clearNode(node),
     /** GM only. See scripts/crafting/craft.js. */
     craft: options => craft(options, api),
     /** GM helper: put `quantity` units of a defined material into an actor's inventory. */

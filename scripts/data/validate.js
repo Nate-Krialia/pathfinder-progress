@@ -136,6 +136,14 @@ export function loadDefinitions(sources) {
       flag(rec, "town", `town "${d.town}" is not defined (known towns: ${[...townIds].join(", ") || "none"})`);
     }
 
+    if (rec.kind === "nodeType") {
+      for (const [tier, rungs] of Object.entries(d.ladders ?? {})) {
+        rungs.forEach((rung, i) => {
+          if (!materialIds.has(rung.materialId)) flag(rec, `ladders.${tier}[${i}].materialId`, `refers to unknown material "${rung.materialId}"`);
+        });
+      }
+    }
+
     if (rec.kind === "creatureYield") {
       d.yield.forEach((y, i) => {
         if (!materialIds.has(y.materialId)) flag(rec, `yield[${i}].materialId`, `refers to unknown material "${y.materialId}"`);

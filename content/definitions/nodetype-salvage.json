@@ -1,0 +1,12 @@
+{
+  "kind": "nodeType",
+  "id": "salvage",
+  "name": "Salvage Heap",
+  "skills": ["crafting"],
+  "charges": 2,
+  "ladders": {
+    "1": [
+      { "materialId": "iron", "dcOffset": 0, "quantity": "1d2", "guaranteed": true }
+    ]
+  }
+}

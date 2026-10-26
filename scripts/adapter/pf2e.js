@@ -310,34 +310,55 @@ export async function removeGp(actor, gp) {
   if (removed === false) throw new Error(`adapter.removeGp: could not remove ${gp} gp from ${actor.name}`);
 }
 
-/**
- * Roll the Crafting skill against a DC through PF2e's own check, so modifiers,
- * dialogs and the chat card behave normally. Returns { degree, total, dc }.
- */
-export async function rollCraftCheck(actor, dc) {
-  const crafting = actor.skills?.crafting;
-  if (!crafting?.check?.roll) throw new Error("adapter.rollCraftCheck: actor has no crafting skill check (PF2e API changed?)");
-  const result = await crafting.check.roll({ dc: { value: dc }, skipDialog: true });
-  const degree = normalizeDegree(result?.options?.degreeOfSuccess ?? result?.degreeOfSuccess);
-  if (!degree) throw new Error("adapter.rollCraftCheck: could not read the degree of success from PF2e's roll result");
-  return { degree, total: result.total, dc };
+// Skills -------------------------------------------------------------------------
+export const SKILL_SLUGS = [
+  "acrobatics", "arcana", "athletics", "crafting", "deception", "diplomacy", "intimidation", "medicine",
+  "nature", "occultism", "performance", "religion", "society", "stealth", "survival", "thievery"
+];
+
+/** A PF2e skill slug: a standard skill, or a lore like "herbalism-lore". */
+export const isSkillSlug = slug => typeof slug === "string" && (SKILL_SLUGS.includes(slug) || /^[a-z][a-z0-9-]*-lore$/.test(slug));
+
+/** The player-facing name of a skill (falls back to the slug). */
+export function skillLabel(slug) {
+  const label = CONFIG.PF2E?.skills?.[slug]?.label;
+  return label ? game.i18n.localize(label) : slug;
+}
+
+/** An actor's total modifier for a skill. */
+export function getSkillModifier(actor, slug) {
+  const mod = actor?.skills?.[slug]?.mod;
+  if (typeof mod !== "number") throw new Error(`adapter.getSkillModifier: ${actor?.name ?? "actor"} has no "${slug}" skill (PF2e API changed?)`);
+  return mod;
+}
+
+/** The natural (kept) d20 from a PF2e check roll, or null if it cannot be read. */
+export function readNaturalD20(roll) {
+  const d20 = roll?.dice?.find?.(die => die.faces === 20);
+  if (!d20) return null;
+  const kept = d20.results?.find?.(r => r.active !== false);
+  const natural = kept?.result ?? d20.total;
+  return Number.isInteger(natural) ? natural : null;
 }
 
 /**
- * Add `quantity` units of a material to an actor: tops up the existing stack
- * if there is one, otherwise creates a "treasure" item carrying the flags.
+ * Roll a skill check against a DC through PF2e's own check, so modifiers,
+ * dialogs and the chat card behave normally.
+ * Returns { degree, total, natural, modifier, dc }, where modifier = total - natural.
  */
-export async function giveMaterial(actor, material, quantity) {
-  const existing = getMaterialStacks(actor).find(s => s.materialId === material.id);
-  if (existing) {
-    await existing.item.update({ "system.quantity": existing.quantity + quantity });
-    return existing.item;
-  }
-  const [created] = await actor.createEmbeddedDocuments("Item", [{
-    name: material.name,
-    type: "treasure",
-    system: { quantity },
-    flags: { [MODULE_ID]: { material: { materialId: material.id, tier: material.tier } } }
-  }]);
-  return created;
+export async function rollSkillCheck(actor, slug, dc) {
+  const skill = actor.skills?.[slug];
+  if (!skill?.check?.roll) throw new Error(`adapter.rollSkillCheck: ${actor.name} has no "${slug}" skill check (PF2e API changed?)`);
+  const result = await skill.check.roll({ dc: { value: dc }, skipDialog: true });
+  const degree = normalizeDegree(result?.options?.degreeOfSuccess ?? result?.degreeOfSuccess);
+  if (!degree) throw new Error("adapter.rollSkillCheck: could not read the degree of success from PF2e's roll result");
+  const natural = readNaturalD20(result);
+  if (natural === null) throw new Error("adapter.rollSkillCheck: could not read the natural d20 from PF2e's roll result (result.dice has no d20)");
+  return { degree, total: result.total, natural, modifier: result.total - natural, dc };
+}
+
+/** Roll the Crafting skill against a DC. Returns { degree, total, dc }. */
+export async function rollCraftCheck(actor, dc) {
+  const { degree, total } = await rollSkillCheck(actor, "crafting", dc);
+  return { degree, total, dc };
 }

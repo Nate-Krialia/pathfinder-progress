@@ -1,0 +1,21 @@
+{
+  "kind": "nodeType",
+  "id": "ore",
+  "name": "Ore Vein",
+  "skills": ["athletics", "crafting"],
+  "charges": 3,
+  "ladders": {
+    "1": [
+      { "materialId": "iron", "dcOffset": 0, "quantity": "1d4", "guaranteed": true },
+      { "materialId": "silver", "dcOffset": 5, "quantity": "1d2" },
+      { "materialId": "starmetal", "dcOffset": 11, "quantity": "1" }
+    ],
+    "2": [
+      { "materialId": "silver", "dcOffset": 0, "quantity": "1d4", "guaranteed": true },
+      { "materialId": "starmetal", "dcOffset": 5, "quantity": "1d2" }
+    ],
+    "3": [
+      { "materialId": "starmetal", "dcOffset": 0, "quantity": "1d3", "guaranteed": true }
+    ]
+  }
+}

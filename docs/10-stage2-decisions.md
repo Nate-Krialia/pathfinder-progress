@@ -77,3 +77,31 @@ Rule elements cannot apply a condition on a hit by themselves (`GrantItem` does 
 
 ## GM console tools
 `stationsFor(actor, recipeId?)`, `setLocation`, `setActorLocation`, `setStationState`, `clearStationState`, `giveStation`, `removeStation`, `transferStation`. All writes are GM-only and validated before anything is saved.
+
+# Stage 4 decisions (gathering)
+
+## Node records
+- A node is a **token flag** (`flags.pathfinder-progress.node`); the token is its identity (no stored id). `explored`, `placed` and `corpse` nodes share one shape: `{ source, state, nodeType, tier, charges, region?, discoveredBy[], ladder?, decayTimer? }`.
+- States: `anchor` (hidden marker; only `source`, `state`, `region`, `discoveredBy`), `active` (charges >= 1), `depleted` (charges 0). A mismatch is a load error. A corpse cannot be an anchor and must carry its own `ladder` and a `decayTimer`.
+- `nodeType` is a definition kind: `{ id, name, skills[], charges, ladders?: { "<tier>": [rung] } }`. Skills are checked against PF2e skill slugs (lores allowed). A type may have no ladders (corpse).
+- The ladder is resolved lazily: the node's own `ladder` beats `nodeType.ladders[tier]`, so edits to a nodeType reach existing nodes.
+
+## Ladders and DCs
+- A rung is `{ materialId, dcOffset, quantity, guaranteed? }`. **Exactly one rung is `guaranteed`: the base rung**, and it must have the **lowest `dcOffset`** (ties allowed). No duplicate materials.
+- Rung DC = `GATHERING.baseDcByTier[node tier] + dcOffset` (placeholders 10/15/20/25/30; spec tiers 1 to 3, 4 and 5 extend the pattern).
+
+## Resolving a gather
+1. Refuse anchors and depleted nodes before any dice. The skill must be on the node type's list; with one allowed skill it is picked automatically, otherwise it must be named.
+2. **Visible roll** (PF2e check) against the base rung: a pass is PF2e success or better.
+3. A failure yields nothing and rolls **no** hidden dice.
+4. A pass grants the base material (quantity dice). Each higher rung then gets its own hidden `d20 + modifier` (modifier = total - natural d20 of the visible roll); the total meeting the DC succeeds (plain arithmetic, no nat-20 upgrade).
+5. **Every attempt spends one charge** (burned before materials are granted). 0 charges = depleted.
+6. A quantity that rolls 0 or less grants nothing.
+- Forced test degrees skip the roll and use the character's static skill modifier for the hidden rolls.
+- Hidden rolls are returned to the GM and logged to the console (not when `chat: false`); they never appear in chat.
+
+## Tools
+`gather`, `previewGather`, `nodeInfo`, `createNode`, `createAnchor`, `activateNode` (unhides the token), `refillNode`, `makeCorpseNode`, `clearNode`. Node tokens are kept out of the combat tracker.
+
+## Deferred
+Corpse yield derived from creature level/traits, auto-creating corpse nodes on death, decay ticking, the click-on-token dialog and the player relay (Stages 6 and 10).

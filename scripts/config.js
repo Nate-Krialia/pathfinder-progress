@@ -71,3 +71,13 @@ export const STATION_KEYS = {
   actorLocationFlag: "location",
   actorStationsFlag: "stations"
 };
+
+/** Gathering (docs/04-gathering.md). All numbers are placeholders. */
+export const GATHERING = {
+  // Base DC by node tier. Each ladder rung's DC is this plus its dcOffset.
+  // Tiers 1 to 3 are from the spec; 4 and 5 extend the pattern.
+  baseDcByTier: { 1: 10, 2: 15, 3: 20, 4: 25, 5: 30 }
+};
+
+/** The token flag that holds a node record. */
+export const NODE_FLAG = "node";

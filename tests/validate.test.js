@@ -18,9 +18,9 @@ test("the seed content passes validation with no errors", () => {
   const sources = seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }));
   const { registry, errors } = loadDefinitions(sources);
   assert.deepEqual(errors, []);
-  assert.equal(registry.material.size, 4);
+  assert.equal(registry.material.size, 6);
   assert.equal(registry.recipe.size, 2);
-  for (const id of ["iron", "silver", "starmetal", "spider-fang"]) assert.ok(registry.material.has(id), id);
+  for (const id of ["iron", "silver", "starmetal", "spider-fang", "moonpetal", "wyrmroot"]) assert.ok(registry.material.has(id), id);
 });
 
 test("a valid set loads into the registry by kind", () => {
@@ -154,19 +154,21 @@ test("extractJson handles labelled, unlabelled and CRLF fences, and bare JSON", 
 
 // Live records ----------------------------------------------------------------
 const ctx = { pack: "live", entry: "record" };
-const NODE = { id: "n1", source: "placed", tier: 1, charges: 3, discoveredBy: [], state: "active",
-  ladder: [{ materialId: "iron", dcOffset: 0, quantity: "1d4", guaranteed: true }, { materialId: "silver", dcOffset: 5, quantity: "1d2" }] };
+const NODE = { source: "placed", state: "active", nodeType: "ore", tier: 1, charges: 3, discoveredBy: [] };
+const LADDER = [{ materialId: "iron", dcOffset: 0, quantity: "1d4", guaranteed: true }, { materialId: "silver", dcOffset: 5, quantity: "1d2" }];
 
-test("live: a valid node passes; a corpse node requires decayTimer", () => {
+test("live: a valid node passes; a corpse node needs a decayTimer and its own ladder", () => {
   assert.deepEqual(validateRecord("node", NODE, ctx), []);
-  const corpse = { ...NODE, source: "corpse" };
-  assert.match(validateRecord("node", corpse, ctx)[0].message, /required when source is "corpse"/);
-  assert.deepEqual(validateRecord("node", { ...corpse, decayTimer: 3 }, ctx), []);
+  const corpse = { ...NODE, source: "corpse", nodeType: "corpse" };
+  const messages = validateRecord("node", corpse, ctx).map(e => `${e.field}: ${e.message}`).join(" | ");
+  assert.match(messages, /decayTimer: is required when source is "corpse"/);
+  assert.match(messages, /ladder: is required when source is "corpse"/);
+  assert.deepEqual(validateRecord("node", { ...corpse, decayTimer: 3, ladder: LADDER }, ctx), []);
   assert.match(validateRecord("node", { ...NODE, decayTimer: 3 }, ctx)[0].message, /only applies/);
 });
 
-test("live: node ladder quantity must be a number or dice", () => {
-  const bad = { ...NODE, ladder: [{ materialId: "iron", dcOffset: 0, quantity: "lots" }] };
+test("live: a ladder rung's quantity must be a number or dice", () => {
+  const bad = { ...NODE, ladder: [{ materialId: "iron", dcOffset: 0, quantity: "lots", guaranteed: true }] };
   assert.equal(validateRecord("node", bad, ctx)[0].field, "ladder[0].quantity");
 });
 

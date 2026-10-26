@@ -8,6 +8,8 @@
  */
 import { CRAFT_LEVEL_RANGE, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
 import { looksLikeUuid } from "./outputRefs.js";
+import { validateLadder } from "../gathering/ladder.js";
+import { isSkillSlug } from "../adapter/pf2e.js";
 import { any, arr, bool, int, num, obj, oneOf, optional, record, scalar, str, union, variant } from "./schema.js";
 export { BUILT_IN_ROLES } from "./roles.js";
 
@@ -148,9 +150,7 @@ const stationDef = obj({
   town: str()
 });
 
-export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef };
-
-// Live records ----------------------------------------------------------------
+// Gathering ------------------------------------------------------------------------
 const ladderRung = obj({
   materialId: idField(),
   dcOffset: int(),
@@ -158,23 +158,82 @@ const ladderRung = obj({
   guaranteed: optional(bool())
 });
 
+/** A ladder: rungs with exactly one guaranteed base rung that is the easiest. */
+const ladderSpec = arr(ladderRung, {
+  min: 1,
+  refine(rungs, path, errors) {
+    for (const e of validateLadder(rungs)) errors.push({ field: `${path}${e.field}`, message: e.message });
+  }
+});
+
+// A kind of gathering node (herb, ore, corpse, ...): which skills may gather it and its default ladders by tier.
+const nodeType = obj({
+  kind: kind("nodeType"),
+  id: idField(),
+  name: str(),
+  skills: arr(str(), {
+    min: 1,
+    refine(skills, path, errors) {
+      skills.forEach((skill, i) => {
+        if (!isSkillSlug(skill)) errors.push({ field: `${path}[${i}]`, message: `"${skill}" is not a PF2e skill (use a slug like "nature", or "<name>-lore")` });
+      });
+    }
+  }),
+  // Charges a new node of this type starts with.
+  charges: int({ min: 1 }),
+  // Ladders by node tier: { "1": [rungs], "2": [rungs] }. A type may have none (a corpse brings its own).
+  ladders: optional(record(ladderSpec, {
+    refine(value, path, errors) {
+      for (const key of Object.keys(value)) {
+        if (!/^[1-9]\d*$/.test(key) || Number(key) < TIER_RANGES.node.min || Number(key) > TIER_RANGES.node.max) {
+          errors.push({ field: `${path}.${key}`, message: `key must be a node tier from ${TIER_RANGES.node.min} to ${TIER_RANGES.node.max}` });
+        }
+      }
+    }
+  }))
+});
+
+export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef, nodeType };
+
+// Live records ----------------------------------------------------------------
+// A gathering node, stored in a token flag. The token is its identity.
 const node = obj({
-  id: str(),
   source: oneOf(["explored", "placed", "corpse"]),
-  tier: tier(TIER_RANGES.node),
-  region: optional(str()),
-  charges: int({ min: 0 }),
-  discoveredBy: arr(str()),
   state: oneOf(["anchor", "active", "depleted"]),
-  ladder: arr(ladderRung),
+  // Required once the node is active or depleted; absent on an anchor.
+  nodeType: optional(idField()),
+  tier: optional(tier(TIER_RANGES.node)),
+  charges: optional(int({ min: 0 })),
+  region: optional(str()),
+  discoveredBy: arr(str()),
+  // An override of the nodeType's ladder for this tier. Required for corpses.
+  ladder: optional(ladderSpec),
   decayTimer: optional(num({ min: 0 }))
 }, {
   refine(value, path, errors) {
-    if (value.source === "corpse" && value.decayTimer === undefined) {
-      errors.push({ field: "decayTimer", message: 'is required when source is "corpse"' });
+    const problem = (field, message) => errors.push({ field, message });
+    const isCorpse = value.source === "corpse";
+
+    if (value.state === "anchor") {
+      if (isCorpse) problem("source", 'a corpse cannot be an anchor');
+      for (const field of ["nodeType", "tier", "charges", "ladder", "decayTimer"]) {
+        if (value[field] !== undefined) problem(field, "must not be set on an anchor (activate it first)");
+      }
+    } else {
+      for (const field of ["nodeType", "tier", "charges"]) {
+        if (value[field] === undefined) problem(field, `is required once a node is ${value.state}`);
+      }
+      if (value.charges !== undefined) {
+        if (value.state === "depleted" && value.charges !== 0) problem("charges", `must be 0 when the node is depleted (got ${value.charges})`);
+        if (value.state === "active" && value.charges < 1) problem("charges", 'must be at least 1 when the node is active (a node with 0 charges is "depleted")');
+      }
     }
-    if (value.source !== "corpse" && value.decayTimer !== undefined) {
-      errors.push({ field: "decayTimer", message: 'only applies when source is "corpse"' });
+
+    if (isCorpse) {
+      if (value.decayTimer === undefined) problem("decayTimer", 'is required when source is "corpse"');
+      if (value.state !== "anchor" && value.ladder === undefined) problem("ladder", 'is required when source is "corpse" (a corpse brings its own ladder)');
+    } else if (value.decayTimer !== undefined) {
+      problem("decayTimer", 'only applies when source is "corpse"');
     }
   }
 });
