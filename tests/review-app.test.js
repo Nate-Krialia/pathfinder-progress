@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { loadDefinitions } from "../scripts/data/validate.js";
 import * as research from "../scripts/research/store.js";
 import * as queue from "../scripts/queue/store.js";
-import { build } from "../scripts/queue/review-app.js";
+import { build, unhandledAction } from "../scripts/queue/review-app.js";
 import { renderReview } from "../scripts/queue/review.js";
 import { asPage, seedRecords } from "./helpers.js";
 
@@ -132,4 +132,20 @@ test("a bad Set days value reports the error and keeps the window alive", async 
   await call(app, actions, "edit-days", { actor: "a1", actionId: first.id });
   assert.match(notices.error.at(-1), /cannot raise to 999/);
   assert.equal(pending(a)[0].daysReserved, 2);
+});
+
+// A fake button: closest("[data-action]") returns itself; closest(".pfp-review") says whether it sits in our content.
+const button = (action, inContent) => ({ dataset: { action }, closest(sel) { return sel === "[data-action]" ? this : (inContent ? {} : null); } });
+
+test("the unknown-action fallback ignores Foundry's own header buttons but still catches our typos", () => {
+  const actions = { resolve() {} };
+  for (const name of ["close", "minimize", "toggleControls"]) {
+    assert.equal(unhandledAction(button(name, false), actions), null, name);
+    assert.equal(unhandledAction(button(name, true), actions), null, `${name} even inside the content`);
+  }
+  assert.equal(unhandledAction(button("someHeaderThing", false), actions), null, "outside our content: not ours");
+  assert.equal(unhandledAction(button("resolve", true), actions), null, "handled");
+  assert.equal(unhandledAction(button("resolve-al", true), actions), "resolve-al", "a typo in our content is reported");
+  assert.equal(unhandledAction({ closest: () => null }, actions), null, "not a button");
+  assert.equal(unhandledAction(null, actions), null);
 });

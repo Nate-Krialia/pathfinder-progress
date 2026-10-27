@@ -9,6 +9,21 @@ import { renderReview } from "./review.js";
 
 let ReviewApp = null;
 
+/** Foundry's own window buttons (header controls); never ours to handle. */
+const FOUNDRY_ACTIONS = new Set(["close", "minimize", "maximize", "toggleControls", "configure", "pin", "unpin"]);
+
+/**
+ * The data-action of a clicked button inside OUR content that has no handler, else null.
+ * Foundry's built-in header actions and anything outside the review content are ignored.
+ */
+export function unhandledAction(target, actions) {
+  const button = target?.closest?.("[data-action]");
+  const name = button?.dataset?.action;
+  if (!name || FOUNDRY_ACTIONS.has(name) || !button.closest(".pfp-review")) return null;
+  return name in actions ? null : name;
+}
+
+
 export function build() {
   const { ApplicationV2 } = foundry.applications.api;
 
@@ -52,8 +67,8 @@ export function build() {
       if (this.#guarded) return;
       this.#guarded = true;
       this.element.addEventListener("click", event => {
-        const name = event.target.closest?.("[data-action]")?.dataset.action;
-        if (name && !(name in this.options.actions)) {
+        const name = unhandledAction(event.target, this.options.actions);
+        if (name) {
           ui.notifications.error(`${MODULE_ID}: the "${name}" button has no handler (a bug in the module).`);
         }
       }, true);
