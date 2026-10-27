@@ -67,18 +67,18 @@ const roll = (degreeOfSuccess, total, natural) => ({ options: { degreeOfSuccess 
 function install({ isGM = true, actors = [], settings = {}, packs = new Map() } = {}) {
   const chat = [];
   const notices = { info: [], warn: [], error: [] };
-  const values = { partyLocation: "oakhaven", stationState: [], extraPacks: "", itemPacks: "", ...settings };
+  const values = { partyLocation: "oakhaven", stationState: [], extraPacks: "", itemPacks: "", auditLedger: {}, ...settings };
   const list = [...actors];
   list.get = id => list.find(a => a.id === id);
   list.has = id => list.some(a => a.id === id);
   globalThis.game = {
     user: { isGM }, i18n: { localize: text => text }, actors: list, packs,
-    settings: { get: (scope, key) => values[key] }
+    settings: { get: (scope, key) => clone(values[key]), set: async (scope, key, value) => { values[key] = clone(value); } }
   };
   globalThis.CONFIG = { PF2E: { skills: { crafting: { label: "Crafting" }, arcana: { label: "Arcana" }, occultism: { label: "Occultism" } } } };
   globalThis.ChatMessage = { create: async message => { chat.push(message); }, getSpeaker: () => ({}) };
   globalThis.ui = { notifications: { info: m => notices.info.push(m), warn: m => notices.warn.push(m), error: m => notices.error.push(m) } };
-  return { chat, notices };
+  return { chat, notices, values };
 }
 
 const makeApi = (overrides = {}) => ({ definitions: registry, contexts: new Map(), uncraftable: new Set(), resolvedOutputs: new Map(), ...overrides });

@@ -108,3 +108,19 @@ export const RESEARCH_KEYS = {
   formulasFlag: "formulas",
   daysFlag: "downtimeDays"
 };
+
+/** The queue (docs/08-foundry-integration.md). */
+export const QUEUE_KEYS = {
+  pendingFlag: "pendingActions",
+  autoOpenSetting: "autoOpenReview"
+};
+
+/**
+ * The audit ledger: a WORLD setting that only a GM (a user allowed to modify settings) can
+ * write. It records what the module itself granted, so a GM client can notice days or formulas
+ * that changed some other way. It is an integrity check, not enforcement or secrecy.
+ */
+export const AUDIT = {
+  ledgerSetting: "auditLedger",
+  historyMax: 20
+};

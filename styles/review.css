@@ -1,0 +1,15 @@
+.pfp-review { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.pfp-review h3 { margin: 0 0 0.25rem; }
+.pfp-toolbar { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+.pfp-queue, .pfp-results, .pfp-audit { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.pfp-row { display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; padding: 0.4rem; border: 1px solid var(--color-border-light-tertiary, #7a7971); border-radius: 4px; }
+.pfp-row-days { display: flex; gap: 0.25rem; align-items: center; }
+.pfp-row-days input { width: 4rem; }
+.pfp-row-buttons { display: flex; gap: 0.25rem; }
+.pfp-detail, .pfp-history { font-size: 0.85em; opacity: 0.8; }
+.pfp-problem, .pfp-warn { color: #b8860b; }
+.pfp-error { color: #b22222; margin-top: 0.25rem; }
+.pfp-ok { color: #2e7d32; }
+.pfp-result.pfp-error, .pfp-result.pfp-invalid { color: #b22222; }
+.pfp-result.pfp-resolved { color: #2e7d32; }
+.pfp-audit-row { padding: 0.4rem; border: 1px solid #b8860b; border-radius: 4px; }

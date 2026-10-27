@@ -326,16 +326,26 @@ const commission = obj({
   formulaAccess: oneOf(["loan", "copy"])
 });
 
+// A queued downtime action, stored in the player's actor flag (the actor is its owner).
+// `daysReserved` is the days it uses, already taken out of the actor's unreserved counter.
 const pendingAction = obj({
   id: str(),
-  actor: str(),
-  // The spec leaves this list open ("..."); extend it as later stages add action types.
+  // The spec leaves this list open ("..."); only "research" has a handler so far.
   type: oneOf(["research", "explore", "upgrade", "commissionStep"]),
   params: any(),
-  daysReserved: int({ min: 0 }),
-  submittedAt: num({ min: 0 })
+  daysReserved: int({ min: 1 }),
+  submittedAt: int({ min: 0 })
 });
 
-export const LIVE_SCHEMAS = { node, project, formula, stationRecord, stationState, commission, pendingAction };
+// One actor's expected state in the audit ledger (see scripts/audit/audit.js).
+const auditEntry = obj({
+  name: str(),
+  days: int(),
+  formulas: record(oneOf(["owned", "loan"])),
+  projects: record(obj({ tier: int(), dc: int(), threshold: int(), progress: int(), status: str() })),
+  history: arr(obj({ at: int(), text: str() }))
+});
+
+export const LIVE_SCHEMAS = { node, project, formula, stationRecord, stationState, commission, pendingAction, auditEntry };
 
 export const DEFINITION_KINDS = Object.keys(DEFINITION_SCHEMAS);

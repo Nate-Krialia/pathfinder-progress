@@ -22,7 +22,7 @@ jobs:
       - name: Build compendium packs
         run: npm run build:packs
       - name: Build module zip
-        run: zip -r module.zip module.json scripts packs README.md
+        run: zip -r module.zip module.json scripts styles packs README.md
       - name: Publish rolling "dev" release
         uses: softprops/action-gh-release@v2
         with:

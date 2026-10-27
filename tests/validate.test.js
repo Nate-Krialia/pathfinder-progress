@@ -193,9 +193,10 @@ test("live: station location is fixed{town} or carried{holder}; pendingAction is
   assert.deepEqual(validateRecord("stationRecord", { ...st, location: { type: "fixed", town: "Oakhaven" } }, ctx), []);
   assert.deepEqual(validateRecord("stationRecord", { ...st, location: { type: "carried", holder: "a1" } }, ctx), []);
   assert.ok(validateRecord("stationRecord", { ...st, location: { type: "fixed" } }, ctx).length > 0);
-  const act = { id: "q1", actor: "a1", type: "research", params: {}, daysReserved: 1, submittedAt: 1 };
+  const act = { id: "q1", type: "research", params: {}, daysReserved: 1, submittedAt: 1 };
   assert.deepEqual(validateRecord("pendingAction", act, ctx), []);
-  assert.ok(validateRecord("pendingAction", { ...act, daysReserved: -1 }, ctx).length > 0);
+  assert.ok(validateRecord("pendingAction", { ...act, daysReserved: 0 }, ctx).length > 0, "a queued action must reserve at least a day");
+  assert.ok(validateRecord("pendingAction", { ...act, actor: "a1" }, ctx).length > 0, "the actor is implied by where the flag lives");
 });
 
 // Duplicate ids are reported even when a copy is ALSO invalid ------------------

@@ -8,6 +8,7 @@
  */
 import { MODULE_ID, RESEARCH_KEYS as K } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
+import { commit } from "../audit/store.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
 import { pickSkill } from "../gathering/resolve.js";
@@ -20,12 +21,20 @@ import { addFormula, findFormula, refreshSnapshots, removeFormula as removeFromL
 import { formatProgressSummary, formatResearchSummary } from "./summary.js";
 
 const requireGM = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
+
+/**
+ * A request that can never succeed as stated (the project is gone or finished, the recipe was
+ * deleted, the skill is not allowed). The queue refunds the days for these. Anything else that
+ * goes wrong is unexpected and leaves a queued action untouched.
+ */
+export class ResearchRefused extends Error {}
+const refuse = message => { throw new ResearchRefused(message); };
 const flagKey = key => `flags.${MODULE_ID}.${key}`;
 const noun = "research";
 
 // Reading -------------------------------------------------------------------------------
 /** The raw list stored in an actor flag. A non-list flag is a loud error, never silently replaced. */
-function rawList(actor, key) {
+export function rawList(actor, key) {
   const raw = actor.getFlag(MODULE_ID, key);
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) throw new Error(`${actor.name}'s "${key}" flag is not a list; fix or clear it first`);
@@ -40,16 +49,18 @@ function findProject(actor, projectId) {
   const list = rawList(actor, K.projectsFlag);
   const index = list.findIndex(p => p?.id === projectId);
   if (index < 0) {
-    throw new Error(`${actor.name} has no project "${projectId}" (projects: ${list.map(p => p?.id).join(", ") || "none"})`);
+    refuse(`${actor.name} has no project "${projectId}" (projects: ${list.map(p => p?.id).join(", ") || "none"})`);
   }
   const problems = check(LIVE_SCHEMAS.project, list[index]);
-  if (problems.length) throw new Error(`project "${projectId}" is invalid: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
+  if (problems.length) refuse(`project "${projectId}" is invalid: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
   return { list, index, project: list[index] };
 }
 
 function requireUnlockProject(project, what) {
-  if (project.outcome.type !== "unlockFormula") throw new Error(`${what}: only unlockFormula projects can be researched for now (upgradeStation arrives in Stage 9)`);
+  if (project.outcome.type !== "unlockFormula") refuse(`${what}: only unlockFormula projects can be researched for now (upgradeStation arrives in Stage 9)`);
 }
+
+const flagUpdate = (key, value) => ({ [flagKey(key)]: value });
 
 // Days -----------------------------------------------------------------------------------
 export const days = actor => readDays(actor);
@@ -57,13 +68,14 @@ export const days = actor => readDays(actor);
 export async function grantDays(actor, n) {
   requireGM("grantDays");
   const total = afterGrant(readDays(actor), n);
-  await actor.setFlag(MODULE_ID, K.daysFlag, total);
+  await commit(actor, flagUpdate(K.daysFlag, total), [{ type: "days", delta: n, note: "granted by the GM" }]);
   return total;
 }
 
 export async function setDays(actor, n) {
   requireGM("setDays");
-  await actor.setFlag(MODULE_ID, K.daysFlag, validateSetDays(n));
+  const total = validateSetDays(n);
+  await commit(actor, flagUpdate(K.daysFlag, total), [{ type: "days", delta: total - readDays(actor), note: "set by the GM" }]);
   return n;
 }
 
@@ -83,7 +95,8 @@ export async function startProject(api, { actor, recipe: recipeId, dc, threshold
 
   const problems = check(LIVE_SCHEMAS.project, built.project);
   if (problems.length) throw new Error(`startProject: built an invalid project: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
-  await actor.update({ [flagKey(K.projectsFlag)]: [...projects.filter(p => p?.id !== built.project.id), built.project] });
+  await commit(actor, flagUpdate(K.projectsFlag, [...projects.filter(p => p?.id !== built.project.id), built.project]),
+    [{ type: "projectSet", project: built.project, note: "started" }]);
   return built.project;
 }
 
@@ -93,7 +106,7 @@ export async function abandonProject(actor, projectId) {
   const { list, index, project } = findProject(actor, projectId);
   const next = [...list];
   next[index] = abandonRecord(project, "abandoned by the GM");
-  await actor.update({ [flagKey(K.projectsFlag)]: next });
+  await commit(actor, flagUpdate(K.projectsFlag, next), [{ type: "projectSet", project: next[index], note: "abandoned" }]);
   return next[index];
 }
 
@@ -128,23 +141,23 @@ export function projectInfo(api, actor, projectId) {
 }
 
 /**
- * Research a project for up to `days` downtime days (one check per day). Stops early when the
- * project completes and does not spend the leftover days. GM only.
- * @param {object} options { actor, project, days, skill?, degree?, chat? }
+ * Work out a research run WITHOUT writing anything: validate, roll the days, apply the rules.
+ * The caller commits the plan (research() below spends the actor's counter; the queue spends
+ * the days an action reserved). Throws ResearchRefused for requests that can never succeed.
+ * @param {object} options { actor, project, days, daysAvailable, skill?, degree? }
  *   degree (TEST OVERRIDE): a degree name for every day, or an array with one per day.
  */
-export async function research({ actor, project: projectId, days: dayCount, skill, degree, chat = true }, api) {
-  requireGM("research");
+export async function planResearch(api, { actor, project: projectId, days: dayCount, daysAvailable, skill, degree }) {
   const { list, index, project } = findProject(actor, projectId);
   requireUnlockProject(project, "research");
-  if (project.status !== "active") throw new Error(`research: project "${projectId}" is ${project.status}, not active`);
+  if (project.status !== "active") refuse(`research: project "${projectId}" is ${project.status}, not active`);
   const recipe = api.definitions?.recipe.get(project.outcome.recipeId);
-  if (!recipe) throw new Error(`research: recipe "${project.outcome.recipeId}" no longer exists; abandon the project with api.abandonProject`);
+  if (!recipe) refuse(`research: recipe "${project.outcome.recipeId}" no longer exists; abandon the project with api.abandonProject`);
 
   const picked = pickSkill(project.skillWhitelist, skill, `"${project.goalName}"`, noun);
-  if (!picked.ok) throw new Error(`research: ${picked.error}`);
+  if (!picked.ok) refuse(`research: ${picked.error}`);
 
-  if (!Number.isInteger(dayCount) || dayCount < 1) throw new Error(`research: days must be a whole number of at least 1 (got ${dayCount})`);
+  if (!Number.isInteger(dayCount) || dayCount < 1) refuse(`research: days must be a whole number of at least 1 (got ${dayCount})`);
 
   // Forced results (testing): one degree for all days, or an array with one per day.
   let forced = null;
@@ -162,24 +175,57 @@ export async function research({ actor, project: projectId, days: dayCount, skil
       return { degree: roll.degree, total: roll.total, natural: roll.natural };
     };
 
-  const available = readDays(actor);
-  const result = await resolveResearch({ project, skill: picked.skill, days: dayCount, daysAvailable: available, rollDay });
-  if (!result.ok) throw new Error(`research: ${result.errors.join("; ")}`);
+  const result = await resolveResearch({ project, skill: picked.skill, days: dayCount, daysAvailable, rollDay });
+  if (!result.ok) {
+    // Running out of days is a refusal the caller can act on; the rest is unexpected.
+    const message = `research: ${result.errors.join("; ")}`;
+    if (daysAvailable < dayCount) refuse(message);
+    throw new Error(message);
+  }
 
-  // Commit everything in ONE update: progress, days, and (on completion) the formula.
   const nextProjects = [...list];
   nextProjects[index] = result.project;
-  const update = { [flagKey(K.projectsFlag)]: nextProjects, [flagKey(K.daysFlag)]: result.daysRemaining };
-  if (result.completed) update[flagKey(K.formulasFlag)] = unlockedFormulas(actor, recipe, "research");
-  await actor.update(update);
-
-  if (chat) {
-    await postChat(actor, formatResearchSummary({
-      actorName: actor.name, project: result.project, skillName: adapter.skillLabel(picked.skill), results: result.results, completed: result.completed
-    }));
-  }
+  const changes = [];
+  if (result.daysSpent) changes.push({ type: "days", delta: -result.daysSpent, note: `research: ${project.goalName}` });
+  changes.push({ type: "projectSet", project: result.project, note: "researched" });
+  if (result.completed) changes.push({ type: "formulaAdd", recipeId: recipe.id, access: "owned", note: "research completed" });
   return {
-    ok: true, project: result.project, skill: picked.skill, results: result.results,
+    result, skill: picked.skill, projects: nextProjects,
+    formulas: result.completed ? unlockedFormulas(actor, recipe, "research") : null,
+    changes
+  };
+}
+
+/** The actor-flag changes a plan makes (projects and, on completion, formulas). The caller adds the days. */
+export function planUpdate(plan) {
+  const update = flagUpdate(K.projectsFlag, plan.projects);
+  if (plan.formulas) Object.assign(update, flagUpdate(K.formulasFlag, plan.formulas));
+  return update;
+}
+
+/** One summary chat message for a planned run (call after it is committed). */
+export function postResearchChat(actor, plan) {
+  return postChat(actor, formatResearchSummary({
+    actorName: actor.name, project: plan.result.project, skillName: adapter.skillLabel(plan.skill), results: plan.result.results, completed: plan.result.completed
+  }));
+}
+
+/**
+ * Research a project for up to `days` downtime days (one check per day), spending the actor's
+ * unreserved days. Stops early when the project completes and does not spend the leftover days. GM only.
+ * @param {object} options { actor, project, days, skill?, degree?, chat? }
+ */
+export async function research({ actor, project: projectId, days: dayCount, skill, degree, chat = true }, api) {
+  requireGM("research");
+  const plan = await planResearch(api, { actor, project: projectId, days: dayCount, daysAvailable: readDays(actor), skill, degree });
+  const { result } = plan;
+
+  // Commit everything in ONE update: progress, days, and (on completion) the formula.
+  await commit(actor, { ...planUpdate(plan), ...flagUpdate(K.daysFlag, result.daysRemaining) }, plan.changes);
+
+  if (chat) await postResearchChat(actor, plan);
+  return {
+    ok: true, project: result.project, skill: plan.skill, results: result.results,
     daysSpent: result.daysSpent, daysRemaining: result.daysRemaining, completed: result.completed
   };
 }
@@ -201,9 +247,13 @@ export async function addProgress(api, actor, projectId, amount, reason, { chat 
 
   const nextProjects = [...list];
   nextProjects[index] = applied.project;
-  const update = { [flagKey(K.projectsFlag)]: nextProjects };
-  if (applied.completed) update[flagKey(K.formulasFlag)] = unlockedFormulas(actor, recipe, "research");
-  await actor.update(update);
+  const update = flagUpdate(K.projectsFlag, nextProjects);
+  const changes = [{ type: "projectSet", project: applied.project, note: `progress ${amount >= 0 ? "+" : ""}${amount}: ${reason.trim()}` }];
+  if (applied.completed) {
+    update[flagKey(K.formulasFlag)] = unlockedFormulas(actor, recipe, "research");
+    changes.push({ type: "formulaAdd", recipeId: recipe.id, access: "owned", note: "research completed" });
+  }
+  await commit(actor, update, changes);
 
   if (chat) {
     await postChat(actor, formatProgressSummary({ actorName: actor.name, project: applied.project, applied: applied.applied, reason: reason.trim(), completed: applied.completed }));
@@ -227,7 +277,8 @@ export async function grantFormula(api, actor, recipeId, { access = "owned", sou
   const added = addFormula(rawList(actor, K.formulasFlag), recipe, { access, source });
   if (!added.ok) throw new Error(`grantFormula: ${added.error}`);
 
-  const update = { [flagKey(K.formulasFlag)]: added.list };
+  const update = flagUpdate(K.formulasFlag, added.list);
+  const changes = [{ type: "formulaAdd", recipeId, access, note: `granted (${source})` }];
   // An owned formula makes any running project for it pointless: close it.
   if (access === "owned") {
     const projects = rawList(actor, K.projectsFlag);
@@ -236,9 +287,10 @@ export async function grantFormula(api, actor, recipeId, { access = "owned", sou
       const next = [...projects];
       next[open] = abandonRecord(projects[open], "formula granted by the GM");
       update[flagKey(K.projectsFlag)] = next;
+      changes.push({ type: "projectSet", project: next[open], note: "closed by a granted formula" });
     }
   }
-  await actor.update(update);
+  await commit(actor, update, changes);
   return { entry: findFormula(added.list, recipeId), change: added.change };
 }
 
@@ -246,7 +298,7 @@ export async function removeFormula(actor, recipeId) {
   requireGM("removeFormula");
   const removed = removeFromList(rawList(actor, K.formulasFlag), recipeId);
   if (!removed.ok) throw new Error(`removeFormula: ${removed.error}`);
-  await actor.setFlag(MODULE_ID, K.formulasFlag, removed.list);
+  await commit(actor, flagUpdate(K.formulasFlag, removed.list), [{ type: "formulaRemove", recipeId, note: "removed by the GM" }]);
 }
 
 /** What an actor holds: owned/loan, and whether each copy is ok, stale, or orphaned. */
@@ -273,7 +325,8 @@ export async function refreshFormulas(api, actor) {
     const { list, refreshed, orphaned } = refreshSnapshots(valid, api.definitions);
     if (refreshed.length) {
       const refreshedSet = new Map(list.map(entry => [entry.recipeId, entry]));
-      await a.setFlag(MODULE_ID, K.formulasFlag, raw.map(entry => refreshedSet.get(entry?.recipeId) ?? entry));
+      // Display snapshots only; the audit tracks ownership, which does not change.
+      await commit(a, flagUpdate(K.formulasFlag, raw.map(entry => refreshedSet.get(entry?.recipeId) ?? entry)), []);
     }
     if (refreshed.length || orphaned.length) changes.push({ actor: a.name, refreshed, orphaned });
   }

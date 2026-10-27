@@ -134,9 +134,33 @@ Corpse yield derived from creature level/traits, auto-creating corpse nodes on d
 - `api.addProgress(actor, project, amount, reason)` is the hook for other sources; a reason is required and is logged. Practice and discovery are not built.
 
 ## Days and formulas
-- Days: actor flag `downtimeDays`; `grantDays` (positive), `setDays` (0 or more); research needs the days up front and can never take the balance below 0. Stage 6 replaces this with queue reservation.
+- Days: actor flag `downtimeDays`; `grantDays` (positive), `setDays` (0 or more); research needs the days up front and can never take the balance below 0. Stage 6 turned the counter into the UNRESERVED days (see Stage 6).
 - Formulas: actor flag `formulas` = `{ recipeId, access: "owned" | "loan", source, snapshot }`. One entry per recipe: owned replaces a loan, a loan never replaces owned. A loan counts as having the formula (the loan flow is Stage 8); plan and provenance record `formulaAccess`.
 - Granting an owned formula closes any running project for it.
+
+# Stage 6 decisions (queue and GM review)
+
+## The queue
+- Stored in the actor flag `pendingActions`: `{ id, type, params, daysReserved, submittedAt }`. The actor is implied by where the flag lives. `type` is `research | explore | upgrade | commissionStep`; **only `research` is wired** (`queue/handlers.js` + a resolver in `queue/store.js`). Submitting any other type is refused; a hand-injected one shows as an error row until the GM rejects it.
+- **Submission is console-style for now**: `api.queue.submit(actor, "research", { projectId, skill? }, days)`. Any owner can call it (it works with no GM online). A player-facing button comes in Stage 10.
+- **Days**: the `downtimeDays` flag is now the UNRESERVED counter. Submit moves days counter -> reservation, reject refunds all, edit moves the difference, resolve spends what the action used and refunds the rest. Submit, reject and edit never change the TOTAL (counter + reserved). Overbooking is refused (`cannot reserve N day(s): only M unreserved`).
+- **Resolution** (GM client only, so rolls stay hidden): `api.queue.resolve(actor, id)` or `resolveAll()` in submission order (`submittedAt`, then action id, then actor id). Each action is isolated:
+  - `resolved`: ran, removed.
+  - `invalid`: can never succeed (project gone, abandoned or finished, recipe deleted, skill not allowed). Days refunded, action removed, reported.
+  - `error`: anything unexpected (a failed roll, a corrupt flag, an unwired type). The action is left exactly as it was; the review window shows **Retry**.
+- Research is split into `planResearch` (rolls and rules, writes nothing) and a commit. `api.research` spends the counter; the queue spends the reservation. Same rules either way.
+
+## Review window
+- `api.openReview()` (GM only, ApplicationV2, built lazily). Shows the queue (edit days, Resolve, Reject, Retry on errors, Resolve all), this session's results, and the audit panel. Failures show a notification and never close the window.
+- `autoOpenReview` (client setting, default on): on GM login and when another user changes module data, a notice appears and the window opens if there is something to review. One active GM reacts.
+- CSS: `styles/review.css`, listed in the manifest `styles` and in the workflow zip.
+
+## Audit (an honor-system aid, not security)
+- Players own their actor, so a determined player can edit flags. The audit makes that visible, it does not prevent it.
+- The ledger is a world setting `auditLedger`, written only by a GM client. It stores EXPECTED state per actor: total days (counter + reserved), formulas `{ recipeId: access }`, projects (tier, dc, threshold, progress, status), and the last 20 changes.
+- Every GM-side write goes through `audit/store.js` `commit`: ledger first, then the actor, and the ledger is put back if the actor update fails. Module writes apply CHANGES to the expected values (they never copy the actor's current state), so a tamper stays visible after later module changes until the GM clicks **Accept**.
+- First run: `bootstrap` gives actors that already hold module data a baseline (entries already tampered with before Stage 6 are accepted as they are).
+- Catches: days, formulas and projects edited outside the module, and malformed records. Cannot catch: items, coins, kits, materials, edits reverted before a check, or who did it. Players can READ the ledger in the console; they cannot write it.
 
 # Notes for later stages
 
