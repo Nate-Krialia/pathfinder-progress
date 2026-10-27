@@ -9,7 +9,7 @@ import { renderReview } from "./review.js";
 
 let ReviewApp = null;
 
-function build() {
+export function build() {
   const { ApplicationV2 } = foundry.applications.api;
 
   return class ReviewWindow extends ApplicationV2 {
@@ -21,11 +21,19 @@ function build() {
       position: { width: 720, height: 560 },
       actions: {
         refresh() { return this.render(); },
-        resolveAll() { return this.#run(() => queue.resolveAll(this.api).then(batch => { this.results = batch.results; this.#note(batch.summary); })); },
+        // Keys must match the buttons' data-action values EXACTLY (kebab-case); ApplicationV2 ignores unknown names.
+        "resolve-all"() {
+          return this.#run(async () => {
+            if (!queue.list().length) { ui.notifications.info(`${MODULE_ID}: nothing is queued, so there is nothing to resolve.`); return; }
+            const batch = await queue.resolveAll(this.api);
+            this.results = batch.results;
+            this.#note(batch.summary);
+          });
+        },
         resolve(event, target) { return this.#resolveOne(target); },
         retry(event, target) { return this.#resolveOne(target); },
         reject(event, target) { return this.#run(() => queue.reject(this.#actor(target), target.dataset.actionId)); },
-        editDays(event, target) {
+        "edit-days"(event, target) {
           const input = this.element.querySelector(`input[data-days-for="${CSS.escape(target.dataset.actionId)}"]`);
           return this.#run(() => queue.editDays(this.#actor(target), target.dataset.actionId, Number(input?.value)));
         },
@@ -38,6 +46,20 @@ function build() {
       this.api = api;
       this.results = [];
     }
+
+    /** A button whose data-action has no handler must say so, never fail silently. */
+    _onRender(context, options) {
+      if (this.#guarded) return;
+      this.#guarded = true;
+      this.element.addEventListener("click", event => {
+        const name = event.target.closest?.("[data-action]")?.dataset.action;
+        if (name && !(name in this.options.actions)) {
+          ui.notifications.error(`${MODULE_ID}: the "${name}" button has no handler (a bug in the module).`);
+        }
+      }, true);
+    }
+
+    #guarded = false;
 
     #actor(target) {
       const actor = game.actors.get(target.dataset.actor);

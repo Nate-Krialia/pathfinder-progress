@@ -153,6 +153,7 @@ Corpse yield derived from creature level/traits, auto-creating corpse nodes on d
 ## Review window
 - `api.openReview()` (GM only, ApplicationV2, built lazily). Shows the queue (edit days, Resolve, Reject, Retry on errors, Resolve all), this session's results, and the audit panel. Failures show a notification and never close the window.
 - `autoOpenReview` (client setting, default on): on GM login and when another user changes module data, a notice appears and the window opens if there is something to review. One active GM reacts.
+- Button names: ApplicationV2 matches `data-action` EXACTLY. The buttons use kebab-case (`resolve-all`, `edit-days`) and the actions map uses the same quoted keys. A click on a name with no handler shows an error notice instead of doing nothing, and `tests/review-app.test.js` checks every rendered `data-action` has a handler.
 - CSS: `styles/review.css`, listed in the manifest `styles` and in the workflow zip.
 
 ## Audit (an honor-system aid, not security)
