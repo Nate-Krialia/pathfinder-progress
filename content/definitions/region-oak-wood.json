@@ -1,0 +1,14 @@
+{
+  "kind": "region",
+  "id": "oak-wood",
+  "name": "Oak Wood",
+  "sceneTag": "oak-wood",
+  "skillWhitelist": ["survival", "nature"],
+  "explorationDC": 18,
+  "daysRequired": 2,
+  "spawnTable": [
+    { "nodeType": "herb", "tier": 1, "weight": 5 },
+    { "nodeType": "ore", "tier": 1, "weight": 3 },
+    { "nodeType": "salvage", "tier": 1, "weight": 2 }
+  ]
+}

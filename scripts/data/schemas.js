@@ -100,9 +100,31 @@ const recipe = obj({
 const region = obj({
   kind: kind("region"),
   id: idField(),
+  name: str(),
   sceneTag: str(),
-  // nodeType is not defined by the spec; treated as a free string for now.
-  spawnTable: arr(obj({ nodeType: str(), weight: num({ min: 0 }) }), { min: 1 }),
+  // The skills that may make the exploration check.
+  skillWhitelist: arr(str(), {
+    min: 1,
+    refine(skills, path, errors) {
+      skills.forEach((skill, i) => {
+        if (!isSkillSlug(skill)) errors.push({ field: `${path}[${i}]`, message: `"${skill}" is not a PF2e skill (use a slug like "survival", or "<name>-lore")` });
+      });
+    }
+  }),
+  // Each activated anchor rolls this table: a node type and tier, chosen by weight.
+  // That the nodeType exists and has a ladder for the tier is checked against the loaded definitions.
+  spawnTable: arr(obj({ nodeType: idField(), tier: tier(TIER_RANGES.node), weight: num({ min: 0 }) }), {
+    min: 1,
+    refine(entries, path, errors) {
+      if (!entries.some(e => e.weight > 0)) errors.push({ field: path, message: "needs at least one entry with a weight above 0" });
+      const seen = new Set();
+      entries.forEach((e, i) => {
+        const key = `${e.nodeType}/${e.tier}`;
+        if (seen.has(key)) errors.push({ field: `${path}[${i}]`, message: `repeats nodeType "${e.nodeType}" at tier ${e.tier}; merge the weights into one entry` });
+        seen.add(key);
+      });
+    }
+  }),
   explorationDC: int({ min: 1 }),
   daysRequired: int({ min: 1 })
 });
@@ -181,6 +203,8 @@ const nodeType = obj({
   }),
   // Charges a new node of this type starts with.
   charges: int({ min: 1 }),
+  // Token image for nodes of this type (a Foundry path). Defaults to a core icon.
+  img: optional(str()),
   // Ladders by node tier: { "1": [rungs], "2": [rungs] }. A type may have none (a corpse brings its own).
   ladders: optional(record(ladderSpec, {
     refine(value, path, errors) {

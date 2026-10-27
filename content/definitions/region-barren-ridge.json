@@ -1,0 +1,14 @@
+{
+  "kind": "region",
+  "id": "barren-ridge",
+  "name": "Barren Ridge",
+  "sceneTag": "barren-ridge",
+  "skillWhitelist": ["survival"],
+  "explorationDC": 15,
+  "daysRequired": 1,
+  "spawnTable": [
+    { "nodeType": "ore", "tier": 1, "weight": 3 },
+    { "nodeType": "ore", "tier": 2, "weight": 1 },
+    { "nodeType": "salvage", "tier": 1, "weight": 1 }
+  ]
+}

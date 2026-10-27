@@ -163,9 +163,35 @@ Corpse yield derived from creature level/traits, auto-creating corpse nodes on d
 - First run: `bootstrap` gives actors that already hold module data a baseline (entries already tampered with before Stage 6 are accepted as they are).
 - Catches: days, formulas and projects edited outside the module, and malformed records. Cannot catch: items, coins, kits, materials, edits reverted before a check, or who did it. Players can READ the ledger in the console; they cannot write it.
 
+# Stage 7 decisions (exploration)
+
+## Regions
+- `{ kind:"region", id, name, sceneTag, skillWhitelist, explorationDC, daysRequired, spawnTable:[{ nodeType, tier, weight }] }`. `name`, `skillWhitelist` and the per-entry `tier` were added to the spec's shape (the spec never said which skill rolls the check, and a node needs a tier).
+- Checked at load against the loaded definitions: the nodeType must exist and must have a ladder for that tier (so `corpse` can never spawn), weights are >= 0 with a total above 0, and a nodeType/tier pair appears once. A bad region is reported by pack, entry and field and is not usable; other regions still load. `api.checkDefinition(record)` runs the same checks on a candidate without loading it.
+- Seed regions: `oak-wood` (DC 18, 2 days, herb/ore/salvage tier 1) and `barren-ridge` (DC 15, 1 day, ore tiers 1 and 2, salvage).
+
+## Scenes and anchors
+- A scene belongs to a region through a module flag `sceneTags: string[]` (no reliance on a native tag feature). No tagged scene means the expedition is refused; there is no blank-scene fallback. A GM's submit is refused up front; a player's client may not see scenes, so a player's submit checks the region only and the scene check happens at resolve time (an error row the GM can fix and Retry).
+- GM tools: `tagScene`, `untagScene`, `scenesFor`, `placeAnchor`, `placeAnchors(n)` (random free grid squares), `placeNode`, `listAnchors` (`{ all }`), `clearAnchors` (needs `{ confirm: true }`), `resetScene`.
+- A scene remembers its last 10 expeditions in the flag `prepared`.
+
+## The expedition
+- Queue type `explore`, params `{ region, skill }`, days = the region's `daysRequired` exactly. The days are spent in full whatever the degree.
+- Resolve (GM client): roll the check against the region DC (hidden, natural d20 recorded), roll the anchor count from the degree, choose a scene (tagged, with free anchors; prefer one with enough, else the roomiest), pick that many free anchors at random, and roll the spawn table for each. Every node record is built and validated BEFORE anything is written.
+- Anchor counts (placeholders, `EXPLORATION.anchorCounts`, uniform within the range): critical success 3-5, success 2-4, failure 1-2, critical failure 1. With a modifier m against DC d: expected anchors = sum over degrees of P(degree) x average count; +8 against DC 20 is 10% / 45% / 40% / 5% (critical failure / failure / success / critical success) and 2.175 anchors.
+- Writes, in order: (1) the activated tokens in one batched update, (2) the scene's prepared log, (3) the actor (days, queue, ledger). A failure at (2) reverts the tokens; a failure at (3) reverts the tokens and the log. The action stays queued. Preparing never activates, views or pulls the scene.
+- Fewer free anchors than rolled: all are activated and the GM is told. Preparing the same scene twice uses only the anchors still free; earlier nodes are untouched. `resetScene` turns explored nodes back into anchors.
+- Chat: a public flavour line (region and days; no scene name, no node details) and a whisper to the GMs with the scene, the natural d20, the nodes and the anchors left.
+- `api.queue.resolve/resolveAll` accept `{ degree }` for explore actions (a test override, like research).
+
+## The Resource Node actor
+- One PF2e `loot` actor, found by the flag `nodeActor` (never by name), its id remembered in the world setting `nodeActorId`. Ownership default NONE; prototype token unlinked, neutral, name on hover, no bars or vision, 1x1, rotation locked. `api.ensureNodeActor()` reuses it, finds it by flag if the setting is lost, and recreates it with a warning if it was deleted. Only the adapter knows the `loot` type name.
+- Tokens: `placeAnchor` / `placeAnchors` / `placeNode` create tokens from it. An anchor looks like `icons/svg/mystery-man.svg` named "Anchor"; activation renames and re-images a still-default anchor after its nodeType. `nodeType.img` (optional) sets the image; the default is a Foundry core icon. Hand-made Stage 4 tokens keep working.
+- Corpse nodes still use the dead creature's own token.
+
 # Notes for later stages
 
-## Stage 7 (and any placed or explored node): a dedicated "Resource Node" actor
+## Stage 7 (built, see above): a dedicated "Resource Node" actor
 Stage 4's test token borrows whatever actor is handy, so it shows that actor's art and sheet. Real nodes should use one neutral PF2e **loot** actor.
 
 What the module needs:

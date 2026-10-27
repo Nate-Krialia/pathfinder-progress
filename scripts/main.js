@@ -9,7 +9,8 @@ import * as researchStore from "./research/store.js";
 import * as auditStore from "./audit/store.js";
 import * as queueStore from "./queue/store.js";
 import { openReview, refreshReview } from "./queue/review-app.js";
-import { AUDIT, QUEUE_KEYS, STATION_KEYS } from "./config.js";
+import * as exploration from "./exploration/store.js";
+import { AUDIT, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS } from "./config.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
 Hooks.once("init", () => {
@@ -67,6 +68,13 @@ Hooks.once("init", () => {
     config: true,
     type: Boolean,
     default: true
+  });
+
+  game.settings.register(MODULE_ID, NODE_ACTOR.setting, {
+    scope: "world",
+    config: false,
+    type: String,
+    default: ""
   });
 
   game.settings.register(MODULE_ID, AUDIT.ledgerSetting, {
@@ -139,6 +147,29 @@ Hooks.once("ready", async () => {
       accept: actor => auditStore.accept(actor),
       ledger: () => auditStore.readLedger()
     },
+    // Exploration (GM tools; see scripts/exploration/store.js). Queue an expedition with api.queue.submit(actor, "explore", { region, skill? }, days).
+    /** Mark a scene as belonging to a region: tagScene(scene, "oak-wood"). Pass a scene, its id or its name. */
+    tagScene: (scene, tag) => exploration.tagScene(scene, tag),
+    untagScene: (scene, tag) => exploration.untagScene(scene, tag),
+    /** The scenes tagged for a region, with their free anchors. */
+    scenesFor: regionId => exploration.scenesFor(api, regionId),
+    placeAnchor: (scene, spec) => exploration.placeAnchor(api, scene, spec),
+    /** Drop n hidden anchors at random free squares: placeAnchors(5, { scene? }). */
+    placeAnchors: (n, options) => exploration.placeAnchors(api, n, options),
+    placeNode: (scene, spec) => exploration.placeNode(api, scene, spec),
+    /** Anchors on a scene (default: the current one). { all: true } includes active and depleted nodes. */
+    listAnchors: (scene, options) => exploration.listAnchors(scene, options),
+    clearAnchors: (scene, options) => exploration.clearAnchors(scene, options),
+    /** Explored nodes back to hidden anchors, and forget the scene's prepared history. */
+    resetScene: scene => exploration.resetScene(api, scene),
+    /** The shared Resource Node actor (created, or recreated with a notice, if missing). */
+    ensureNodeActor: () => exploration.ensureNodeActor(),
+    /** Before queueing: DC, your modifier per skill, the odds, the expected node count, and the scenes (GM only). */
+    previewExplore: (actor, regionId, skill) => exploration.previewExplore(api, actor, regionId, skill),
+    /** Simulate many expeditions (no writes): { region, runs?, degree? | modifier? }. */
+    simulateExplore: options => exploration.simulateExplore(api, options),
+    /** Check a definition against the loaded ones without loading it. Returns its problems. */
+    checkDefinition: record => exploration.checkDefinition(api, record),
     // Research and formulas (GM tools; see scripts/research/store.js)
     /** Downtime days the actor has. Stage 6 replaces this counter with queue reservation. */
     days: actor => researchStore.days(actor),
@@ -183,6 +214,7 @@ Hooks.once("ready", async () => {
     }
   };
   game.modules.get(MODULE_ID).api = api;
+  queueStore.bind(api);
 
   for (const warning of adapter.checkVersions()) {
     console.warn(`${MODULE_ID} | ${warning}`);

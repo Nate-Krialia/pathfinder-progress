@@ -107,6 +107,7 @@ export function loadDefinitions(sources) {
   const builtInNames = new Set(Object.values(BUILT_IN_ROLES).flat());
   const materials = unique.filter(r => r.kind === "material").map(r => r.data);
   const materialIds = new Set(materials.map(m => m.id));
+  const nodeTypes = new Map(unique.filter(r => r.kind === "nodeType").map(r => [r.data.id, r.data]));
   const townIds = new Set(unique.filter(r => r.kind === "town").map(r => r.data.id));
 
   const bad = new Set();
@@ -142,6 +143,17 @@ export function loadDefinitions(sources) {
           if (!materialIds.has(rung.materialId)) flag(rec, `ladders.${tier}[${i}].materialId`, `refers to unknown material "${rung.materialId}"`);
         });
       }
+    }
+
+    if (rec.kind === "region") {
+      d.spawnTable.forEach((entry, i) => {
+        const type = nodeTypes.get(entry.nodeType);
+        if (!type) {
+          flag(rec, `spawnTable[${i}].nodeType`, `refers to unknown nodeType "${entry.nodeType}" (known: ${[...nodeTypes.keys()].join(", ") || "none"})`);
+        } else if (!type.ladders?.[String(entry.tier)]) {
+          flag(rec, `spawnTable[${i}].tier`, `nodeType "${entry.nodeType}" has no tier-${entry.tier} ladder (tiers with a ladder: ${Object.keys(type.ladders ?? {}).join(", ") || "none"})`);
+        }
+      });
     }
 
     if (rec.kind === "creatureYield") {

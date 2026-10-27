@@ -76,7 +76,7 @@ test("submit reserves days in ONE update, conserves the total, and leaves the au
 test("submit refuses overbooking, strangers, unwired types and bad projects, changing nothing", async () => {
   const { actor } = await world({ days: 2 });
   await assert.rejects(submitDagger(actor, 3), /cannot reserve 3 day\(s\): only 2 unreserved/);
-  await assert.rejects(queue.submit(actor, "explore", {}, 1), /cannot be queued yet/);
+  await assert.rejects(queue.submit(actor, "upgrade", {}, 1), /cannot be queued yet/);
   await assert.rejects(queue.submit(actor, "research", { projectId: "ghost" }, 1), /no project "ghost"/);
   const stranger = fakeActor("a2", "Stranger", { owner: false });
   globalThis.game.actors.push(stranger);
@@ -187,12 +187,12 @@ test("FAILURE ISOLATION: resolveAll runs the rest in order; an unexpected error 
 test("an unwired action type is an error row, never silently dropped", async () => {
   const { actor } = await world();
   await actor.update({
-    "flags.pathfinder-progress.pendingActions": [{ id: "x1", type: "explore", params: {}, daysReserved: 1, submittedAt: 1 }],
+    "flags.pathfinder-progress.pendingActions": [{ id: "x1", type: "upgrade", params: {}, daysReserved: 1, submittedAt: 1 }],
     "flags.pathfinder-progress.downtimeDays": 9
   });
   const { results } = await queue.resolveAll(api, { chat: false });
   assert.equal(results[0].status, "error");
-  assert.match(results[0].message, /no resolver is wired for "explore"/);
+  assert.match(results[0].message, /no resolver is wired for "upgrade"/);
   assert.equal(pending(actor).length, 1);
   assert.deepEqual(audit.scan(), []);
   await queue.reject(actor, "x1");

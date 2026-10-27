@@ -11,11 +11,20 @@ import { MODULE_ID, QUEUE_KEYS, RESEARCH_KEYS as K } from "../config.js";
 import { commit } from "../audit/store.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
+import * as exploration from "../exploration/store.js";
 import { ResearchRefused, planResearch, planUpdate, postResearchChat, rawList } from "../research/store.js";
 import { HANDLERS, wiredTypes } from "./handlers.js";
 import { planEdit, planReject, planResolve, planSubmit } from "./reservation.js";
 import { runBatch } from "./queue.js";
 import { esc } from "./review.js";
+
+let boundApi = null;
+/** Give the queue the module api (definitions). Needed by explore actions. */
+export function bind(api) { boundApi = api; }
+const needApi = what => {
+  if (!boundApi) throw new Error(`${what}: the queue is not bound to the module api yet`);
+  return boundApi;
+};
 
 const requireGM = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
 const flagKey = key => `flags.${MODULE_ID}.${key}`;
@@ -42,7 +51,8 @@ const actorFor = actorId => {
 export function describeAction(actor, action) {
   const handler = HANDLERS[action.type];
   if (!handler) return { label: `${action.type} (not wired yet)`, detail: "no resolver exists for this type yet", problem: "this type cannot be resolved yet" };
-  return handler.describe({ action, projects: rawList(actor, K.projectsFlag) });
+  const info = action.type === "explore" && boundApi ? exploration.describeInfo(boundApi, actor, action) : undefined;
+  return handler.describe({ action, projects: rawList(actor, K.projectsFlag), info });
 }
 
 // Submitting (any owner) -------------------------------------------------------------------
@@ -57,7 +67,9 @@ export async function submit(actor, type, params, days) {
   if (!game.user.isGM && !actor.isOwner) throw new Error(`submit: you do not own ${actor.name}`);
   const handler = HANDLERS[type];
   if (!handler) throw new Error(`submit: "${type}" actions cannot be queued yet (wired: ${wiredTypes().join(", ")})`);
-  const checked = handler.validateSubmit({ projects: rawList(actor, K.projectsFlag), params });
+  const region = type === "explore" ? needApi("submit").definitions?.region.get(params?.region) : undefined;
+  const scenes = type === "explore" && game.user.isGM && region ? exploration.poolFor(region) : null;
+  const checked = handler.validateSubmit({ projects: rawList(actor, K.projectsFlag), params, days, region, scenes });
   if (!checked.ok) throw new Error(`submit: ${checked.errors.join("; ")}`);
   const reserved = planSubmit(actor.getFlag(MODULE_ID, K.daysFlag), days);
   if (!reserved.ok) throw new Error(`submit: ${reserved.error}`);
@@ -139,8 +151,43 @@ const RESOLVERS = {
   }
 };
 
+RESOLVERS.explore = async function explore(api, actor, action, pending, { chat, degree }) {
+  const others = pending.filter(a => a.id !== action.id);
+  const counter = actor.getFlag(MODULE_ID, K.daysFlag);
+  let run;
+  try {
+    run = await exploration.planRun(api, actor, action, { degree });
+  } catch (error) {
+    if (!(error instanceof exploration.ExploreRefused)) throw error;
+    // Can never succeed (region gone, skill not allowed): refund everything. The total is unchanged.
+    const { counter: refunded } = planResolve(counter, action.daysReserved, 0);
+    await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: others, [flagKey(K.daysFlag)]: refunded });
+    return { status: "invalid", message: `${error.message}. ${action.daysReserved} day(s) refunded.` };
+  }
+  // World first (tokens, scene log), then the actor; if the actor commit fails the scene is put back.
+  const undo = await exploration.applyPlan(api, actor, run);
+  try {
+    const { counter: after } = planResolve(counter, action.daysReserved, action.daysReserved);
+    await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: others, [flagKey(K.daysFlag)]: after },
+      [{ type: "days", delta: -action.daysReserved, note: `expedition: ${run.region.name}` }]);
+  } catch (error) {
+    try {
+      await undo();
+    } catch (undoError) {
+      console.error(`${MODULE_ID} | the actor commit failed AND the scene could not be restored`, undoError);
+      throw new Error(`${error.message}. The scene "${run.plan.scene.name}" was changed and could not be restored automatically; run api.resetScene on it.`);
+    }
+    throw error;
+  }
+  if (chat) await exploration.postExploreChat(api, actor, run, action.daysReserved);
+  const { plan } = run;
+  const natural = run.roll.natural === null ? "" : ` Natural d20: ${run.roll.natural}.`;
+  const short = plan.shortfall ? ` (rolled ${plan.rolled}, the scene only had ${plan.freeBefore})` : "";
+  return { status: "resolved", message: `prepared "${plan.scene.name}" (not launched): ${plan.activations.length} node(s) activated${short}, ${plan.freeAfter} free anchor(s) left.${natural}` };
+};
+
 /** Resolve one queued action. GM only. Throws on an unexpected failure (the action stays queued). */
-export async function resolveAction(api, actor, actionId, { chat = true } = {}) {
+export async function resolveAction(api, actor, actionId, { chat = true, degree } = {}) {
   requireGM("resolve");
   const pending = pendingOf(actor);
   const action = pending.find(a => a?.id === actionId);
@@ -148,14 +195,14 @@ export async function resolveAction(api, actor, actionId, { chat = true } = {}) 
   const valid = findAction(actor, actionId).action;
   const resolver = RESOLVERS[valid.type];
   if (!resolver) throw new Error(`no resolver is wired for "${valid.type}" actions yet; reject it to refund its days`);
-  return resolver(api, actor, valid, pending, { chat });
+  return resolver(api, actor, valid, pending, { chat, degree });
 }
 
 /** Resolve every queued action in submission order, isolating failures. GM only. Returns { results, summary }. */
-export async function resolveAll(api, { chat = true } = {}) {
+export async function resolveAll(api, { chat = true, degree } = {}) {
   requireGM("resolveAll");
   const rows = list();
-  const batch = await runBatch(rows, row => resolveAction(api, actorFor(row.actorId), row.action.id, { chat }));
+  const batch = await runBatch(rows, row => resolveAction(api, actorFor(row.actorId), row.action.id, { chat, degree }));
   // Add names so a results panel can say who and what.
   const byKey = new Map(rows.map(r => [`${r.actorId}/${r.action.id}`, r]));
   batch.results = batch.results.map(r => ({ ...r, actorName: byKey.get(`${r.actorId}/${r.actionId}`)?.actorName, label: byKey.get(`${r.actorId}/${r.actionId}`)?.label }));

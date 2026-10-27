@@ -383,3 +383,31 @@ export async function giveMaterial(actor, material, quantity) {
   return created;
 }
 
+
+// Resource Node actor -----------------------------------------------------------------------------------
+// The one neutral PF2e "loot" actor every node token is made from. PF2e's actor type name stays in this file.
+
+/**
+ * Actor data for the shared node actor: nobody but the GM can open it, and its token is
+ * unlinked, neutral, name-on-hover, 1x1, with no vision or bars.
+ */
+export function nodeActorData({ name, img, flagScope, flagKey }) {
+  const display = globalThis.CONST?.TOKEN_DISPLAY_MODES?.HOVER ?? 30;
+  const neutral = globalThis.CONST?.TOKEN_DISPOSITIONS?.NEUTRAL ?? 0;
+  const none = globalThis.CONST?.DOCUMENT_OWNERSHIP_LEVELS?.NONE ?? 0;
+  return {
+    name, img, type: "loot",
+    ownership: { default: none },
+    flags: { [flagScope]: { [flagKey]: true } },
+    prototypeToken: {
+      name, actorLink: false, disposition: neutral, displayName: display, displayBars: 0,
+      width: 1, height: 1, lockRotation: true, sight: { enabled: false }, texture: { src: img }
+    }
+  };
+}
+
+export const isNodeActor = (actor, flagScope, flagKey) => actor?.type === "loot" && actor.getFlag?.(flagScope, flagKey) === true;
+
+export const findNodeActor = (actors, flagScope, flagKey) => [...actors].find(actor => isNodeActor(actor, flagScope, flagKey)) ?? null;
+
+export const createNodeActor = data => Actor.create(data);

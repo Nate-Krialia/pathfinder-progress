@@ -124,3 +124,33 @@ export const AUDIT = {
   ledgerSetting: "auditLedger",
   historyMax: 20
 };
+
+/** Exploration (docs/05-exploration.md). All numbers are placeholders. */
+export const EXPLORATION = {
+  // Anchors activated by an expedition, by degree: rolled uniformly from min to max (inclusive).
+  anchorCounts: {
+    criticalSuccess: { min: 3, max: 5 },
+    success: { min: 2, max: 4 },
+    failure: { min: 1, max: 2 },
+    criticalFailure: { min: 1, max: 1 }
+  },
+  // How many past expeditions a scene remembers.
+  preparedLogMax: 10,
+  sceneTagsFlag: "sceneTags",
+  preparedFlag: "prepared",
+  // A token still carrying this name is an untouched anchor; activation renames it after its nodeType.
+  anchorName: "Anchor",
+  // Foundry core icons (no art ships with the module). A nodeType can set its own `img`.
+  anchorImg: "icons/svg/mystery-man.svg",
+  defaultNodeImg: "icons/svg/item-bag.svg",
+  // Random anchor placement keeps this many grid squares away from the scene edge.
+  placePaddingSquares: 1
+};
+
+/** The shared neutral actor every placed node token is made from (found by flag, never by name). */
+export const NODE_ACTOR = {
+  flag: "nodeActor",
+  setting: "nodeActorId",
+  name: "Resource Node",
+  img: "icons/svg/item-bag.svg"
+};
