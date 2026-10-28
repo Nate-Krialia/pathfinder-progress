@@ -12,6 +12,8 @@ import * as gathering from "../scripts/gathering/store.js";
 import * as queue from "../scripts/queue/store.js";
 import * as audit from "../scripts/audit/store.js";
 import * as research from "../scripts/research/store.js";
+import { _resetSocketForTests, ensureSocket, installSocketHooks, socketStatus } from "../scripts/socket.js";
+import { readFileSync } from "node:fs";
 import { asPage, openDowntime, seedRecords } from "./helpers.js";
 
 const M = "pathfinder-progress";
@@ -804,4 +806,166 @@ test("one failing explore does not block a research action in the same batch", a
   const { results, summary } = await queue.resolveAll(api, { chat: false });  // bb has no rolls: its explore errors
   assert.deepEqual(summary, { resolved: 1, invalid: 0, skipped: 0, errors: 1 });
   assert.equal(results.find(r => r.actorId === "a2").status, "resolved");
+});
+
+// The socket: a PLAYER's search must reach the GM client ------------------------------------------------------------------
+function fakeHooks() {
+  const listeners = {};
+  return { once(name, fn) { (listeners[name] ??= []).push(fn); }, fire(name) { const fns = listeners[name] ?? []; listeners[name] = []; for (const fn of fns) fn(); }, pending: name => (listeners[name] ?? []).length };
+}
+
+/** A socketlib that records registrations and runs "GM" handlers as the GM client (isGM flips for the call). */
+function fakeSocketlib({ failRegister = false } = {}) {
+  const lib = {
+    functions: new Map(), registrations: 0, calls: [],
+    registerModule(id) {
+      lib.registrations++;
+      if (failRegister) throw new Error("registerModule failed");
+      return {
+        register: (name, fn) => lib.functions.set(name, fn),
+        async executeAsGM(name, args) {
+          lib.calls.push({ name, args });
+          const fn = lib.functions.get(name);
+          if (!fn) throw new Error(`socketlib: "${name}" is not registered on the GM client`);
+          const wasGM = globalThis.game.user.isGM;
+          globalThis.game.user.isGM = true; // the handler runs on the GM's client
+          try { return await fn(args); } finally { globalThis.game.user.isGM = wasGM; }
+        }
+      };
+    }
+  };
+  return lib;
+}
+
+async function playerSearchWorld() {
+  _resetSocketForTests();
+  const { bb, scene } = await world({ anchors: 0 });
+  await standOn(scene, bb);
+  await hiddenNode(scene, { dc: 10 });
+  globalThis.canvas = { scene };
+  globalThis.game.user.isGM = false;
+  globalThis.game.user.id = "u-player";
+  bb.perceptionRolls.push(roll(2, 18, 12));
+  return { bb, scene };
+}
+
+test("SOCKET (player client): registered on socketlib.ready, then a player's search is relayed to the GM client and comes back plain", async () => {
+  const { bb } = await playerSearchWorld();
+  const lib = fakeSocketlib();
+  globalThis.socketlib = lib;
+  const hooks = fakeHooks();
+  installSocketHooks(hooks);
+  hooks.fire("socketlib.ready");
+  assert.equal(lib.registrations, 1);
+  assert.ok(lib.functions.has("search"), "the search handler is registered on THIS (player) client");
+  const result = await exploration.searchArea(bb);
+  assert.deepEqual(result, { message: "You search the area. You spot: Herb Patch.", spotted: ["Herb Patch"] });
+  assert.deepEqual(lib.calls, [{ name: "search", args: { actorId: bb.id, sceneId: globalThis.canvas.scene.id, userId: "u-player" } }]);
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: registration does not depend on the client being a GM; both kinds register the same function", async () => {
+  for (const isGM of [false, true]) {
+    _resetSocketForTests();
+    install({ isGM });
+    const lib = fakeSocketlib();
+    globalThis.socketlib = lib;
+    installSocketHooks(fakeHooks());
+    assert.ok(ensureSocket(), `${isGM ? "GM" : "player"} client registers`);
+    assert.ok(lib.functions.has("search"));
+    assert.equal(socketStatus().client, isGM ? "GM" : "player");
+  }
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: if socketlib.ready fired BEFORE this module was listening, init/setup/ready still register it", async () => {
+  for (const hook of ["init", "setup", "ready"]) {
+    const { bb } = await playerSearchWorld();
+    const lib = fakeSocketlib();
+    globalThis.socketlib = lib;               // socketlib is already there; its hook was missed
+    const hooks = fakeHooks();
+    installSocketHooks(hooks);
+    assert.equal(lib.registrations, 0, "nothing registered until a hook fires");
+    hooks.fire(hook);
+    assert.equal(lib.registrations, 1, `registered on ${hook}`);
+    assert.equal((await exploration.searchArea(bb)).message, "You search the area. You spot: Herb Patch.");
+  }
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: with no hook at all, the first search registers lazily and still works", async () => {
+  const { bb } = await playerSearchWorld();
+  const lib = fakeSocketlib();
+  globalThis.socketlib = lib;
+  installSocketHooks(fakeHooks());            // no hook is ever fired
+  assert.equal(lib.registrations, 0);
+  const result = await exploration.searchArea(bb);
+  assert.equal(result.spotted[0], "Herb Patch");
+  assert.equal(lib.registrations, 1);
+  await playerSearchWorld();
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: registering twice is harmless (one registration, however many hooks fire)", async () => {
+  await playerSearchWorld();
+  const lib = fakeSocketlib();
+  globalThis.socketlib = lib;
+  const hooks = fakeHooks();
+  installSocketHooks(hooks);
+  for (const name of ["socketlib.ready", "init", "setup", "ready"]) hooks.fire(name);
+  ensureSocket(); ensureSocket();
+  assert.equal(lib.registrations, 1);
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: socketlib missing gives a plain, fixable message that points at api.socketStatus(), and works once it appears", async () => {
+  const { bb } = await playerSearchWorld();
+  globalThis.socketlib = undefined;
+  installSocketHooks(fakeHooks());
+  await assert.rejects(exploration.searchArea(bb), /socket is not ready \(is socketlib installed and active\? api\.socketStatus\(\)/);
+  assert.equal(socketStatus().registered, false);
+  assert.equal(socketStatus().socketlibGlobal, false);
+  globalThis.socketlib = fakeSocketlib();
+  bb.perceptionRolls.push(roll(2, 18, 12));
+  assert.equal((await exploration.searchArea(bb)).spotted[0], "Herb Patch");
+  assert.equal(socketStatus().registered, true);
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: if registerModule throws, the error is logged, the player gets a clear message, and the next call tries again", async () => {
+  const { bb } = await playerSearchWorld();
+  const lib = fakeSocketlib({ failRegister: true });
+  globalThis.socketlib = lib;
+  installSocketHooks(fakeHooks());
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => logged.push(args.map(String).join(" "));
+  try {
+    await assert.rejects(exploration.searchArea(bb), /socket is not ready/);
+  } finally { console.error = original; }
+  assert.ok(logged.some(l => /could not register with socketlib/.test(l)));
+  assert.equal(lib.registrations, 1);
+  const lib2 = fakeSocketlib();
+  globalThis.socketlib = lib2;
+  bb.perceptionRolls.push(roll(2, 18, 12));
+  assert.equal((await exploration.searchArea(bb)).spotted[0], "Herb Patch");
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: no GM connected is a plain message and nothing is revealed", async () => {
+  const { bb, scene } = await playerSearchWorld();
+  globalThis.socketlib = { registerModule: () => ({ register() {}, executeAsGM: async () => { throw new Error("No GM is connected"); } }) };
+  await assert.rejects(exploration.searchArea(bb), /The GM isn't available to run your search right now/);
+  assert.equal(scene.tokens.filter(t => t.hidden).length, 1);
+  globalThis.socketlib = undefined;
+});
+
+test("module.json lists socketlib as a REQUIRED module, with a reason", () => {
+  const manifest = JSON.parse(readFileSync("module.json", "utf8"));
+  const entry = manifest.relationships.requires.find(r => r.id === "socketlib");
+  assert.ok(entry, "socketlib must be in relationships.requires");
+  assert.equal(entry.type, "module");
+  assert.match(entry.manifest, /socketlib.*module\.json$/);
+  assert.match(entry.reason, /Search the area/);
+  assert.ok(!(manifest.relationships.recommends ?? []).some(r => r.id === "socketlib"), "required, not just recommended");
 });

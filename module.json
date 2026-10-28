@@ -2,7 +2,7 @@
   "id": "pathfinder-progress",
   "title": "Pathfinder Progress",
   "description": "Use-based skill mastery, gathering, and crafting for Pathfinder 2e.",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "compatibility": {
     "minimum": "14",
     "verified": "14.369"
@@ -22,7 +22,8 @@
       {
         "id": "socketlib",
         "type": "module",
-        "manifest": "https://github.com/farling42/foundryvtt-socketlib/releases/latest/download/module.json"
+        "manifest": "https://github.com/farling42/foundryvtt-socketlib/releases/latest/download/module.json",
+        "reason": "Relays a player's \"Search the area\" to the GM client."
       }
     ]
   },

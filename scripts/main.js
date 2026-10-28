@@ -12,6 +12,7 @@ import { openReview, refreshReview } from "./queue/review-app.js";
 import * as exploration from "./exploration/store.js";
 import * as commissions from "./commissions/store.js";
 import * as downtime from "./downtime/store.js";
+import { installSocketHooks, socketStatus } from "./socket.js";
 import { suggestPayout } from "./commissions/commission.js";
 import { feeForTier } from "./stations/fees.js";
 import { AUDIT, COMMISSIONS, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS } from "./config.js";
@@ -219,6 +220,8 @@ Hooks.once("ready", async () => {
     clearMap: scene => exploration.clearMap(scene),
     /** GM: let every character search the scene again (one attempt per character per visit). */
     resetSearches: scene => exploration.resetSearches(scene),
+    /** Troubleshooting: is the socket registered on this client? */
+    socketStatus: () => socketStatus(),
     /** Players: search the area your character is in (the GM client rolls your Perception). Returns { message, spotted }. */
     searchArea: actor => exploration.searchArea(actor),
     /** The shared Resource Node actor (created, or recreated with a notice, if missing). */
@@ -339,9 +342,5 @@ Hooks.on("updateActor", (actor, changes, options, userId) => {
   Promise.resolve().then(run).catch(err => console.error(`${MODULE_ID} |`, err));
 });
 
-// The search relay: a player's "Search the area" asks the GM client to roll and compare (see exploration/store.js).
-Hooks.once("socketlib.ready", () => {
-  const socket = globalThis.socketlib.registerModule(MODULE_ID);
-  socket.register("search", options => exploration.runSearch(options));
-  exploration.setSocket(socket);
-});
+// The search relay (socket.js registers it on every client, GM or player, at every moment it could work).
+installSocketHooks();
