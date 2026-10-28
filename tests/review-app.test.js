@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { loadDefinitions } from "../scripts/data/validate.js";
 import * as research from "../scripts/research/store.js";
 import * as queue from "../scripts/queue/store.js";
+import { capResults } from "../scripts/queue/review.js";
 import { build, unhandledAction } from "../scripts/queue/review-app.js";
 import { renderReview } from "../scripts/queue/review.js";
 import { asPage, seedRecords } from "./helpers.js";
@@ -148,4 +149,25 @@ test("the unknown-action fallback ignores Foundry's own header buttons but still
   assert.equal(unhandledAction(button("resolve-al", true), actions), "resolve-al", "a typo in our content is reported");
   assert.equal(unhandledAction({ closest: () => null }, actions), null, "not a button");
   assert.equal(unhandledAction(null, actions), null);
+});
+
+test("the 'Last results' list is capped: the newest 30 are kept, in order", () => {
+  const many = Array.from({ length: 75 }, (_, i) => ({ actionId: `a${i}`, status: "resolved" }));
+  const capped = capResults(many);
+  assert.equal(capped.length, 30);
+  assert.deepEqual([capped[0].actionId, capped.at(-1).actionId], ["a45", "a74"]);
+  assert.equal(capResults(many.slice(0, 5)).length, 5, "short lists are untouched");
+  assert.equal(capResults(many, 3).length, 3);
+});
+
+test("resolving many actions one by one never lets the window's results list grow past the cap", async () => {
+  const { a, app, actions } = await setup();
+  await research.grantDays(a, 40);
+  for (let i = 0; i < 34; i++) {
+    const action = await queue.submit(a, "research", { projectId: DAGGER }, 1);
+    a.rolls.push(roll(1, 5, 3)); // a failure: no progress, so the project stays active
+    await call(app, actions, "resolve", { actor: "a1", actionId: action.id });
+    assert.ok(app.results.length <= 30, `after ${i + 1} resolves the list has ${app.results.length}`);
+  }
+  assert.equal(app.results.length, 30);
 });

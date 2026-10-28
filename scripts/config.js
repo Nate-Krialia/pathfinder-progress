@@ -120,6 +120,12 @@ export const QUEUE_KEYS = {
  * write. It records what the module itself granted, so a GM client can notice days or formulas
  * that changed some other way. It is an integrity check, not enforcement or secrecy.
  */
+/** The GM review window. */
+export const REVIEW = {
+  // "Last results" keeps this many entries; older ones drop off.
+  resultsMax: 30
+};
+
 export const AUDIT = {
   ledgerSetting: "auditLedger",
   historyMax: 20

@@ -301,6 +301,7 @@ test("SUCCESS: item to the patron, fee from the patron, payout patron -> crafter
   assert.deepEqual(entry.materialsConsumed, [{ materialId: "iron", units: 1 }, { materialId: "spider-fang", units: 1 }]);
   assert.equal(env.chat.length, 1);
   assert.match(env.chat[0].content, /delivered; payout 12 gp/);
+  assert.match(env.chat[0].content, /Fee paid by Aelwyn: 5 gp\./, "a character patron is named as the payer");
   assert.deepEqual(audit.scan(), []);
 });
 
@@ -399,10 +400,13 @@ test("GM-issued, NPC patron, crafter supplies materials: own stock used, fee wai
   assert.equal(status(commission.id), "accepted");
 
   const before = gp(crafter);
-  await commissions.craftForCommission(api, commission.id, { degree: "success", selection: SEL, learnDegree: "failure", chat: false });
+  await commissions.craftForCommission(api, commission.id, { degree: "success", selection: SEL, learnDegree: "failure" });
   assert.deepEqual([stack(crafter, "iron"), stack(crafter, "spider-fang")], [1, 1], "the crafter's own stock paid for it");
   assert.equal(gp(crafter), before + commission.payout, "payout created as gold; the fee was waived");
   assert.equal(crafter.items.filter(i => i.type === "weapon").length, 0, "no item is created for an NPC patron");
+  const card = env.chat.map(m => m.content).join("\n");
+  assert.doesNotMatch(card, /Fee paid/, "the card must not claim a fee was paid");
+  assert.match(card, /Fee waived \(paid by the NPC patron\)\./);
   assert.equal(patron.items.filter(i => i.type === "weapon").length, 0);
   const c = commissions.getCommission(commission.id);
   assert.deepEqual([c.status, c.delivered.itemName, c.log.at(-1).feePayer, c.log.at(-1).feeGp, c.log.at(-1).itemTo], ["delivered", "Spider Fang Dagger", "waived (NPC patron)", 0, "no item (NPC patron)"]);

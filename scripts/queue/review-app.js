@@ -5,7 +5,7 @@
 import { MODULE_ID } from "../config.js";
 import * as audit from "../audit/store.js";
 import * as queue from "./store.js";
-import { renderReview } from "./review.js";
+import { capResults, renderReview } from "./review.js";
 
 let ReviewApp = null;
 
@@ -41,7 +41,7 @@ export function build() {
           return this.#run(async () => {
             if (!queue.list().length) { ui.notifications.info(`${MODULE_ID}: nothing is queued, so there is nothing to resolve.`); return; }
             const batch = await queue.resolveAll(this.api);
-            this.results = batch.results;
+            this.results = capResults(batch.results);
             this.#note(batch.summary);
           });
         },
@@ -105,9 +105,9 @@ export function build() {
         const base = { actorId, actionId, actorName: row?.actorName, label: row?.label };
         try {
           const outcome = await queue.resolveAction(this.api, this.#actor(target), actionId);
-          this.results = [...this.results.filter(r => !(r.actorId === actorId && r.actionId === actionId)), { ...base, ...outcome }];
+          this.results = capResults([...this.results.filter(r => !(r.actorId === actorId && r.actionId === actionId)), { ...base, ...outcome }]);
         } catch (error) {
-          this.results = [...this.results.filter(r => !(r.actorId === actorId && r.actionId === actionId)), { ...base, status: "error", message: error.message }];
+          this.results = capResults([...this.results.filter(r => !(r.actorId === actorId && r.actionId === actionId)), { ...base, status: "error", message: error.message }]);
         }
       });
     }

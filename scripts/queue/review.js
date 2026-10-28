@@ -4,8 +4,13 @@
  * the ApplicationV2 window (review-app.js) routes.
  */
 
+import { REVIEW } from "../config.js";
+
 const ENTITIES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ENTITIES[ch]);
+
+/** Keep the newest `max` results so a long session's list cannot grow without limit. */
+export const capResults = (results, max = REVIEW.resultsMax) => (results.length > max ? results.slice(results.length - max) : results);
 
 const STATUS_LABEL = { resolved: "Resolved", invalid: "Refused and refunded", skipped: "Skipped", error: "Error (still queued)" };
 

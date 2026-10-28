@@ -471,7 +471,8 @@ async function craftLocked(api, id, options) {
 }
 
 async function postCraftChat({ c, crafter, patronActor, plan, outcome, entry, next }) {
-  const lines = [formatSummary({ crafterName: esc(crafter.name), plan, outcome, itemName: next.delivered?.itemName })];
+  const feeText = patronActor ? `Fee paid by ${esc(patronActor.name)}: ${outcome.feeConsumed} gp.` : "Fee waived (paid by the NPC patron).";
+  const lines = [formatSummary({ crafterName: esc(crafter.name), plan, outcome, itemName: next.delivered?.itemName, feeText })];
   lines.push(`Commission for <strong>${esc(patronName(c))}</strong>: ${outcome.made ? `delivered${patronActor ? "" : " (no item changes hands for an NPC patron)"}; payout ${esc(gpText(toCopper(c.payout)))}.` : "still open; no payout yet."}`);
   if (entry.learn?.degree) lines.push(`Learn roll: progress ${entry.learn.progress}/${entry.learn.threshold}${entry.learn.completed ? " - formula learned!" : ""}.`);
   try {
