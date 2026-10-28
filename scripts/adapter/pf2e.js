@@ -411,3 +411,23 @@ export const isNodeActor = (actor, flagScope, flagKey) => actor?.type === "loot"
 export const findNodeActor = (actors, flagScope, flagKey) => [...actors].find(actor => isNodeActor(actor, flagScope, flagKey)) ?? null;
 
 export const createNodeActor = data => Actor.create(data);
+
+/**
+ * The update that fixes a created node actor whose safe defaults did not stick (Foundry/PF2e
+ * rewrite some defaults when an actor is created), or null if it is already right.
+ * Returns { update, problems } where problems describes what was wrong.
+ */
+export function nodeActorRepair(actor) {
+  const none = globalThis.CONST?.DOCUMENT_OWNERSHIP_LEVELS?.NONE ?? 0;
+  const update = {};
+  const problems = [];
+  if (actor.ownership?.default !== none) {
+    update["ownership.default"] = none;
+    problems.push(`default ownership was ${actor.ownership?.default}`);
+  }
+  if (actor.prototypeToken?.actorLink !== false) {
+    update["prototypeToken.actorLink"] = false;
+    problems.push(`prototype token actorLink was ${actor.prototypeToken?.actorLink}`);
+  }
+  return problems.length ? { update, problems } : null;
+}

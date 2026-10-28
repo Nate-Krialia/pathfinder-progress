@@ -82,6 +82,13 @@ export async function ensureNodeActor() {
   actor = adapter.findNodeActor(game.actors, MODULE_ID, NODE_ACTOR.flag);
   if (!actor) {
     actor = await adapter.createNodeActor(adapter.nodeActorData({ name: NODE_ACTOR.name, img: NODE_ACTOR.img, flagScope: MODULE_ID, flagKey: NODE_ACTOR.flag }));
+    // Foundry/PF2e can rewrite defaults during creation: read the saved actor back and correct it.
+    const repair = adapter.nodeActorRepair(actor);
+    if (repair) {
+      await actor.update(repair.update);
+      if (adapter.nodeActorRepair(actor)) throw new Error(`ensureNodeActor: could not set the "${NODE_ACTOR.name}" actor's safe defaults (${repair.problems.join("; ")}); fix its ownership and token link by hand`);
+      ui.notifications.info(`${MODULE_ID}: corrected the new "${NODE_ACTOR.name}" actor's defaults (${repair.problems.join("; ")}).`);
+    }
     ui.notifications[remembered ? "warn" : "info"](remembered
       ? `${MODULE_ID}: the "${NODE_ACTOR.name}" actor was deleted, so it was created again. Node tokens placed before keep their node data.`
       : `${MODULE_ID}: created the "${NODE_ACTOR.name}" actor that node tokens are made from.`);

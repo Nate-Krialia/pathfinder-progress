@@ -90,7 +90,11 @@ function fakeActor(id, name, mods = { survival: 8, nature: 8 }) {
   return actor;
 }
 
+// Set by a test to make the fake Actor.create rewrite fields the way Foundry/PF2e can: (data) => data.
+let createRewrite = null;
+
 function install({ isGM = true, actors = [], scenes = [], seed = 1 } = {}) {
+  createRewrite = null;
   const values = { auditLedger: {}, nodeActorId: "" };
   const actorList = collection([...actors]);
   const sceneList = collection([...scenes]);
@@ -106,8 +110,10 @@ function install({ isGM = true, actors = [], scenes = [], seed = 1 } = {}) {
   globalThis.Actor = {
     async create(data) {
       const created = {
-        ...clone(data), id: newId("actor"), flags: clone(data.flags ?? {}), isOwner: true,
+        ...clone(createRewrite ? createRewrite(clone(data)) : data), id: newId("actor"), flags: clone(data.flags ?? {}), isOwner: true,
         getFlag: (scope, key) => created.flags[scope]?.[key],
+        failUpdate: false,
+        async update(change) { if (created.failUpdate) throw new Error("update refused"); applyFlat(created, change); },
         async getTokenDocument(tokenData) { return { toObject: () => ({ actorId: created.id, ...clone(created.prototypeToken), ...clone(tokenData) }) }; }
       };
       actorList.push(created);
@@ -167,6 +173,39 @@ test("if the node actor is deleted it is recreated with a WARNING notice; a rena
   assert.notEqual(second.id, first.id);
   assert.match(env.notices.warn.at(-1), /was deleted, so it was created again/);
   assert.equal(env.values.nodeActorId, second.id);
+});
+
+test("if Foundry/PF2e rewrite ownership and actorLink at creation, ensureNodeActor corrects them and says so", async () => {
+  const { env } = await world({ anchors: 0 });
+  createRewrite = data => ({ ...data, ownership: { default: 1, gm1: 3 }, prototypeToken: { ...data.prototypeToken, actorLink: true } });
+  const actor = await exploration.ensureNodeActor();
+  assert.equal(actor.ownership.default, 0);
+  assert.equal(actor.ownership.gm1, 3, "the GM's own ownership is left alone");
+  assert.equal(actor.prototypeToken.actorLink, false);
+  assert.equal(actor.prototypeToken.disposition, 0, "other defaults untouched");
+  assert.ok(env.notices.info.some(m => /corrected the new "Resource Node" actor's defaults \(default ownership was 1; prototype token actorLink was true\)/.test(m)), env.notices.info.join(" | "));
+  const again = await exploration.ensureNodeActor();
+  assert.equal(again, actor);
+  assert.equal(env.notices.info.filter(m => /corrected/.test(m)).length, 1, "reuse does not re-correct");
+});
+
+test("a recreated node actor gets the same correction, and an actor that already has the defaults is not touched", async () => {
+  const { env } = await world({ anchors: 0 });
+  const first = await exploration.ensureNodeActor();
+  assert.equal(env.notices.info.filter(m => /corrected/.test(m)).length, 0, "nothing to correct when the defaults stuck");
+  env.actorList.splice(env.actorList.indexOf(first), 1);
+  createRewrite = data => ({ ...data, ownership: { default: 1 }, prototypeToken: { ...data.prototypeToken, actorLink: true } });
+  const second = await exploration.ensureNodeActor();
+  assert.deepEqual([second.ownership.default, second.prototypeToken.actorLink], [0, false]);
+  assert.match(env.notices.warn.at(-1), /was deleted, so it was created again/);
+});
+
+test("if the correction itself does not stick, ensureNodeActor fails loudly instead of leaving an unsafe actor quietly", async () => {
+  await world({ anchors: 0 });
+  createRewrite = data => ({ ...data, ownership: { default: 1 } });
+  const original = globalThis.Actor.create;
+  globalThis.Actor.create = async data => { const a = await original(data); a.update = async () => {}; return a; };
+  await assert.rejects(exploration.ensureNodeActor(), /could not set the "Resource Node" actor's safe defaults \(default ownership was 1\)/);
 });
 
 test("only a GM can ensure the node actor or place anything", async () => {
