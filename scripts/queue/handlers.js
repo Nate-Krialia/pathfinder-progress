@@ -7,6 +7,7 @@
  * definitions; scenes only on a GM client), never the recipes, so a player can submit.
  */
 
+import { EXPLORATION } from "../config.js";
 import { pickSkill } from "../gathering/resolve.js";
 
 /** Look up a project in the actor's raw projects list. */
@@ -48,18 +49,21 @@ const pct = x => `${Math.round(x * 100)}%`;
 const explore = {
   /**
    * ctx: { params, days, region, scenes } where scenes is the region's scene pool as
-   * [{ name, anchors }] for a GM client, or null on a player's client (players may not see scenes).
+   * [{ name, anchors, totalAnchors }] for a GM client, or null on a player's client (players may not see scenes).
+   * params: { region (or regionId), skill?, forceCombat? }; days = how many days to explore (at least the region's daysRequired).
    */
   validateSubmit({ params, days, region, scenes }) {
-    if (!region) return { ok: false, errors: [`unknown region "${params?.region}"`] };
-    if (days !== region.daysRequired) return { ok: false, errors: [`"${region.name}" expeditions take ${region.daysRequired} day(s); reserve exactly that many (got ${days})`] };
+    if (!region) return { ok: false, errors: [`unknown region "${params?.region ?? params?.regionId}"`] };
+    if (!Number.isInteger(days) || days < region.daysRequired) return { ok: false, errors: [`"${region.name}" takes at least ${region.daysRequired} day(s) to explore (got ${days})`] };
+    if (days > EXPLORATION.maxDays) return { ok: false, errors: [`an expedition lasts at most ${EXPLORATION.maxDays} days (got ${days})`] };
+    if (params.forceCombat !== undefined && typeof params.forceCombat !== "boolean") return { ok: false, errors: ["forceCombat must be true or false"] };
     const picked = pickSkill(region.skillWhitelist, params.skill, `"${region.name}"`, "exploration");
     if (!picked.ok) return { ok: false, errors: [picked.error] };
     if (scenes !== null && scenes !== undefined) {
       if (!scenes.length) return { ok: false, errors: [`no scene is tagged "${region.sceneTag}" for "${region.name}"; tag one with api.tagScene(scene, "${region.sceneTag}")`] };
-      if (!scenes.some(s => s.anchors.length)) return { ok: false, errors: [`the scene(s) tagged "${region.sceneTag}" have no free anchors; place some with api.placeAnchors`] };
+      if (!scenes.some(s => s.totalAnchors > 0)) return { ok: false, errors: [`the scene(s) tagged "${region.sceneTag}" have no anchors; place some with api.placeAnchors`] };
     }
-    return { ok: true, params: { region: region.id, skill: picked.skill } };
+    return { ok: true, params: { region: region.id, skill: picked.skill, forceCombat: params.forceCombat === true } };
   },
 
   /** ctx: { action, info } where info comes from exploration/store.js describeInfo. */
@@ -67,10 +71,11 @@ const explore = {
     if (!info?.region) return { label: `Explore: ${action.params?.region ?? "?"}`, detail: "region not found", problem: "the region no longer exists" };
     const { region } = info;
     const odds = info.odds
-      ? `${action.params.skill} ${info.modifier >= 0 ? "+" : ""}${info.modifier} vs DC ${region.explorationDC}: crit ${pct(info.odds.chances.criticalSuccess)} / success ${pct(info.odds.chances.success)} / fail ${pct(info.odds.chances.failure)} / crit-fail ${pct(info.odds.chances.criticalFailure)}, expect ~${info.odds.expectedAnchors.toFixed(1)} nodes`
+      ? `${action.params.skill} ${info.modifier >= 0 ? "+" : ""}${info.modifier} vs DC ${region.explorationDC}: crit ${pct(info.odds.chances.criticalSuccess)} / success ${pct(info.odds.chances.success)} / fail ${pct(info.odds.chances.failure)} / crit-fail ${pct(info.odds.chances.criticalFailure)}, expect ~${(info.odds.expectedAnchors * action.daysReserved).toFixed(1)} nodes`
       : `${action.params.skill} (no modifier found) vs DC ${region.explorationDC}`;
-    const detail = `${odds}; ${action.daysReserved} day(s); ${info.scenes} tagged scene(s), ${info.freeAnchors} free anchor(s)`;
-    const problem = !info.scenes ? `no scene is tagged "${region.sceneTag}"` : !info.freeAnchors ? "no free anchors on the tagged scene(s)" : null;
+    const force = action.params.forceCombat ? "; FORCE COMBAT" : "";
+    const detail = `${odds}; ${action.daysReserved} day(s)${force}; ${info.scenes} tagged scene(s), ${info.freeAnchors} free anchor(s) of ${info.totalAnchors}`;
+    const problem = !info.scenes ? `no scene is tagged "${region.sceneTag}"` : !info.totalAnchors ? "no anchors on the tagged scene(s)" : null;
     return { label: `Explore: ${region.name}`, detail, problem };
   }
 };

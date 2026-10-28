@@ -1,6 +1,6 @@
 /**
  * Node records: normalising a token's flag into a usable view, and the state
- * transitions (create, activate, refill, corpse). Pure; no Foundry globals.
+ * transitions (create, activate, corpse). Nodes never refill: a depleted node stays depleted until the map is cleared. Pure; no Foundry globals.
  *
  * A record is the flag stored on a node token. A VIEW adds everything resolved
  * from definitions: the nodeType, the ladder with absolute DCs, the allowed skills.
@@ -26,7 +26,7 @@ export function normalizeNode({ record, token, registry, config = GATHERING }) {
 
   const base = {
     uuid: token.uuid, name: token.name, source: record.source, state: record.state,
-    region: record.region ?? null, discoveredBy: [...record.discoveredBy], decayTimer: record.decayTimer ?? null
+    region: record.region ?? null, revealed: record.revealed !== false, discoveredBy: [...record.discoveredBy], decayTimer: record.decayTimer ?? null
   };
   if (record.state === "anchor") return { ok: true, node: { ...base, nodeType: null, tier: null, charges: 0, skills: [], ladder: null } };
 
@@ -90,15 +90,6 @@ export function activateRecord(record, { nodeType, tier, charges, source, region
     ...(source ? { source } : {}), ...(region ? { region } : {}), ...(discoveredBy ? { discoveredBy } : {})
   };
   return validated(next, registry, config);
-}
-
-/** Bring a spent or part-used node back to `charges` (default: its nodeType's). */
-export function refillRecord(record, charges, registry, config) {
-  if (record.state === "anchor") return { ok: false, errors: ["an anchor has no charges to refill; activate it first"] };
-  const type = registry.nodeType.get(record.nodeType);
-  const amount = charges ?? type?.charges;
-  if (!Number.isInteger(amount) || amount < 1) return { ok: false, errors: [`charges must be a whole number of at least 1 (got ${amount})`] };
-  return validated({ ...record, state: "active", charges: amount }, registry, config);
 }
 
 /** A corpse node: the same shape, with its own ladder and a decay timer. */

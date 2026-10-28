@@ -12,7 +12,7 @@ import * as research from "../scripts/research/store.js";
 import * as queue from "../scripts/queue/store.js";
 import * as audit from "../scripts/audit/store.js";
 import { previewCraft } from "../scripts/crafting/craft.js";
-import { asPage, seedRecords, UUID, UUID_2 } from "./helpers.js";
+import { asPage, openDowntime, seedRecords, UUID, UUID_2 } from "./helpers.js";
 
 const M = "pathfinder-progress";
 const registry = loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -88,7 +88,7 @@ function install(actors) {
   list.getName = name => list.find(a => a.name === name);
   globalThis.game = {
     user: { isGM: true }, i18n: { localize: t => t }, actors: list,
-    settings: { get: (s, k) => clone(env.values[k]), set: async (s, k, v) => { tick(`settings.set ${k}`); env.values[k] = clone(v); } }
+    settings: { get: (s, k) => (k === "downtime" ? openDowntime(list.map(a => a.id)) : clone(env.values[k])), set: async (s, k, v) => { tick(`settings.set ${k}`); env.values[k] = clone(v); } }
   };
   globalThis.foundry = { utils: { randomID: () => `r${++idCounter}` } };
   globalThis.CONFIG = { Dice: { randomUniform: () => 0.99 }, PF2E: { skills: { crafting: { label: "Crafting" }, survival: { label: "Survival" } } } };

@@ -46,3 +46,6 @@ export const FANG_RECIPE = {
     { name: "fang", drives: ["bonusDamage", "specialAbility"], tierFloor: 2, qty: 1 }
   ]
 };
+
+/** A downtime period that is open for these characters (test fakes use it so queue actions are allowed). */
+export const openDowntime = ids => ({ open: true, days: 99, startedAt: 1, participants: Object.fromEntries(ids.map(id => [id, { granted: 99, spent: 0 }])), log: [] });

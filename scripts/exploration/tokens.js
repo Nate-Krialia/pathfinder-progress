@@ -12,35 +12,24 @@ export function anchorTokenData({ x, y, record }, config = EXPLORATION) {
   return { name: config.anchorName, x, y, hidden: true, texture: { src: config.anchorImg }, flags: { [MODULE_ID]: { [NODE_FLAG]: record } } };
 }
 
-/** Token data for a ready-to-gather node. */
-export function nodeTokenData({ x, y, record, nodeType }, config = EXPLORATION) {
-  return { name: nodeType.name, x, y, hidden: false, texture: { src: nodeImage(nodeType, config) }, flags: { [MODULE_ID]: { [NODE_FLAG]: record } } };
+/** Token data for a node. An expedition's nodes are made hidden (`hidden: true`) until someone spots them. */
+export function nodeTokenData({ x, y, record, nodeType, hidden = false }, config = EXPLORATION) {
+  return { name: nodeType.name, x, y, hidden, texture: { src: nodeImage(nodeType, config) }, flags: { [MODULE_ID]: { [NODE_FLAG]: record } } };
 }
 
-/**
- * The update that activates an anchor token: the new record, shown, and (if the token still
- * has the default anchor look) renamed and re-imaged after its nodeType.
- */
-export function activationUpdate({ tokenId, record, nodeType, currentName }, config = EXPLORATION) {
-  const update = { _id: tokenId, hidden: false, [`flags.${MODULE_ID}.${NODE_FLAG}`]: record };
-  if (currentName === config.anchorName) {
-    update.name = nodeType.name;
-    update["texture.src"] = nodeImage(nodeType, config);
-  }
-  return update;
-}
+const nodePath = `flags.${MODULE_ID}.${NODE_FLAG}`;
 
-/**
- * The update that puts an activated token back as it was. Keys the activation ADDED are removed
- * (Foundry merges flag objects, so they must be deleted explicitly).
- */
-export function revertUpdate({ tokenId, before }) {
-  const update = { _id: tokenId, hidden: before.hidden, name: before.name, "texture.src": before.img };
-  const path = `flags.${MODULE_ID}.${NODE_FLAG}`;
-  for (const key of before.addedKeys) update[`${path}.-=${key}`] = null;
-  for (const [key, value] of Object.entries(before.record)) update[`${path}.${key}`] = value;
-  return update;
-}
+/** Mark an anchor as occupied by the node token standing on it. */
+export const occupyUpdate = (anchorId, nodeTokenId) => ({ _id: anchorId, [`${nodePath}.occupiedBy`]: nodeTokenId });
+
+/** Free an anchor again (Foundry merges flag objects, so the key is deleted explicitly). */
+export const vacateUpdate = anchorId => ({ _id: anchorId, [`${nodePath}.-=occupiedBy`]: null });
+
+/** Show a hidden node and record that it was found. */
+export const revealUpdate = (tokenId, spotterName) => ({ _id: tokenId, hidden: false, [`${nodePath}.revealed`]: true, [`${nodePath}.revealedBy`]: spotterName });
+
+/** Hide a revealed node again (used to undo a reveal). */
+export const unrevealUpdate = tokenId => ({ _id: tokenId, hidden: true, [`${nodePath}.revealed`]: false, [`${nodePath}.-=revealedBy`]: null });
 
 /**
  * `n` random grid-snapped positions inside a scene's play area, not on top of each other or of

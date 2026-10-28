@@ -358,6 +358,19 @@ export async function rollSkillCheck(actor, slug, dc, { createMessage } = {}) {
   return { degree, total: result.total, natural, modifier: result.total - natural, dc };
 }
 
+/**
+ * Roll a character's Perception (no DC). Returns { total, natural }. The roll is made without a chat card:
+ * a search must not announce its result to the table.
+ */
+export async function rollPerception(actor, { createMessage } = {}) {
+  const statistic = actor.perception;
+  const roll = statistic?.check?.roll ?? statistic?.roll;
+  if (!roll) throw new Error(`adapter.rollPerception: ${actor?.name ?? "actor"} has no Perception check (PF2e API changed?)`);
+  const result = await roll.call(statistic?.check?.roll ? statistic.check : statistic, { skipDialog: true, ...(createMessage === false ? { createMessage: false } : {}) });
+  if (typeof result?.total !== "number") throw new Error("adapter.rollPerception: could not read the total from PF2e's roll result");
+  return { total: result.total, natural: readNaturalD20(result) };
+}
+
 /** Roll the Crafting skill against a DC. Returns { degree, total, dc }. */
 export async function rollCraftCheck(actor, dc) {
   const { degree, total } = await rollSkillCheck(actor, "crafting", dc);

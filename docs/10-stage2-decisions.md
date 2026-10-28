@@ -103,12 +103,12 @@ Rule elements cannot apply a condition on a hit by themselves (`GrantItem` does 
 ## When a grant fails (policy)
 - The charge is burned first, deliberately: a crash can then never leave a free attempt.
 - But a crash is not a gathering attempt. If granting materials throws, the **charge is refunded** and any materials already given in the same gather are **taken back** (a new stack is deleted, a topped-up stack returns to its old quantity), so a gather is all-or-nothing.
-- If the refund itself fails, the error says so and gives the exact `api.refillNode(token, n)` to repair it.
+- If the refund itself fails, the error says so and tells the GM to set the node's `charges` (and `state`) back by hand. Nodes never refill (see Stage 9).
 - Charges and state are always written together and checked against the node schema, so a node can never be saved with 0 charges while "active" (or charges while "depleted").
 - A chat failure after a successful gather is logged; it does not undo or hide the result.
 
 ## Tools
-`gather`, `previewGather`, `nodeInfo`, `createNode`, `createAnchor`, `activateNode` (unhides the token), `refillNode`, `makeCorpseNode`, `clearNode`. Node tokens are kept out of the combat tracker.
+`gather`, `previewGather`, `nodeInfo`, `createNode`, `createAnchor`, `activateNode` (unhides the token), `makeCorpseNode`, `clearNode`. Node tokens are kept out of the combat tracker.
 
 ## Deferred
 Corpse yield derived from creature level/traits, auto-creating corpse nodes on death, decay ticking, the click-on-token dialog and the player relay (Stages 6 and 10).
@@ -219,6 +219,33 @@ Corpse yield derived from creature level/traits, auto-creating corpse nodes on d
 ## The audit
 - Loans and copies are formula changes, so the ledger tracks them; every GM write goes through the ledger-first commit. A new check compares loans with the commission list: a loan must belong to an accepted loan commission of that crafter, and an accepted loan commission must have its loan (unless the crafter owns the formula or a GM loan serves it).
 - NOT tracked, and not trackable: gold, materials and items (players earn and spend them outside the module and sheets are editable). Each commission keeps a movement log (fee, materials used and kept, payout, item, learn roll) so a dispute can be settled by hand.
+
+# Stage 9 decisions (downtime periods, hidden exploration, temporary nodes)
+
+`docs/11-hub-design.md` overrides older notes where they disagree.
+
+## Downtime periods
+- A period is a GM-started window: `api.downtime.start({ days, actorIds? })`, `addLate(actor)`, `end({ force })`, `state()`, `isOpen()`. State is one world setting `downtime` = `{ open, days, startedAt, endedAt?, participants: { actorId: { granted, spent, late? } }, log[] }`, written only by a GM client. No socket is needed: players only read it.
+- Default participants: each connected non-GM user's assigned character, else the player characters they own; the GM can pass anyone. `start` grants `days` to each through the audit commit and takes the grants back if any step fails.
+- `addLate` gives the most FREE (unreserved) days any participant still has. `end` is blocked (`{ blocked: n }`, nothing changes) while anything is queued, unless `{ force: true }`, which returns every queued item (days refunded) and then expires everyone's days. Presence is the reward: nothing carries over and nobody catches up. `end` is safe to run again if it stopped part-way.
+- The gate: anything that reserves days, and a commission craft step, is refused by `queue.submit` outside a period ("Downtime isn't open right now") or for a non-participant ("Downtime is open, but you weren't here for it"); it is checked again when the GM resolves (a survivor is refunded, not run). Commission requests, answers and cancels spend no time and are not gated.
+- GM tools (`api.research`, a direct commission craft, a GM calling `queue.submit` for someone) bypass the gate, and each bypass writes a "GM override" note to the audit ledger (world events under the key `_events`). `grantDays` / `setDays` stay GM tools. Start, late join and expiry appear in each character's ledger history and as world events.
+- **Craft and gather days are NOT built yet (deferred to Stage 10, deliberately).** Today craft is an instant GM tool, a commission craft spends no days and gathering spends charges, not days. `craftDays(recipe, reductions)` exists with the floor (every reduction is applied first, then the result is clamped to at least 1 day) but nothing calls it. Craft and gather become day-spending queue types in Stage 10 together with workshop tiers and upgrades, because craft days depend on them. The downtime gate already covers research, explore and the commission craft step.
+
+## Hidden exploration
+- A player queues `{ region, skill?, forceCombat? }` with `days` (at least the region's `daysRequired`, at most `EXPLORATION.maxDays`). Each day is one hidden roll for nodes (the degree rolls that day's node count); the ENCOUNTER is rolled ONCE per expedition (`forceCombat` makes it certain; otherwise the region's `danger` low/moderate/high gives 20/35/50%, placeholders; players see the label later, never the chance).
+- Nodes are NEW tokens, HIDDEN, placed at free anchors' positions, each with a Perception DC from the node's tier (`EXPLORATION.perceptionDcByTier`). Anchors stay and are marked `occupiedBy` until `clearMap`; with fewer free anchors than nodes the extra nodes are not placed (and the GM log says so). The scene is prepared, never launched.
+- Players are shown no odds or results: `previewExplore`, `simulateExplore`, `scenesFor`, `listAnchors` and `checkDefinition` are GM-only, there is no public chat line, and the encounter, expedition log, searches and revealed list live in the GM-written world setting `explorationState` (keyed by scene id), not in scene flags. **Honest limit:** Foundry cannot enforce read access to settings, flags or hidden tokens, so a player using the browser console could read them. This keeps everything off every screen; it is an honor system, like recipe visibility.
+
+## Spotting nodes: "Search the area"
+- Options considered: (A) PF2e's native Seek. My search found only third-party modules automating Seek against hidden tokens (for example PF2e Visioner); nothing confirmed core PF2e does, and it was not verified in Foundry. (B) A module action. **Chosen: B.** `api.searchArea(actor)`: a player's call is relayed with socketlib to the GM client (socketlib was declared from the start and is now used). The GM client rolls the character's Perception itself (so a player cannot send a better total), compares it with every hidden node's DC on the scene, and reveals the ones it beats.
+- One attempt per character per scene visit (`api.resetSearches(scene)` gives them back; `clearMap` does too; a new expedition does NOT reset them, and the GM summary says who already searched). The attempt is used up even if nothing was there.
+- The player's message is identical whether the search failed or nothing was there: "You search the area." followed only by what was spotted. It never says how many hidden nodes remain. "You have already searched this area." is the only other line.
+- A spotted node becomes visible to everyone on the scene, is listed in that scene's revealed list, and is added to the spotter's `knownNodes` flag. A hidden node cannot be gathered ("has not been found yet").
+
+## Temporary nodes, no respawn
+- Removed: `api.refillNode`, `refillRecord` and the refund hint that pointed at them. (There were no refill timers or "depleted until" states.) A depleted node stays depleted; the corpse `decayTimer` is unrelated and stays.
+- `api.clearMap(scene)` (GM): deletes every node token the module placed on the scene (explored nodes and nodes made from the shared Resource Node actor, found or hidden; each token's own synthetic actor goes with it), frees the anchors, removes this scene's entries from every character's `knownNodes`, and resets the scene's encounter, searches, revealed list and history. Returns `{ removed, found, hidden, skipped, knownNodesCleared }`. It never deletes the shared Resource Node actor, anchors, inventories, hand-made node tokens made from other actors, or corpse nodes (these are counted in `skipped`). Safe to run again. It replaces `resetScene`.
 
 # Notes for later stages
 

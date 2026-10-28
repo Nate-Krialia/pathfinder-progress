@@ -11,6 +11,7 @@
 import { COMMISSIONS, CRAFTING, MODULE_ID, RESEARCH_KEYS as K } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { commit } from "../audit/store.js";
+import { noteOverride } from "../downtime/store.js";
 import { prepareCraft } from "../crafting/prepare.js";
 import { resolveOutcome } from "../crafting/outcome.js";
 import { formatSummary } from "../crafting/summary.js";
@@ -361,6 +362,7 @@ async function craftLocked(api, id, options) {
   if (!ready.ok) throw new Error(`craft: cannot craft commission "${id}":\n- ${ready.errors.join("\n- ")}`);
   const { c, crafter, patronActor, recipe, plan, learn } = ready.ctx;
   const now = Date.now();
+  if (!options.gateChecked) await noteOverride(crafter, "commission craft"); // a direct GM craft goes around the downtime gate
 
   // ---- Rolls (nothing is written yet) ----
   let degree = options.degree;
@@ -555,7 +557,7 @@ export async function resolveStep(api, actor, action, pending, options = {}) {
       }
       case "craft": {
         const result = await craftForCommission(api, p.id, {
-          selection: p.selection, station: p.station, learnSkill: p.learnSkill, degree: options.degree, chat: options.chat, extraUpdate: pendingUpdate
+          selection: p.selection, station: p.station, learnSkill: p.learnSkill, degree: options.degree, chat: options.chat, extraUpdate: pendingUpdate, gateChecked: true
         });
         return { status: "resolved", message: `${result.outcome.made ? "delivered" : "failed, still open"} (${result.outcome.degree}).` };
       }

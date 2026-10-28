@@ -8,7 +8,7 @@ import { loadDefinitions } from "../scripts/data/validate.js";
 import * as research from "../scripts/research/store.js";
 import * as queue from "../scripts/queue/store.js";
 import * as audit from "../scripts/audit/store.js";
-import { asPage, seedRecords } from "./helpers.js";
+import { asPage, openDowntime, seedRecords } from "./helpers.js";
 
 const MODULE = "pathfinder-progress";
 const registry = loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -41,7 +41,7 @@ function install({ isGM = true, actors = [] } = {}) {
   const chat = [];
   globalThis.game = {
     user: { isGM }, actors: list, i18n: { localize: t => t },
-    settings: { get: (s, key) => clone(values[key]), set: async (s, key, value) => { if (values.failSet) throw new Error("set failed"); values[key] = clone(value); } }
+    settings: { get: (s, key) => (key === "downtime" ? openDowntime(list.map(a => a.id)) : clone(values[key])), set: async (s, key, value) => { if (values.failSet) throw new Error("set failed"); values[key] = clone(value); } }
   };
   globalThis.foundry = { utils: { randomID: () => `id${++idCounter}` } };
   globalThis.CONFIG = { PF2E: { skills: { crafting: { label: "Crafting" }, arcana: { label: "Arcana" }, occultism: { label: "Occultism" } } } };

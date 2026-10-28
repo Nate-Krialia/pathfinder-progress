@@ -24,3 +24,6 @@ A region record: `sceneTag`, `spawnTable` (weighted list of node types), `explor
 - Procedural map generation.
 - Fallback blank scene if a region has no tagged scenes (not decided; raise with the user before building).
 - Anchor counts per degree are placeholders in config.
+
+## Update (Stage 9, per `11-hub-design.md`)
+Exploration is now hidden: the player queues days (and optionally "force combat"); the GM client rolls in secret, the encounter once per expedition and nodes once per day; nodes are placed as hidden tokens at anchors with a Perception DC and found with "Search the area"; nodes are temporary and cleared with `api.clearMap`. See `10-stage2-decisions.md`, Stage 9.

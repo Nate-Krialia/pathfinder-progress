@@ -129,7 +129,9 @@ const region = obj({
     }
   }),
   explorationDC: int({ min: 1 }),
-  daysRequired: int({ min: 1 })
+  daysRequired: int({ min: 1 }),
+  // How dangerous the region is. Players see the label (later, in the Hub); the encounter chance behind it stays with the GM.
+  danger: optional(oneOf(["low", "moderate", "high"]))
 });
 
 // The spec names the override but not its shape; this is the minimal sensible one.
@@ -235,7 +237,14 @@ const node = obj({
   discoveredBy: arr(str()),
   // An override of the nodeType's ladder for this tier. Required for corpses.
   ladder: optional(ladderSpec),
-  decayTimer: optional(num({ min: 0 }))
+  decayTimer: optional(num({ min: 0 })),
+  // A hidden node an expedition placed: the Perception DC to spot it, the anchor it stands on, and whether it was found.
+  perceptionDC: optional(int({ min: 1 })),
+  anchorId: optional(str()),
+  revealed: optional(bool()),
+  revealedBy: optional(str()),
+  // On an anchor: the node token standing on it right now (cleared by clearMap).
+  occupiedBy: optional(str())
 }, {
   refine(value, path, errors) {
     const problem = (field, message) => errors.push({ field, message });
@@ -243,10 +252,11 @@ const node = obj({
 
     if (value.state === "anchor") {
       if (isCorpse) problem("source", 'a corpse cannot be an anchor');
-      for (const field of ["nodeType", "tier", "charges", "ladder", "decayTimer"]) {
+      for (const field of ["nodeType", "tier", "charges", "ladder", "decayTimer", "perceptionDC", "anchorId", "revealed", "revealedBy"]) {
         if (value[field] !== undefined) problem(field, "must not be set on an anchor (activate it first)");
       }
     } else {
+      if (value.occupiedBy !== undefined) problem("occupiedBy", "is only for anchors (it names the node standing on the anchor)");
       for (const field of ["nodeType", "tier", "charges"]) {
         if (value[field] === undefined) problem(field, `is required once a node is ${value.state}`);
       }

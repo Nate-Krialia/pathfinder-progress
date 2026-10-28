@@ -88,6 +88,14 @@ export async function bootstrap(actors = [...game.actors], now = Date.now()) {
   return added;
 }
 
+/** A note about something that is not one actor's data (a downtime start, a GM override). Kept under the ledger key "_events". */
+export async function logWorldEvent(text, now = Date.now()) {
+  requireGM("audit event");
+  const ledger = readLedger();
+  const history = [...(ledger._events?.history ?? []), { at: now, text }].slice(-100);
+  await writeLedger({ ...ledger, _events: { name: "World events", history } });
+}
+
 /** The GM accepts what an actor holds now: the ledger is reset to match it (history is kept). */
 export async function accept(actor, now = Date.now()) {
   requireGM("audit accept");

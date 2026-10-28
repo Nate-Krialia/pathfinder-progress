@@ -1,33 +1,31 @@
 /**
- * Chat text for expeditions. Pure. Players get a flavour line (no scene name, no node details,
- * so nothing is spoiled); the GM gets the full picture, whispered.
+ * Chat text for expeditions. Pure. An expedition's result is for the GM ONLY: players are not shown odds,
+ * degrees, encounters or node counts (docs/11-hub-design.md), so there is no public summary at all.
  */
 import { esc } from "../queue/review.js";
 
-const FLAVOUR = {
-  criticalSuccess: "The expedition returns with rich pickings and a clear idea of where everything lies.",
-  success: "The expedition finds a good number of promising spots.",
-  failure: "The expedition turns up only a few scattered finds.",
-  criticalFailure: "The expedition struggles badly and finds almost nothing."
-};
+const DEGREE_TEXT = { criticalSuccess: "critical success", success: "success", failure: "failure", criticalFailure: "critical failure" };
 
-const DEGREE_TEXT = { criticalSuccess: "Critical success", success: "Success", failure: "Failure", criticalFailure: "Critical failure" };
-
-export function formatPublicSummary({ actorName, regionName, degree, days }) {
-  return `<div class="pfp-explore"><h3>${esc(actorName)}: expedition to ${esc(regionName)}</h3>
-<p>${esc(FLAVOUR[degree])}</p><p><em>${days} downtime day(s) spent. The GM will prepare the scene when the party is ready.</em></p></div>`;
-}
-
-/** @param {{ plan: object, skillName: string, natural: number|null, total: number|null, dc: number, nodes: Array<{ name: string, nodeType: string, tier: number }> }} args */
-export function formatGmSummary({ actorName, regionName, plan, skillName, natural, total, dc, nodes }) {
-  const check = natural === null ? "forced result" : `${esc(skillName)}: natural ${natural}, total ${total} vs DC ${dc}`;
-  const list = nodes.map(n => `<li>${esc(n.name)}: ${esc(n.nodeType)}, tier ${n.tier}</li>`).join("");
+/**
+ * @param {object} args
+ * @param {object} args.plan        from planExpedition
+ * @param {Array<{ degree: string, natural: number|null, total: number|null }>} args.rolls  one per day
+ * @param {{ encounter: boolean, forced: boolean, chance: number }} args.encounter
+ * @param {Array<{ name: string, nodeType: string, tier: number, perceptionDC: number }>} args.nodes
+ * @param {string[]} args.searchedBy  characters who already searched this scene
+ */
+export function formatGmSummary({ actorName, regionName, plan, skillName, dc, rolls, encounter, nodes, searchedBy = [] }) {
+  const days = rolls.map((r, i) => `day ${i + 1}: ${r.natural === null ? "forced" : `natural ${r.natural}, total ${r.total} vs DC ${dc}`} = ${DEGREE_TEXT[r.degree]}`).join("; ");
+  const enc = encounter.forced ? "ENCOUNTER (the party forced combat)" : encounter.encounter ? `ENCOUNTER (rolled under ${Math.round(encounter.chance * 100)}%)` : `no encounter (${Math.round(encounter.chance * 100)}% chance)`;
+  const list = nodes.map(n => `<li>${esc(n.name)}: ${esc(n.nodeType)}, tier ${n.tier}, hidden, Perception DC ${n.perceptionDC}</li>`).join("");
   const notes = [];
-  if (plan.shortfall) notes.push(`Rolled ${plan.rolled} anchor(s) but the scene only had ${plan.freeBefore}; all were activated.`);
-  if (plan.scene.preparedCount) notes.push(`This scene was already prepared ${plan.scene.preparedCount} time(s) before.`);
+  if (plan.notPlaced) notes.push(`${plan.rolled} node(s) were found but only ${plan.freeBefore} free anchor(s) were left, so ${plan.notPlaced} were not placed.`);
+  if (plan.scene.preparedCount) notes.push(`This scene was prepared ${plan.scene.preparedCount} time(s) before.`);
   notes.push(`${plan.freeAfter} free anchor(s) left on the scene.`);
-  return `<div class="pfp-explore"><h3>GM: ${esc(actorName)}'s expedition to ${esc(regionName)}</h3>
-<p>${check}. <strong>${esc(DEGREE_TEXT[plan.degree])}</strong>: ${plan.activations.length} node(s) activated on <strong>${esc(plan.scene.name)}</strong>.</p>
-<ul>${list}</ul><p>${notes.map(esc).join(" ")}</p>
-<p><strong>Scene prepared, not launched.</strong> Activate it when the party is ready.</p></div>`;
+  if (searchedBy.length) notes.push(`Already searched here: ${searchedBy.join(", ")}. Reset with api.resetSearches(scene) so they can search the new nodes.`);
+  return `<div class="pfp-explore"><h3>GM only: ${esc(actorName)}'s expedition to ${esc(regionName)}</h3>
+<p>${esc(skillName)}, ${rolls.length} day(s) - ${esc(days)}.</p>
+<p><strong>${esc(enc)}</strong> on <strong>${esc(plan.scene.name)}</strong>.</p>
+<p>${nodes.length} hidden node(s) placed:</p><ul>${list}</ul><p>${notes.map(esc).join(" ")}</p>
+<p><strong>Scene prepared, not launched.</strong> Activate it when the party is ready; players find the nodes with api.searchArea.</p></div>`;
 }

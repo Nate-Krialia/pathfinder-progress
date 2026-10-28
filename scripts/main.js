@@ -11,9 +11,10 @@ import * as queueStore from "./queue/store.js";
 import { openReview, refreshReview } from "./queue/review-app.js";
 import * as exploration from "./exploration/store.js";
 import * as commissions from "./commissions/store.js";
+import * as downtime from "./downtime/store.js";
 import { suggestPayout } from "./commissions/commission.js";
 import { feeForTier } from "./stations/fees.js";
-import { AUDIT, COMMISSIONS, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS } from "./config.js";
+import { AUDIT, COMMISSIONS, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS } from "./config.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
 Hooks.once("init", () => {
@@ -71,6 +72,20 @@ Hooks.once("init", () => {
     config: true,
     type: Boolean,
     default: true
+  });
+
+  game.settings.register(MODULE_ID, DOWNTIME.stateSetting, {
+    scope: "world",
+    config: false,
+    type: new foundry.data.fields.ObjectField(),
+    default: {}
+  });
+
+  game.settings.register(MODULE_ID, EXPLORATION.stateSetting, {
+    scope: "world",
+    config: false,
+    type: new foundry.data.fields.ObjectField(),
+    default: {}
   });
 
   game.settings.register(MODULE_ID, COMMISSIONS.settingKey, {
@@ -135,7 +150,6 @@ Hooks.once("ready", async () => {
     createNode: (node, spec) => gathering.createNode(api, node, spec),
     createAnchor: (node, spec) => gathering.createAnchor(api, node, spec),
     activateNode: (node, spec) => gathering.activateNode(api, node, spec),
-    refillNode: (node, charges) => gathering.refillNode(api, node, charges),
     makeCorpseNode: (node, spec) => gathering.makeCorpseNode(api, node, spec),
     clearNode: node => gathering.clearNode(node),
     // Queue and review (see scripts/queue/store.js). Any owner can submit; the rest is GM only.
@@ -201,8 +215,12 @@ Hooks.once("ready", async () => {
     /** Anchors on a scene (default: the current one). { all: true } includes active and depleted nodes. */
     listAnchors: (scene, options) => exploration.listAnchors(scene, options),
     clearAnchors: (scene, options) => exploration.clearAnchors(scene, options),
-    /** Explored nodes back to hidden anchors, and forget the scene's prepared history. */
-    resetScene: scene => exploration.resetScene(api, scene),
+    /** GM: delete every node the module placed on a scene (found or hidden), free the anchors, clear known-node lists, the encounter and the searches. Nothing respawns. */
+    clearMap: scene => exploration.clearMap(scene),
+    /** GM: let every character search the scene again (one attempt per character per visit). */
+    resetSearches: scene => exploration.resetSearches(scene),
+    /** Players: search the area your character is in (the GM client rolls your Perception). Returns { message, spotted }. */
+    searchArea: actor => exploration.searchArea(actor),
     /** The shared Resource Node actor (created, or recreated with a notice, if missing). */
     ensureNodeActor: () => exploration.ensureNodeActor(),
     /** Before queueing: DC, your modifier per skill, the odds, the expected node count, and the scenes (GM only). */
@@ -211,6 +229,17 @@ Hooks.once("ready", async () => {
     simulateExplore: options => exploration.simulateExplore(api, options),
     /** Check a definition against the loaded ones without loading it. Returns its problems. */
     checkDefinition: record => exploration.checkDefinition(api, record),
+    // Downtime periods (see scripts/downtime/store.js). Only a GM client changes the period.
+    downtime: {
+      /** GM: open a period. { days, actorIds? } (default: connected players' characters). */
+      start: options => downtime.start(options),
+      /** GM: close it. Returns { blocked: n } (changing nothing) while anything is queued, unless { force: true }. */
+      end: options => downtime.end(options, { queueCount: () => queueStore.list().length, rejectAll: () => queueStore.rejectAll() }),
+      /** GM: add a late joiner with the most free days any participant still has. */
+      addLate: actor => downtime.addLate(actor),
+      state: () => downtime.state(),
+      isOpen: () => downtime.isOpen()
+    },
     // Research and formulas (GM tools; see scripts/research/store.js)
     /** Downtime days the actor has. Stage 6 replaces this counter with queue reservation. */
     days: actor => researchStore.days(actor),
@@ -308,4 +337,11 @@ Hooks.on("updateActor", (actor, changes, options, userId) => {
   if (!api) return;
   const run = userId === game.user.id ? () => refreshReview() : () => announce(api);
   Promise.resolve().then(run).catch(err => console.error(`${MODULE_ID} |`, err));
+});
+
+// The search relay: a player's "Search the area" asks the GM client to roll and compare (see exploration/store.js).
+Hooks.once("socketlib.ready", () => {
+  const socket = globalThis.socketlib.registerModule(MODULE_ID);
+  socket.register("search", options => exploration.runSearch(options));
+  exploration.setSocket(socket);
 });

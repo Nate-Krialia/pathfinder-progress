@@ -150,7 +150,15 @@ export const EXPLORATION = {
   anchorImg: "icons/svg/mystery-man.svg",
   defaultNodeImg: "icons/svg/item-bag.svg",
   // Random anchor placement keeps this many grid squares away from the scene edge.
-  placePaddingSquares: 1
+  placePaddingSquares: 1,
+  // An expedition lasts at least the region's daysRequired and at most this many days.
+  maxDays: 10,
+  // Chance of an encounter, rolled ONCE per expedition, by the region's danger. forceCombat makes it certain.
+  encounterChance: { low: 0.2, moderate: 0.35, high: 0.5 },
+  // Perception DC to spot a hidden node, by the node's tier.
+  perceptionDcByTier: { 1: 14, 2: 17, 3: 20, 4: 24, 5: 28 },
+  // GM-only per-scene state (encounter, searches, revealed nodes, expedition log): a world setting keyed by scene id.
+  stateSetting: "explorationState"
 };
 
 /** The shared neutral actor every placed node token is made from (found by flag, never by name). */
@@ -170,4 +178,26 @@ export const COMMISSIONS = {
   payoutMargin: 0.25,
   // Entries kept in a commission's movement log.
   logMax: 50
+};
+
+/** Downtime periods (docs/11-hub-design.md). */
+export const DOWNTIME = {
+  stateSetting: "downtime",
+  // A period grants at least 1 and at most this many days.
+  maxDays: 30,
+  logMax: 50,
+  // Plain-language reasons shown to players.
+  reasons: {
+    closed: "Downtime isn't open right now",
+    notParticipant: "Downtime is open, but you weren't here for it"
+  }
+};
+
+/** Craft time (placeholders; workshop tiers and upgrades arrive in Stage 10). */
+export const CRAFT_DAYS = {
+  // A craft takes 1 day, plus 1 more for every `levelsPerExtraDay` levels of the recipe.
+  baseDays: 1,
+  levelsPerExtraDay: 2,
+  // No reduction can take a craft below this many days.
+  minDays: 1
 };

@@ -25,7 +25,7 @@ Higher-tier nodes also list higher-tier materials on their ladder (e.g. T2 base,
 2. **Pass/fail on the base rung.** Failure yields nothing.
 3. On success: grant the base material (quantity dice, e.g. 1d4 iron).
 4. **For each higher rung, run a hidden roll** (d20 + the same modifier) against that rung's DC. Success grants that rung's quantity dice (e.g. 1d2 silver, 1 starmetal). The visible roll does NOT automatically unlock higher rungs.
-5. **Every gather attempt, pass or fail, spends one charge.** Depleted nodes cannot be gathered.
+5. **Every gather attempt, pass or fail, spends one charge.** Depleted nodes cannot be gathered, and **nodes never refill** (see `10-stage2-decisions.md`, Stage 9). A hidden node found by an expedition cannot be gathered until it is spotted.
 
 Hidden rolls run on the GM client (via socket relay). No guaranteed floor beyond the base material.
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { activateRecord, makeAnchorRecord, makeCorpseRecord, makeNodeRecord, normalizeNode, refillRecord } from "../scripts/gathering/node.js";
+import { activateRecord, makeAnchorRecord, makeCorpseRecord, makeNodeRecord, normalizeNode } from "../scripts/gathering/node.js";
 import { formatGatherSummary } from "../scripts/gathering/summary.js";
 import { readNaturalD20 } from "../scripts/adapter/pf2e.js";
 import { validateRecord } from "../scripts/data/validate.js";
@@ -131,20 +131,6 @@ test("activation can mark the node as explored and set charges and region", () =
   const anchor = makeAnchorRecord({}, registry).record;
   const { record } = activateRecord(anchor, { nodeType: "ore", tier: 1, charges: 5, source: "explored", region: "hills" }, registry);
   assert.deepEqual([record.source, record.charges, record.region], ["explored", 5, "hills"]);
-});
-
-test("refilling brings a depleted node back to active", () => {
-  const depleted = { ...ACTIVE, state: "depleted", charges: 0 };
-  const { ok, record } = refillRecord(depleted, undefined, registry);
-  assert.ok(ok);
-  assert.deepEqual([record.state, record.charges], ["active", 3], "defaults to the nodeType's charges");
-  assert.equal(refillRecord(depleted, 8, registry).record.charges, 8);
-  assert.equal(refillRecord({ ...ACTIVE, charges: 1 }, 3, registry).record.charges, 3, "an active node can be topped up too");
-});
-
-test("refilling refuses anchors and bad amounts", () => {
-  assert.match(refillRecord(ANCHOR, 3, registry).errors[0], /anchor has no charges/);
-  for (const bad of [0, -1, 1.5]) assert.match(refillRecord(ACTIVE, bad, registry).errors[0], /at least 1/);
 });
 
 test("a corpse node needs a ladder and a decay timer", () => {

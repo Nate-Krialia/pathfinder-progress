@@ -188,9 +188,7 @@ test("a consistent node record at every step of a node's life", async () => {
     assertConsistent(token);
   }
   assert.deepEqual([record(token).charges, record(token).state], [0, "depleted"]);
-  await store.refillNode(api, token, 2);
-  assertConsistent(token);
-  assert.deepEqual([record(token).charges, record(token).state], [2, "active"]);
+  assert.equal(store.refillNode, undefined, "nodes never refill");
 });
 
 // Failure paths: a grant that crashes -------------------------------------------------------------------
@@ -241,7 +239,7 @@ test("if the refund itself fails, the error says so and the node is still consis
   token.setFlag = async (...args) => { writes++; if (writes === 2) throw new Error("flag write failed"); return realSetFlag(...args); }; // 1st = burn, 2nd = refund
   await assert.rejects(
     store.gather({ actor, node: token, skill: "athletics", degree: "success", chat: false }, api),
-    err => /charge could NOT be refunded/.test(err.message) && /api\.refillNode\(token, 3\)/.test(err.message) && /now has 2 charge/.test(err.message)
+    err => /charge could NOT be refunded/.test(err.message) && /set flags\.pathfinder-progress\.node\.charges back to 3/.test(err.message) && /now has 2 charge/.test(err.message)
   );
   assert.deepEqual([record(token).charges, record(token).state], [2, "active"], "burned but consistent: never 0 charges while active");
   assertConsistent(token);
@@ -339,6 +337,5 @@ test("GM-only: a non-GM cannot gather or edit nodes", async () => {
   const token = await oreNode();
   globalThis.game.user.isGM = false;
   await assert.rejects(store.gather({ actor, node: token, skill: "athletics", degree: "success" }, api), /GM only/);
-  await assert.rejects(store.refillNode(api, token, 3), /GM only/);
   await assert.rejects(store.createNode(api, fakeToken(), orePlaced()), /GM only/);
 });

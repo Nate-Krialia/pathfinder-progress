@@ -12,10 +12,10 @@ import { loadDefinitions } from "../data/validate.js";
 import { DEFINITION_KINDS } from "../data/schemas.js";
 import { makeAnchorRecord, makeNodeRecord } from "../gathering/node.js";
 import { pickSkill } from "../gathering/resolve.js";
-import { isNodeToken, saveNodeRecord } from "../gathering/store.js";
-import { exploreOdds, planExpedition, simulateExpeditions } from "./plan.js";
-import { activationUpdate, anchorTokenData, nodeTokenData, randomPositions, revertUpdate } from "./tokens.js";
-import { formatGmSummary, formatPublicSummary } from "./summary.js";
+import { exploreOdds, planExpedition, rollEncounter, simulateExpeditions } from "./plan.js";
+import { anchorTokenData, nodeTokenData, occupyUpdate, randomPositions, revealUpdate, unrevealUpdate, vacateUpdate } from "./tokens.js";
+import { formatGmSummary } from "./summary.js";
+import { SEARCHED_ALREADY_TEXT, SEARCH_TEXT, searchMessage, spottedIds } from "./search.js";
 
 /** A request that can never succeed as stated (the region no longer exists, the skill is not allowed). The queue refunds these. */
 export class ExploreRefused extends Error {}
@@ -51,25 +51,44 @@ export async function untagScene(scene, tag) {
   return next;
 }
 
-/** The free anchors on a scene: [{ id, name, record, doc }]. */
+// GM-only per-scene state ---------------------------------------------------------------------------------
+// One world setting keyed by scene id: { encounter, prepared[], searches{}, revealed[] }. Nothing about an
+// expedition is kept in a scene flag or shown in chat. (Foundry cannot enforce read access to settings or
+// flags: this keeps the information out of every screen, which is an honor system, like recipe visibility.)
+const emptySceneState = () => ({ encounter: null, prepared: [], searches: {}, revealed: [] });
+const readAllState = () => {
+  const raw = game.settings.get(MODULE_ID, EXPLORATION.stateSetting);
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? structuredClone(raw) : {};
+};
+export const sceneState = sceneId => ({ ...emptySceneState(), ...(readAllState()[sceneId] ?? {}) });
+async function writeSceneState(sceneId, state) {
+  const all = readAllState();
+  if (state === null) delete all[sceneId];
+  else all[sceneId] = state;
+  await game.settings.set(MODULE_ID, EXPLORATION.stateSetting, all);
+}
+
+/** The free anchors on a scene (not occupied by a node): [{ id, name, x, y, record, doc }]. */
 function freeAnchors(scene) {
   return [...scene.tokens].map(doc => ({ doc, record: readRecord(doc) }))
-    .filter(({ record }) => record?.state === "anchor")
-    .map(({ doc, record }) => ({ id: doc.id, name: doc.name, record, doc }));
+    .filter(({ record }) => record?.state === "anchor" && !record.occupiedBy)
+    .map(({ doc, record }) => ({ id: doc.id, name: doc.name, x: doc.x, y: doc.y, record, doc }));
 }
+const countAnchors = scene => [...scene.tokens].filter(doc => readRecord(doc)?.state === "anchor").length;
 
 /** Every scene tagged with the region's tag, with its free anchors. */
 export function poolFor(region) {
   return [...game.scenes].filter(scene => tagsOf(scene).includes(region.sceneTag)).map(scene => ({
-    id: scene.id, name: scene.name, anchors: freeAnchors(scene), preparedCount: listOf(scene.getFlag(MODULE_ID, EXPLORATION.preparedFlag)).length
+    id: scene.id, name: scene.name, anchors: freeAnchors(scene), totalAnchors: countAnchors(scene), preparedCount: sceneState(scene.id).prepared.length
   }));
 }
 
-/** The scenes tagged for a region, with how many free anchors each has. */
+/** The scenes tagged for a region, with how many free anchors each has. GM only. */
 export function scenesFor(api, regionId) {
+  requireGM("scenesFor");
   const region = api.definitions?.region.get(regionId);
   if (!region) throw new Error(`scenesFor: unknown region "${regionId}" (known: ${[...(api.definitions?.region.keys() ?? [])].join(", ") || "none"})`);
-  return poolFor(region).map(s => ({ id: s.id, name: s.name, freeAnchors: s.anchors.length, timesPrepared: s.preparedCount }));
+  return poolFor(region).map(s => ({ id: s.id, name: s.name, freeAnchors: s.anchors.length, totalAnchors: s.totalAnchors, timesPrepared: s.preparedCount }));
 }
 
 // Resource Node actor ---------------------------------------------------------------------------------
@@ -150,11 +169,13 @@ export async function placeNode(api, scene, { nodeType: typeId, tier, x, y, char
 
 /** The node tokens on a scene. By default only anchors; { all: true } includes active and depleted nodes. */
 export function listAnchors(scene, { all = false } = {}) {
+  requireGM("listAnchors");
   const doc = sceneOf(scene);
   return [...doc.tokens].map(t => ({ t, record: readRecord(t) })).filter(({ record }) => record && (all || record.state === "anchor"))
     .map(({ t, record }) => ({
       id: t.id, name: t.name, state: record.state, source: record.source, nodeType: record.nodeType ?? null, tier: record.tier ?? null,
-      charges: record.charges ?? null, region: record.region ?? null, x: t.x, y: t.y, hidden: t.hidden
+      charges: record.charges ?? null, region: record.region ?? null, x: t.x, y: t.y, hidden: t.hidden,
+      occupiedBy: record.occupiedBy ?? null, revealed: record.state === "anchor" ? null : record.revealed !== false, perceptionDC: record.perceptionDC ?? null
     }));
 }
 
@@ -162,33 +183,59 @@ export function listAnchors(scene, { all = false } = {}) {
 export async function clearAnchors(scene, { confirm } = {}) {
   requireGM("clearAnchors");
   const doc = sceneOf(scene);
-  const ids = freeAnchors(doc).map(a => a.id);
+  const ids = [...doc.tokens].filter(t => readRecord(t)?.state === "anchor").map(t => t.id);
   if (confirm !== true) throw new Error(`clearAnchors: this would delete ${ids.length} anchor token(s) from "${doc.name}". Run it again with { confirm: true } to go ahead.`);
   if (ids.length) await doc.deleteEmbeddedDocuments("Token", ids);
   return ids.length;
 }
 
-/** Turn explored nodes back into hidden anchors and forget the scene's prepared history. Returns how many were reset. */
-export async function resetScene(api, scene) {
-  requireGM("resetScene");
+/** Let every character search the scene again (the one-attempt-per-visit rule). Returns how many attempts were cleared. */
+export async function resetSearches(scene) {
+  requireGM("resetSearches");
   const doc = sceneOf(scene);
-  let count = 0;
-  for (const token of [...doc.tokens]) {
-    const record = readRecord(token);
-    if (!record || record.source !== "explored") continue;
-    const made = makeAnchorRecord({ source: "placed", region: record.region }, api.definitions);
-    if (!made.ok) throw new Error(`resetScene: ${made.errors.join("; ")}`);
-    await saveNodeRecord(token, made.record);
-    await token.update({ hidden: true, name: EXPLORATION.anchorName, "texture.src": EXPLORATION.anchorImg });
-    count++;
-  }
-  await doc.unsetFlag(MODULE_ID, EXPLORATION.preparedFlag);
+  const state = sceneState(doc.id);
+  const count = Object.keys(state.searches).length;
+  if (count) await writeSceneState(doc.id, { ...state, searches: {} });
   return count;
 }
 
-// Odds and simulation --------------------------------------------------------------------------------------
-/** Before queueing: the DC, your modifier, the odds, the expected node count, and the scenes (GM only sees scenes). */
+/**
+ * Clear the map: delete every node token the module placed here (found or still hidden; the token's own
+ * actor goes with it), free the anchors they stood on, take the nodes out of every character's known-node
+ * list, and reset the scene's encounter, searches and expedition history. Never touches the shared
+ * Resource Node actor, anchors, hand-made node tokens, corpse nodes or anything already in inventories.
+ * Safe to run again if it stopped part-way. Returns { removed, found, hidden, skipped, knownNodesCleared }.
+ */
+export async function clearMap(scene) {
+  requireGM("clearMap");
+  const doc = sceneOf(scene);
+  const nodeActorId = game.settings.get(MODULE_ID, NODE_ACTOR.setting) || null;
+  const tokens = [...doc.tokens].map(t => ({ t, record: readRecord(t) })).filter(({ record }) => record && record.state !== "anchor");
+  const mine = tokens.filter(({ t, record }) => record.source === "explored" || (nodeActorId && t.actorId === nodeActorId));
+  const found = mine.filter(({ record }) => record.revealed !== false).length;
+  const hidden = mine.length - found;
+
+  if (mine.length) await doc.deleteEmbeddedDocuments("Token", mine.map(({ t }) => t.id));
+  const occupied = [...doc.tokens].filter(t => readRecord(t)?.state === "anchor" && readRecord(t).occupiedBy);
+  if (occupied.length) await doc.updateEmbeddedDocuments("Token", occupied.map(t => vacateUpdate(t.id)));
+
+  let knownNodesCleared = 0;
+  for (const actor of game.actors) {
+    const known = listOf(actor.getFlag(MODULE_ID, "knownNodes"));
+    const kept = known.filter(entry => entry.sceneId !== doc.id);
+    if (kept.length !== known.length) {
+      knownNodesCleared += known.length - kept.length;
+      await actor.update({ [`flags.${MODULE_ID}.knownNodes`]: kept });
+    }
+  }
+  await writeSceneState(doc.id, null);
+  return { removed: mine.length, found, hidden, skipped: tokens.length - mine.length, knownNodesCleared };
+}
+
+// Odds and simulation (GM only: players are never shown odds or results) ------------------------------------------
+/** The DC, the GM-side modifier per skill, the odds, the expected nodes per day, and the scenes. GM only. */
 export function previewExplore(api, actor, regionId, skill) {
+  requireGM("previewExplore");
   const region = api.definitions?.region.get(regionId);
   if (!region) throw new Error(`previewExplore: unknown region "${regionId}" (known: ${[...(api.definitions?.region.keys() ?? [])].join(", ") || "none"})`);
   const skills = skill ? [skill] : region.skillWhitelist;
@@ -199,21 +246,23 @@ export function previewExplore(api, actor, regionId, skill) {
     return modifier === null ? { skill: slug, modifier: null } : { skill: slug, modifier, ...exploreOdds(modifier, region.explorationDC) };
   });
   return {
-    region: { id: region.id, name: region.name, dc: region.explorationDC, days: region.daysRequired },
+    region: { id: region.id, name: region.name, dc: region.explorationDC, minDays: region.daysRequired, danger: region.danger ?? "moderate", encounterChance: EXPLORATION.encounterChance[region.danger ?? "moderate"] },
     perSkill,
-    scenes: game.user.isGM ? scenesFor(api, regionId) : null
+    scenes: scenesFor(api, regionId)
   };
 }
 
-/** Simulate many expeditions (no scene, no writes) and compare observed numbers with expected. */
-export function simulateExplore(api, { region: regionId, runs = 5000, degree, modifier } = {}) {
+/** Simulate many expeditions (no scene, no writes) and compare observed numbers with expected. GM only. */
+export function simulateExplore(api, { region: regionId, runs = 5000, degree, modifier, days = 1, forceCombat = false } = {}) {
+  requireGM("simulateExplore");
   const region = api.definitions?.region.get(regionId);
   if (!region) throw new Error(`simulateExplore: unknown region "${regionId}"`);
-  return simulateExpeditions({ region, runs, degree, modifier, rng });
+  return simulateExpeditions({ region, runs, degree, modifier, days, forceCombat, rng });
 }
 
 /** Check a definition against the loaded ones WITHOUT loading it. Returns the problems found in it. */
 export function checkDefinition(api, record) {
+  requireGM("checkDefinition");
   const page = data => "```json\n" + JSON.stringify(data) + "\n```";
   const sources = DEFINITION_KINDS.flatMap(kind => [...(api.definitions?.[kind].values() ?? [])].map(d => ({ pack: "loaded", entry: d.id, text: page(d) })));
   const { errors } = loadDefinitions([...sources, { pack: "console", entry: record?.id ?? "(candidate)", text: page(record) }]);
@@ -221,7 +270,7 @@ export function checkDefinition(api, record) {
 }
 
 // The expedition ---------------------------------------------------------------------------------------------
-/** What the review window needs to describe an explore action. */
+/** What the review window needs to describe an explore action (GM only: the queue is resolved by a GM). */
 export function describeInfo(api, actor, action) {
   const region = api.definitions?.region.get(action.params?.region);
   if (!region) return { region: null };
@@ -229,79 +278,186 @@ export function describeInfo(api, actor, action) {
   try { modifier = adapter.getSkillModifier(actor, action.params.skill); } catch { /* the actor lacks this skill */ }
   const odds = modifier === null ? null : exploreOdds(modifier, region.explorationDC);
   const pool = poolFor(region);
-  return { region, skill: action.params.skill, modifier, odds, scenes: pool.length, freeAnchors: pool.reduce((n, s) => n + s.anchors.length, 0) };
+  return {
+    region, skill: action.params.skill, modifier, odds, scenes: pool.length,
+    freeAnchors: pool.reduce((n, s) => n + s.anchors.length, 0), totalAnchors: pool.reduce((n, s) => n + s.totalAnchors, 0)
+  };
 }
 
 /**
- * Roll the check and plan the expedition. Writes nothing. Throws ExploreRefused when the request can
- * never succeed (region gone, skill not allowed); any other Error leaves the action queued for a Retry.
- * @param {{ degree?: string }} options  degree: TEST OVERRIDE for the check
+ * Roll the checks and plan the expedition. Writes nothing. One hidden check per day, one encounter roll for the
+ * whole trip. Throws ExploreRefused when the request can never succeed (region gone, skill not allowed); any other
+ * Error leaves the action queued for a Retry.
+ * @param {{ degree?: string|string[] }} options  degree: TEST OVERRIDE for the checks (one for every day, or one per day)
  */
 export async function planRun(api, actor, action, { degree } = {}) {
   const region = api.definitions?.region.get(action.params?.region);
   if (!region) throw new ExploreRefused(`region "${action.params?.region}" no longer exists`);
   const picked = pickSkill(region.skillWhitelist, action.params.skill, `"${region.name}"`, "exploration");
   if (!picked.ok) throw new ExploreRefused(picked.error);
+  const days = action.daysReserved;
 
-  let roll;
+  const rolls = [];
   if (degree !== undefined) {
-    const forced = adapter.normalizeDegree(degree);
-    if (!forced) throw new Error(`unknown degree "${degree}"`);
-    roll = { degree: forced, natural: null, total: null };
+    const forced = Array.isArray(degree) ? degree : Array(days).fill(degree);
+    if (forced.length < days) throw new Error(`${forced.length} forced degree(s) given for ${days} day(s)`);
+    for (const d of forced.slice(0, days)) {
+      const normalized = adapter.normalizeDegree(d);
+      if (!normalized) throw new Error(`unknown degree "${d}"`);
+      rolls.push({ degree: normalized, natural: null, total: null });
+    }
   } else {
-    roll = await adapter.rollSkillCheck(actor, picked.skill, region.explorationDC, { createMessage: false });
+    for (let day = 0; day < days; day++) {
+      const roll = await adapter.rollSkillCheck(actor, picked.skill, region.explorationDC, { createMessage: false });
+      rolls.push({ degree: roll.degree, natural: roll.natural, total: roll.total });
+    }
   }
 
-  const result = planExpedition({ region, registry: api.definitions, degree: roll.degree, scenes: poolFor(region), rng });
+  const encounter = rollEncounter({ danger: region.danger ?? "moderate", forceCombat: action.params.forceCombat === true, rng });
+  const result = planExpedition({ region, registry: api.definitions, degrees: rolls.map(r => r.degree), scenes: poolFor(region), rng });
   if (!result.ok) throw new Error(result.errors.join("; "));
-  return { region, skill: picked.skill, roll, plan: result.plan };
+  return { region, skill: picked.skill, rolls, encounter, plan: result.plan, days };
+}
+
+async function rollBack(undos) {
+  const failures = [];
+  for (const undo of [...undos].reverse()) {
+    try { await undo.run(); } catch (error) { failures.push(`${undo.what} (${error.message})`); }
+  }
+  if (failures.length) throw new Error(`could not undo: ${failures.join("; ")}. Check the scene by hand (api.clearMap clears what an expedition placed).`);
 }
 
 /**
- * Write the plan to the scene: the activated tokens in ONE batched update, then the scene's
- * prepared log. Returns an async undo() that puts everything back. If the log write fails the
- * tokens are reverted before the error propagates.
+ * Write the plan to the scene: the hidden node tokens (new tokens at the anchors' positions), the anchors marked
+ * occupied, then the scene's GM-only state. Returns an async undo() that puts everything back; a failure part-way
+ * undoes the earlier writes before the error propagates.
  */
 export async function applyPlan(api, actor, run) {
   const scene = sceneOf(run.plan.scene.id);
-  const before = [];
-  const updates = [];
   for (const act of run.plan.activations) {
-    const token = scene.tokens.get(act.tokenId);
-    const record = readRecord(token);
-    if (record?.state !== "anchor") throw new Error(`anchor "${act.tokenId}" on ${scene.name} is no longer a free anchor; try again`);
-    before.push({ tokenId: act.tokenId, before: { hidden: token.hidden, name: token.name, img: token.texture.src, record: structuredClone(record), addedKeys: Object.keys(act.record).filter(k => !(k in record)) } });
-    updates.push(activationUpdate({ tokenId: act.tokenId, record: act.record, nodeType: api.definitions.nodeType.get(act.nodeType), currentName: token.name }));
+    const anchor = scene.tokens.get(act.anchorId);
+    if (readRecord(anchor)?.state !== "anchor" || readRecord(anchor)?.occupiedBy) throw new Error(`anchor "${act.anchorId}" on ${scene.name} is no longer free; try again`);
   }
-  const revertTokens = () => scene.updateEmbeddedDocuments("Token", before.map(revertUpdate));
-  await scene.updateEmbeddedDocuments("Token", updates);
-
-  const previous = listOf(scene.getFlag(MODULE_ID, EXPLORATION.preparedFlag));
-  const entry = { at: Date.now(), actorId: actor.id, actorName: actor.name, region: run.region.id, degree: run.plan.degree, rolled: run.plan.rolled, nodes: run.plan.activations.length };
+  const nodeActor = await ensureNodeActor();
+  const undos = [];
+  const previousState = sceneState(scene.id);
+  const hadState = scene.id in readAllState();
   try {
-    await scene.setFlag(MODULE_ID, EXPLORATION.preparedFlag, [...previous, entry].slice(-EXPLORATION.preparedLogMax));
+    let created = [];
+    if (run.plan.activations.length) {
+      const data = await Promise.all(run.plan.activations.map(act =>
+        tokenObject(nodeActor, nodeTokenData({ x: act.x, y: act.y, record: act.record, nodeType: api.definitions.nodeType.get(act.nodeType), hidden: true }))));
+      created = await scene.createEmbeddedDocuments("Token", data);
+      undos.push({ what: "the new node tokens", run: () => scene.deleteEmbeddedDocuments("Token", created.map(t => t.id)) });
+      const occupy = run.plan.activations.map((act, i) => occupyUpdate(act.anchorId, created[i].id));
+      await scene.updateEmbeddedDocuments("Token", occupy);
+      undos.push({ what: "the occupied anchors", run: () => scene.updateEmbeddedDocuments("Token", run.plan.activations.map(act => vacateUpdate(act.anchorId))) });
+    }
+    const entry = { at: Date.now(), actorName: actor.name, region: run.region.id, days: run.days, placed: run.plan.activations.length, encounter: run.encounter.encounter };
+    const next = {
+      ...previousState,
+      encounter: { active: run.encounter.encounter, forced: run.encounter.forced, at: entry.at, by: actor.name },
+      prepared: [...previousState.prepared, entry].slice(-EXPLORATION.preparedLogMax)
+    };
+    await writeSceneState(scene.id, next);
+    undos.push({ what: "the scene's expedition state", run: () => writeSceneState(scene.id, hadState ? previousState : null) });
   } catch (error) {
-    await revertTokens();
+    await rollBack(undos).catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
     throw error;
   }
-  return async function undo() {
-    await revertTokens();
-    if (previous.length) await scene.setFlag(MODULE_ID, EXPLORATION.preparedFlag, previous);
-    else await scene.unsetFlag(MODULE_ID, EXPLORATION.preparedFlag);
-  };
+  return () => rollBack(undos);
 }
 
-/** Post the public flavour line and the GM-only details. A chat failure never undoes the expedition. */
-export async function postExploreChat(api, actor, run, days) {
+/** Tell the GMs what happened. Players are told nothing here: their result stays with the GM. */
+export async function postExploreChat(api, actor, run) {
   const scene = sceneOf(run.plan.scene.id);
-  const nodes = run.plan.activations.map(a => ({ name: api.definitions.nodeType.get(a.nodeType).name, nodeType: a.nodeType, tier: a.tier }));
+  const nodes = run.plan.activations.map(a => ({ name: api.definitions.nodeType.get(a.nodeType).name, nodeType: a.nodeType, tier: a.tier, perceptionDC: a.perceptionDC }));
+  const searchedBy = Object.keys(sceneState(scene.id).searches).map(id => game.actors.get(id)?.name ?? id);
   try {
-    await ChatMessage.create({ speaker: ChatMessage.getSpeaker({ actor }), content: formatPublicSummary({ actorName: actor.name, regionName: run.region.name, degree: run.plan.degree, days }) });
     await ChatMessage.create({
       whisper: ChatMessage.getWhisperRecipients("GM").map(u => u.id),
-      content: formatGmSummary({ actorName: actor.name, regionName: run.region.name, plan: run.plan, skillName: adapter.skillLabel(run.skill), natural: run.roll.natural, total: run.roll.total, dc: run.region.explorationDC, nodes })
+      content: formatGmSummary({ actorName: actor.name, regionName: run.region.name, plan: run.plan, skillName: adapter.skillLabel(run.skill), dc: run.region.explorationDC, rolls: run.rolls, encounter: run.encounter, nodes, searchedBy })
     });
   } catch (error) {
     console.error(`${MODULE_ID} | the expedition was prepared on "${scene.name}", but the chat message failed`, error);
+  }
+}
+
+// Searching ---------------------------------------------------------------------------------------------------
+let socket = null;
+/** Called once socketlib is ready (main.js). */
+export function setSocket(s) { socket = s; }
+
+const ownerUserIds = actor => [...game.users].filter(u => !u.isGM && actor.testUserPermission(u, "OWNER")).map(u => u.id);
+
+/**
+ * Run a search on the GM client: roll the character's Perception HERE (so a player cannot report a better total),
+ * compare it to the Perception DCs of the scene's hidden nodes, reveal what it beats, and tell the player only what
+ * was spotted. One attempt per character per scene visit; the attempt is used up even if nothing was there.
+ * @returns {{ message: string, spotted: string[] }}
+ */
+export async function runSearch({ actorId, sceneId, userId }) {
+  requireGM("runSearch");
+  const actor = game.actors.get(actorId);
+  const scene = game.scenes.get(sceneId);
+  const user = game.users.get(userId);
+  const generic = { message: SEARCH_TEXT, spotted: [] };
+  if (!actor || !scene || !user) return generic;
+  if (!user.isGM && !actor.testUserPermission(user, "OWNER")) return { message: "You can only search with a character you own.", spotted: [] };
+  if (![...scene.tokens].some(t => t.actorId === actor.id)) return generic; // not on this scene: nothing happens, nothing is used up
+
+  const state = sceneState(scene.id);
+  if (state.searches[actor.id]) return { message: SEARCHED_ALREADY_TEXT, spotted: [] };
+  await writeSceneState(scene.id, { ...state, searches: { ...state.searches, [actor.id]: Date.now() } }); // used up first: a crash cannot give a free retry
+
+  const { total, natural } = await adapter.rollPerception(actor, { createMessage: false });
+  const hiddenNodes = [...scene.tokens].map(t => ({ t, record: readRecord(t) }))
+    .filter(({ record }) => record && record.state !== "anchor" && record.revealed === false)
+    .map(({ t, record }) => ({ id: t.id, dc: record.perceptionDC, token: t, record }));
+  const spottedNodes = hiddenNodes.filter(n => spottedIds(total, hiddenNodes).includes(n.id));
+
+  if (spottedNodes.length) {
+    const now = Date.now();
+    const known = listOf(actor.getFlag(MODULE_ID, "knownNodes"));
+    const afterState = sceneState(scene.id);
+    const entries = spottedNodes.map(n => ({ sceneId: scene.id, tokenId: n.id, name: n.token.name, nodeType: n.record.nodeType, tier: n.record.tier, at: now }));
+    await writeSceneState(scene.id, { ...afterState, revealed: [...afterState.revealed, ...entries.map(e => ({ tokenId: e.tokenId, name: e.name, nodeType: e.nodeType, by: actor.name, at: now }))] });
+    try {
+      await actor.update({ [`flags.${MODULE_ID}.knownNodes`]: [...known, ...entries] });
+      await scene.updateEmbeddedDocuments("Token", spottedNodes.map(n => revealUpdate(n.id, actor.name)));
+    } catch (error) {
+      await actor.update({ [`flags.${MODULE_ID}.knownNodes`]: known }).catch(() => {});
+      await writeSceneState(scene.id, afterState).catch(() => {});
+      throw error;
+    }
+  }
+
+  const names = spottedNodes.map(n => n.token.name);
+  const message = searchMessage(names);
+  try {
+    const owners = ownerUserIds(actor);
+    if (owners.length) await ChatMessage.create({ whisper: owners, speaker: ChatMessage.getSpeaker({ actor }), content: `<p>${message}</p>` });
+    await ChatMessage.create({
+      whisper: ChatMessage.getWhisperRecipients("GM").map(u => u.id),
+      content: `<p>GM only: ${actor.name} searched ${scene.name}: Perception total ${total}${natural === null ? "" : ` (natural ${natural})`}. Found ${names.length} of ${hiddenNodes.length} hidden node(s)${spottedNodes.length ? `: ${spottedNodes.map(n => `${n.token.name} (DC ${n.dc})`).join(", ")}` : ""}.</p>`
+    });
+  } catch (error) {
+    console.error(`${MODULE_ID} | the search was resolved, but the chat message failed`, error);
+  }
+  return { message, spotted: names };
+}
+
+/** The player's button: ask the GM client to search the area the character is standing in. */
+export async function searchArea(actor) {
+  const sceneId = globalThis.canvas?.scene?.id;
+  if (!sceneId) throw new Error("searchArea: open the scene you are on first");
+  if (game.user.isGM) return runSearch({ actorId: actor.id, sceneId, userId: game.user.id });
+  if (!actor.isOwner) throw new Error("You can only search with a character you own.");
+  if (!socket) throw new Error("searchArea: the module's socket is not ready (is socketlib installed and active?)");
+  try {
+    return await socket.executeAsGM("search", { actorId: actor.id, sceneId, userId: game.user.id });
+  } catch (error) {
+    console.error(`${MODULE_ID} | search relay failed`, error);
+    throw new Error("The GM isn't available to run your search right now.");
   }
 }

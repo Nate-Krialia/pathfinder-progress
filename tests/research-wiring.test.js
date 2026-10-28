@@ -15,7 +15,7 @@ import { previewCraft } from "../scripts/crafting/craft.js";
 import { collectSources } from "../scripts/data/loader.js";
 import { PACKS } from "../scripts/config.js";
 import { SNAPSHOT_KEYS } from "../scripts/research/formulas.js";
-import { asPage, seedRecords, UUID, UUID_2 } from "./helpers.js";
+import { asPage, openDowntime, seedRecords, UUID, UUID_2 } from "./helpers.js";
 
 const MODULE = "pathfinder-progress";
 const registry = loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -73,7 +73,7 @@ function install({ isGM = true, actors = [], settings = {}, packs = new Map() } 
   list.has = id => list.some(a => a.id === id);
   globalThis.game = {
     user: { isGM }, i18n: { localize: text => text }, actors: list, packs,
-    settings: { get: (scope, key) => clone(values[key]), set: async (scope, key, value) => { values[key] = clone(value); } }
+    settings: { get: (scope, key) => (key === "downtime" ? openDowntime(list.map(a => a.id)) : clone(values[key])), set: async (scope, key, value) => { values[key] = clone(value); } }
   };
   globalThis.CONFIG = { PF2E: { skills: { crafting: { label: "Crafting" }, arcana: { label: "Arcana" }, occultism: { label: "Occultism" } } } };
   globalThis.ChatMessage = { create: async message => { chat.push(message); }, getSpeaker: () => ({}) };

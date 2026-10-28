@@ -10,7 +10,7 @@ import * as queue from "../scripts/queue/store.js";
 import { capResults } from "../scripts/queue/review.js";
 import { build, unhandledAction } from "../scripts/queue/review-app.js";
 import { renderReview } from "../scripts/queue/review.js";
-import { asPage, seedRecords } from "./helpers.js";
+import { asPage, openDowntime, seedRecords } from "./helpers.js";
 
 const MODULE = "pathfinder-progress";
 const registry = loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -36,7 +36,7 @@ function install(actors) {
   const list = [...actors]; list.get = id => list.find(a => a.id === id);
   const notices = { info: [], warn: [], error: [] };
   let n = 0;
-  globalThis.game = { user: { isGM: true }, i18n: { localize: t => t }, actors: list, settings: { get: (s, k) => clone(values[k]), set: async (s, k, v) => { values[k] = clone(v); } } };
+  globalThis.game = { user: { isGM: true }, i18n: { localize: t => t }, actors: list, settings: { get: (s, k) => (k === "downtime" ? openDowntime(list.map(a => a.id)) : clone(values[k])), set: async (s, k, v) => { values[k] = clone(v); } } };
   globalThis.foundry = {
     utils: { randomID: () => `id${++n}` },
     applications: { api: { ApplicationV2: class { constructor(o) { this.options = { ...this.constructor.DEFAULT_OPTIONS, ...o }; this.renders = 0; } async render() { this.renders++; } } } }

@@ -13,6 +13,7 @@ import { check } from "../data/schema.js";
 import { daysFrom } from "../research/days.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
 import * as commissions from "../commissions/store.js";
+import * as downtime from "../downtime/store.js";
 import * as exploration from "../exploration/store.js";
 import { ResearchRefused, planResearch, planUpdate, postResearchChat, rawList } from "../research/store.js";
 import { HANDLERS, wiredTypes } from "./handlers.js";
@@ -64,6 +65,9 @@ export function describeAction(actor, action) {
   return handler.describe({ action, projects: rawList(actor, K.projectsFlag), info });
 }
 
+/** Does this action take downtime? Days reserved, or a commission craft (which will spend craft days from Stage 10). */
+const spendsTime = (type, params, days) => days > 0 || (type === "commission" && params?.step === "craft");
+
 // Submitting (any owner) -------------------------------------------------------------------
 /**
  * Queue an action and reserve its days. Anyone who owns the actor can submit.
@@ -76,6 +80,14 @@ export async function submit(actor, type, params, days) {
   if (!game.user.isGM && !actor.isOwner) throw new Error(`submit: you do not own ${actor.name}`);
   const handler = HANDLERS[type];
   if (!handler) throw new Error(`submit: "${type}" actions cannot be queued yet (wired: ${wiredTypes().join(", ")})`);
+  // The downtime gate. Players never bypass it; a GM submitting on someone's behalf does, and the ledger says so.
+  if (spendsTime(type, params, days)) {
+    const reason = downtime.gateReason(actor);
+    if (reason) {
+      if (!game.user.isGM) throw new Error(reason);
+      await downtime.noteOverride(actor, `queued a ${type} action`);
+    }
+  }
   const region = type === "explore" ? needApi("submit").definitions?.region.get(params?.region) : undefined;
   const scenes = type === "explore" && game.user.isGM && region ? exploration.poolFor(region) : null;
   const submitter = type === "commission" ? commissions.submitContext(actor, params) : {};
@@ -161,7 +173,7 @@ const RESOLVERS = {
     if (chat) await postResearchChat(actor, plan);
     const last = plan.result.results.at(-1);
     const verb = plan.result.completed ? "finished the research" : `researched (${spent} day(s))`;
-    return { status: "resolved", message: `${verb}; progress ${plan.result.project.progress}/${plan.result.project.threshold}; ${refunded} day(s) refunded.${last?.natural ? ` Last natural d20: ${last.natural}.` : ""}` };
+    return { status: "resolved", daysSpent: spent, message: `${verb}; progress ${plan.result.project.progress}/${plan.result.project.threshold}; ${refunded} day(s) refunded.${last?.natural ? ` Last natural d20: ${last.natural}.` : ""}` };
   }
 };
 
@@ -180,7 +192,7 @@ RESOLVERS.explore = async function explore(api, actor, action, pending, { chat, 
     await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: others, [flagKey(K.daysFlag)]: refunded });
     return { status: "invalid", message: `${error.message}. ${action.daysReserved} day(s) refunded.` };
   }
-  // World first (tokens, scene log), then the actor; if the actor commit fails the scene is put back.
+  // World first (tokens, anchors, scene state), then the actor; if the actor commit fails the scene is put back.
   const undo = await exploration.applyPlan(api, actor, run);
   try {
     const { counter: after } = planResolve(counter, action.daysReserved, action.daysReserved);
@@ -191,15 +203,18 @@ RESOLVERS.explore = async function explore(api, actor, action, pending, { chat, 
       await undo();
     } catch (undoError) {
       console.error(`${MODULE_ID} | the actor commit failed AND the scene could not be restored`, undoError);
-      throw new Error(`${error.message}. The scene "${run.plan.scene.name}" was changed and could not be restored automatically; run api.resetScene on it.`);
+      throw new Error(`${error.message}. The scene "${run.plan.scene.name}" was changed and could not be restored automatically; run api.clearMap on it.`);
     }
     throw error;
   }
-  if (chat) await exploration.postExploreChat(api, actor, run, action.daysReserved);
+  if (chat) await exploration.postExploreChat(api, actor, run);
   const { plan } = run;
-  const natural = run.roll.natural === null ? "" : ` Natural d20: ${run.roll.natural}.`;
-  const short = plan.shortfall ? ` (rolled ${plan.rolled}, the scene only had ${plan.freeBefore})` : "";
-  return { status: "resolved", message: `prepared "${plan.scene.name}" (not launched): ${plan.activations.length} node(s) activated${short}, ${plan.freeAfter} free anchor(s) left.${natural}` };
+  const short = plan.notPlaced ? ` (${plan.rolled} found, only ${plan.freeBefore} free anchor(s): ${plan.notPlaced} not placed)` : "";
+  const enc = run.encounter.encounter ? (run.encounter.forced ? "encounter (forced)" : "encounter") : "no encounter";
+  return {
+    status: "resolved", daysSpent: action.daysReserved,
+    message: `prepared "${plan.scene.name}" (not launched): ${plan.activations.length} hidden node(s) placed${short}, ${enc}, ${plan.freeAfter} free anchor(s) left.`
+  };
 };
 
 /** Resolve one queued action. GM only. Throws on an unexpected failure (the action stays queued). */
@@ -211,7 +226,30 @@ export async function resolveAction(api, actor, actionId, { chat = true, degree 
   const valid = findAction(actor, actionId).action;
   const resolver = RESOLVERS[valid.type];
   if (!resolver) throw new Error(`no resolver is wired for "${valid.type}" actions yet; reject it to refund its days`);
-  return resolver(api, actor, valid, pending, { chat, degree });
+
+  // The gate is checked again here: an action that survived a closed period is refunded, not run.
+  if (spendsTime(valid.type, valid.params, valid.daysReserved)) {
+    const reason = downtime.gateReason(actor);
+    if (reason) {
+      const { counter } = planReject(actor.getFlag(MODULE_ID, K.daysFlag), valid);
+      await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: pending.filter(a => a.id !== valid.id), [flagKey(K.daysFlag)]: counter });
+      return { status: "invalid", message: `${reason}. ${valid.daysReserved} day(s) refunded.` };
+    }
+  }
+  const outcome = await resolver(api, actor, valid, pending, { chat, degree });
+  if (outcome.status === "resolved" && outcome.daysSpent) await downtime.recordSpent(actor, outcome.daysSpent);
+  return outcome;
+}
+
+/** Return every queued action to its owner (days refunded). Used by a forced end of downtime. Returns how many. */
+export async function rejectAll({ chat = false } = {}) {
+  requireGM("rejectAll");
+  let count = 0;
+  for (const row of list()) {
+    await reject(actorFor(row.actorId), row.action.id, { chat });
+    count++;
+  }
+  return count;
 }
 
 /** Resolve every queued action in submission order, isolating failures. GM only. Returns { results, summary }. */

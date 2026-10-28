@@ -7,7 +7,7 @@ import { MODULE_ID, NODE_FLAG } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
-import { activateRecord, makeAnchorRecord, makeCorpseRecord, makeNodeRecord, normalizeNode, refillRecord } from "./node.js";
+import { activateRecord, makeAnchorRecord, makeCorpseRecord, makeNodeRecord, normalizeNode } from "./node.js";
 import { checkGatherable, hiddenSuccessChance, neededD20, pickSkill, resolveGather, visiblePassChance } from "./resolve.js";
 import { formatGatherSummary } from "./summary.js";
 
@@ -94,17 +94,6 @@ export async function activateNode(api, token, spec = {}) {
   const record = failIf(activateRecord(current, spec, api.definitions), "activateNode");
   await writeRecord(doc, record);
   await doc.update({ hidden: false });
-  return record;
-}
-
-/** Bring a node back to `charges` (default: its nodeType's) and make it active. */
-export async function refillNode(api, token, charges) {
-  requireGM("refillNode");
-  const doc = resolveToken(token);
-  const current = readRecord(doc);
-  if (!current) throw new Error(`refillNode: ${doc.name} is not a node`);
-  const record = failIf(refillRecord(current, charges, api.definitions), "refillNode");
-  await writeRecord(doc, record);
   return record;
 }
 
@@ -233,7 +222,7 @@ export async function gather({ actor, node: nodeRef, skill, degree: forced, chat
       `gather: could not grant the materials (${error.message}). `
       + (refunded
         ? "The charge was refunded and nothing was given."
-        : `The charge could NOT be refunded: ${doc.name} now has ${result.chargesAfter} charge(s); restore it with api.refillNode(token, ${previous.charges}).`)
+        : `The charge could NOT be refunded: ${doc.name} now has ${result.chargesAfter} charge(s); set flags.${MODULE_ID}.${NODE_FLAG}.charges back to ${previous.charges} (and state to \"${previous.state}\") on that token by hand.`)
       + undone,
       { cause: error }
     );

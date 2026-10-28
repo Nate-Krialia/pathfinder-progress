@@ -9,6 +9,7 @@
 import { MODULE_ID, RESEARCH_KEYS as K } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { commit } from "../audit/store.js";
+import { noteOverride, recordSpent } from "../downtime/store.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
 import { pickSkill } from "../gathering/resolve.js";
@@ -65,10 +66,10 @@ const flagUpdate = (key, value) => ({ [flagKey(key)]: value });
 // Days -----------------------------------------------------------------------------------
 export const days = actor => readDays(actor);
 
-export async function grantDays(actor, n) {
+export async function grantDays(actor, n, note = "granted by the GM") {
   requireGM("grantDays");
   const total = afterGrant(readDays(actor), n);
-  await commit(actor, flagUpdate(K.daysFlag, total), [{ type: "days", delta: n, note: "granted by the GM" }]);
+  await commit(actor, flagUpdate(K.daysFlag, total), [{ type: "days", delta: n, note }]);
   return total;
 }
 
@@ -217,11 +218,13 @@ export function postResearchChat(actor, plan) {
  */
 export async function research({ actor, project: projectId, days: dayCount, skill, degree, chat = true }, api) {
   requireGM("research");
+  await noteOverride(actor, "research"); // the GM tool goes around the downtime gate; the ledger says so
   const plan = await planResearch(api, { actor, project: projectId, days: dayCount, daysAvailable: readDays(actor), skill, degree });
   const { result } = plan;
 
   // Commit everything in ONE update: progress, days, and (on completion) the formula.
   await commit(actor, { ...planUpdate(plan), ...flagUpdate(K.daysFlag, result.daysRemaining) }, plan.changes);
+  await recordSpent(actor, result.daysSpent);
 
   if (chat) await postResearchChat(actor, plan);
   return {

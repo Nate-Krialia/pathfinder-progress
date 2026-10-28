@@ -7,7 +7,9 @@
  */
 import { EXPLORATION } from "../config.js";
 import { degreeChances, degreeIndex, DEGREE_NAMES } from "../checks.js";
-import { activateRecord } from "../gathering/node.js";
+import { makeNodeRecord } from "../gathering/node.js";
+import { check } from "../data/schema.js";
+import { LIVE_SCHEMAS } from "../data/schemas.js";
 
 const randomInt = (min, max, rng) => min + Math.floor(rng() * (max - min + 1));
 
@@ -53,36 +55,62 @@ export function chooseScene(scenes, count, rng) {
 }
 
 /**
- * Plan an expedition without touching anything.
+ * The encounter is rolled ONCE per expedition (a long trip must not make a fight near-certain).
+ * forceCombat guarantees it. @returns {{ encounter: boolean, forced: boolean, chance: number, roll: number|null }}
+ */
+export function rollEncounter({ danger = "moderate", forceCombat = false, rng, config = EXPLORATION }) {
+  if (forceCombat) return { encounter: true, forced: true, chance: 1, roll: null };
+  const chance = config.encounterChance[danger];
+  if (typeof chance !== "number") throw new Error(`rollEncounter: unknown danger "${danger}" (use ${Object.keys(config.encounterChance).join(", ")})`);
+  const roll = rng();
+  return { encounter: roll < chance, forced: false, chance, roll };
+}
+
+/** The Perception DC to spot a hidden node of this tier. */
+export function perceptionDcFor(tier, config = EXPLORATION) {
+  const dc = config.perceptionDcByTier[tier];
+  if (!Number.isInteger(dc)) throw new Error(`perceptionDcFor: no Perception DC configured for node tier ${tier}`);
+  return dc;
+}
+
+/**
+ * Plan an expedition without touching anything. One degree per day of exploring; each day's degree rolls
+ * its own anchor count, and the counts add up. The nodes are placed HIDDEN, on new tokens at free anchors'
+ * positions; the anchors stay (marked occupied by the caller) and extra nodes with no free anchor are simply
+ * not placed.
  * @param {object} args
  * @param {object} args.region    a validated region definition
  * @param {object} args.registry  loaded definitions (to validate the nodes it builds)
- * @param {string} args.degree    the exploration check's degree
- * @param {Array<{ id: string, name: string, anchors: Array<{ id: string, record: object }>, preparedCount?: number }>} args.scenes
- *        the scenes tagged for this region
+ * @param {string[]} args.degrees one exploration-check degree per day
+ * @param {Array<{ id: string, name: string, totalAnchors: number, preparedCount?: number, anchors: Array<{ id: string, x: number, y: number }> }>} args.scenes
+ *        the scenes tagged for this region; `anchors` are the FREE ones
  * @returns {{ ok: true, plan: object } | { ok: false, kind: "noScene" | "noAnchors" | "invalidNode", errors: string[] }}
  */
-export function planExpedition({ region, registry, degree, scenes, rng, config = EXPLORATION }) {
+export function planExpedition({ region, registry, degrees, scenes, rng, config = EXPLORATION }) {
   if (!scenes.length) return { ok: false, kind: "noScene", errors: [`no scene is tagged "${region.sceneTag}" (tag one with api.tagScene(scene, "${region.sceneTag}"))`] };
-  if (!scenes.some(s => s.anchors.length)) {
-    return { ok: false, kind: "noAnchors", errors: [`the scene(s) tagged "${region.sceneTag}" (${scenes.map(s => s.name).join(", ")}) have no free anchors (place some with api.placeAnchors, or api.resetScene)`] };
+  if (!scenes.some(s => s.totalAnchors > 0)) {
+    return { ok: false, kind: "noAnchors", errors: [`the scene(s) tagged "${region.sceneTag}" (${scenes.map(s => s.name).join(", ")}) have no anchors at all (place some with api.placeAnchors)`] };
   }
-  const rolled = rollAnchorCount(degree, rng, config);
-  const scene = chooseScene(scenes, rolled, rng);
+  const rolled = degrees.reduce((sum, degree) => sum + rollAnchorCount(degree, rng, config), 0);
+  const scene = chooseScene(scenes, rolled, rng) ?? scenes.find(s => s.totalAnchors > 0);
   const anchors = pickMany(scene.anchors, rolled, rng);
   const activations = [];
   for (const anchor of anchors) {
     const spawn = pickSpawn(region.spawnTable, rng);
-    const built = activateRecord(anchor.record, { nodeType: spawn.nodeType, tier: spawn.tier, source: "explored", region: region.id }, registry);
+    const built = makeNodeRecord({ source: "explored", nodeType: spawn.nodeType, tier: spawn.tier, region: region.id }, registry);
     if (!built.ok) return { ok: false, kind: "invalidNode", errors: [`${scene.name}: ${built.errors.join("; ")}`] };
-    activations.push({ tokenId: anchor.id, nodeType: spawn.nodeType, tier: spawn.tier, record: built.record });
+    const perceptionDC = perceptionDcFor(spawn.tier, config);
+    const record = { ...built.record, perceptionDC, revealed: false, anchorId: anchor.id };
+    const problems = check(LIVE_SCHEMAS.node, record);
+    if (problems.length) return { ok: false, kind: "invalidNode", errors: [`${scene.name}: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`] };
+    activations.push({ anchorId: anchor.id, x: anchor.x, y: anchor.y, nodeType: spawn.nodeType, tier: spawn.tier, perceptionDC, record });
   }
   return {
     ok: true,
     plan: {
-      degree, rolled, scene: { id: scene.id, name: scene.name, preparedCount: scene.preparedCount ?? 0 },
+      degrees, rolled, scene: { id: scene.id, name: scene.name, preparedCount: scene.preparedCount ?? 0 },
       activations, freeBefore: scene.anchors.length, freeAfter: scene.anchors.length - activations.length,
-      shortfall: Math.max(0, rolled - activations.length)
+      notPlaced: rolled - activations.length
     }
   };
 }
@@ -90,7 +118,7 @@ export function planExpedition({ region, registry, degree, scenes, rng, config =
 // Odds -------------------------------------------------------------------------------------------------
 const mean = range => (range.min + range.max) / 2;
 
-/** Degree chances and the average number of anchors one expedition activates. */
+/** Degree chances and the average number of nodes one DAY of exploring finds (multiply by the days for a trip). */
 export function exploreOdds(modifier, dc, config = EXPLORATION) {
   const chances = degreeChances(modifier, dc);
   const expectedAnchors = DEGREE_NAMES.reduce((sum, degree) => sum + chances[degree] * mean(config.anchorCounts[degree]), 0);
@@ -98,36 +126,44 @@ export function exploreOdds(modifier, dc, config = EXPLORATION) {
 }
 
 /**
- * Simulate many expeditions' anchor counts and node rolls (no scenes, no writes), to compare
- * the observed numbers with the expected ones.
- * Give a fixed `degree`, or a `modifier` to roll the check each run.
+ * Simulate many expeditions' node counts, node rolls and encounters (no scenes, no writes), to compare the
+ * observed numbers with the expected ones. Give a fixed `degree` for every day, or a `modifier` to roll each
+ * day's check. `days` is the length of each trip.
  */
-export function simulateExpeditions({ region, runs, degree, modifier, rng, config = EXPLORATION }) {
+export function simulateExpeditions({ region, runs, degree, modifier, days = 1, forceCombat = false, rng, config = EXPLORATION }) {
   if (!Number.isInteger(runs) || runs < 1) throw new Error(`simulateExpeditions: runs must be a whole number of at least 1 (got ${runs})`);
+  if (!Number.isInteger(days) || days < 1) throw new Error(`simulateExpeditions: days must be a whole number of at least 1 (got ${days})`);
   if (degree === undefined && typeof modifier !== "number") throw new Error("simulateExpeditions: give a degree or a modifier");
-  const countTally = {};
+  const totalTally = {};
   const degreeTally = Object.fromEntries(DEGREE_NAMES.map(d => [d, 0]));
   const spawnTally = new Map(region.spawnTable.map(e => [`${e.nodeType}/${e.tier}`, 0]));
   let nodes = 0;
+  let encounters = 0;
   for (let i = 0; i < runs; i++) {
-    const d = degree ?? DEGREE_NAMES[degreeIndex(Math.floor(rng() * 20) + 1, modifier, region.explorationDC)];
-    degreeTally[d]++;
-    const count = rollAnchorCount(d, rng, config);
-    countTally[count] = (countTally[count] ?? 0) + 1;
-    for (let n = 0; n < count; n++) {
+    let found = 0;
+    for (let day = 0; day < days; day++) {
+      const d = degree ?? DEGREE_NAMES[degreeIndex(Math.floor(rng() * 20) + 1, modifier, region.explorationDC)];
+      degreeTally[d]++;
+      found += rollAnchorCount(d, rng, config);
+    }
+    totalTally[found] = (totalTally[found] ?? 0) + 1;
+    for (let n = 0; n < found; n++) {
       const spawn = pickSpawn(region.spawnTable, rng);
       spawnTally.set(`${spawn.nodeType}/${spawn.tier}`, spawnTally.get(`${spawn.nodeType}/${spawn.tier}`) + 1);
       nodes++;
     }
+    if (rollEncounter({ danger: region.danger, forceCombat, rng, config }).encounter) encounters++;
   }
   const totalWeight = region.spawnTable.reduce((sum, e) => sum + e.weight, 0);
-  const expectedMean = degree !== undefined ? mean(config.anchorCounts[degree]) : exploreOdds(modifier, region.explorationDC, config).expectedAnchors;
+  const perDay = degree !== undefined ? mean(config.anchorCounts[degree]) : exploreOdds(modifier, region.explorationDC, config).expectedAnchors;
   return {
-    runs, nodes,
-    meanAnchors: nodes / runs,
-    expectedMeanAnchors: expectedMean,
-    counts: Object.fromEntries(Object.entries(countTally).map(([n, c]) => [n, c / runs])),
-    degrees: Object.fromEntries(Object.entries(degreeTally).map(([d, c]) => [d, c / runs])),
+    runs, days, nodes,
+    meanNodes: nodes / runs,
+    expectedMeanNodes: perDay * days,
+    counts: Object.fromEntries(Object.entries(totalTally).map(([n, c]) => [n, c / runs])),
+    degrees: Object.fromEntries(Object.entries(degreeTally).map(([d, c]) => [d, c / (runs * days)])),
+    encounterRate: encounters / runs,
+    expectedEncounterRate: forceCombat ? 1 : (config.encounterChance[region.danger ?? "moderate"]),
     spawn: region.spawnTable.map(e => ({
       nodeType: e.nodeType, tier: e.tier,
       observed: nodes ? spawnTally.get(`${e.nodeType}/${e.tier}`) / nodes : 0,
