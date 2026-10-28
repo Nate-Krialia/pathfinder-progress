@@ -154,3 +154,14 @@ export const NODE_ACTOR = {
   name: "Resource Node",
   img: "icons/svg/item-bag.svg"
 };
+
+/** Commissions (docs/06-commissions.md). All numbers are placeholders. */
+export const COMMISSIONS = {
+  settingKey: "commissions",
+  // Gold value per unit of a material that has no `value` of its own, by tier (for suggested payouts).
+  valueByTier: { 1: 5, 2: 25, 3: 100, 4: 400, 5: 1600 },
+  // The suggested payout is (material value + station fee) plus this fraction.
+  payoutMargin: 0.25,
+  // Entries kept in a commission's movement log.
+  logMax: 50
+};

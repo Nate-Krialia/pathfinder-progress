@@ -41,6 +41,8 @@ const research = {
   }
 };
 
+import { buildCommission, checkStep } from "../commissions/commission.js";
+
 const pct = x => `${Math.round(x * 100)}%`;
 
 const explore = {
@@ -73,5 +75,48 @@ const explore = {
   }
 };
 
-export const HANDLERS = { research, explore };
+const commission = {
+  /** Commission steps cost no downtime days. */
+  freeOfDays: true,
+
+  /**
+   * ctx: { params, days, actorId, isGM, commissions, formulas, crafterId } (see commissions/store.js submitContext).
+   * `formulas` is the submitting character's own formula list: a patron can only offer a formula they own.
+   */
+  validateSubmit({ params, days, actorId, isGM, commissions, formulas, crafterId }) {
+    if (days !== 0) return { ok: false, errors: [`commission steps cost no days (reserve 0, got ${days})`] };
+    const step = params?.step;
+    if (step === "request") {
+      if (!crafterId) return { ok: false, errors: [`cannot find the crafter "${params.crafter}" (give their name or id)`] };
+      const entry = formulas.find(f => f?.recipeId === params.recipe);
+      if (!entry || entry.access !== "owned") return { ok: false, errors: [`you do not own the formula for "${params.recipe}"; only an owner can offer it`] };
+      const slotNames = entry.snapshot?.slots?.map(s => s.name);
+      const built = buildCommission({
+        source: "player", patron: { type: "actor", actorId }, crafter: crafterId, recipeId: params.recipe, access: params.access,
+        selection: params.selection, stationId: params.stationId, payout: params.payout, learnRoll: params.learnRoll
+      }, { id: "check", now: 0, slotNames });
+      if (!built.ok) return { ok: false, errors: built.errors };
+      const c = built.commission;
+      return { ok: true, params: { step, crafter: crafterId, recipe: c.formulaId, access: c.access, selection: c.selection, stationId: c.stationId, payout: c.payout, learnRoll: c.learnRoll } };
+    }
+    const found = commissions.find(c => c.id === params?.id);
+    if (!found) return { ok: false, errors: [`no commission "${params?.id}"`] };
+    const allowed = checkStep(found, step, actorId, isGM);
+    if (!allowed.ok) return allowed;
+    if (step === "accept" && params.as !== undefined && (params.as !== "loan" || found.access !== "copy")) {
+      return { ok: false, errors: ['"as" can only be "loan", and only on a copy offer'] };
+    }
+    if (step === "craft" && !found.selection && !params.selection) {
+      return { ok: false, errors: ["the crafter supplies the materials: give a selection ({ slot: materialId })"] };
+    }
+    return { ok: true, params: { step, id: found.id, ...(params.as ? { as: params.as } : {}), ...(params.selection ? { selection: params.selection } : {}), ...(params.station ? { station: params.station } : {}), ...(params.learnSkill ? { learnSkill: params.learnSkill } : {}) } };
+  },
+
+  /** ctx: { action, info } where info = { label, detail, problem } from commissions/store.js describeInfo. */
+  describe({ action, info }) {
+    return info ?? { label: `Commission ${action.params?.step ?? "?"}`, detail: "", problem: null };
+  }
+};
+
+export const HANDLERS = { research, explore, commission };
 export const wiredTypes = () => Object.keys(HANDLERS);

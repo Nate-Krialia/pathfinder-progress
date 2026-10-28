@@ -431,3 +431,26 @@ export function nodeActorRepair(actor) {
   }
   return problems.length ? { update, problems } : null;
 }
+
+// Coins in whole copper pieces (commissions move gold between actors) --------------------------------------
+/** Split copper into PF2e coin parts. */
+export const coinsFromCopper = copper => ({ gp: Math.floor(copper / 100), sp: Math.floor((copper % 100) / 10), cp: copper % 10 });
+
+/** An actor's total coins, in copper pieces. */
+export function getCopper(actor) {
+  const coins = actor.inventory?.coins;
+  if (typeof coins?.copperValue === "number") return coins.copperValue;
+  if (typeof coins?.goldValue === "number") return Math.round(coins.goldValue * 100);
+  throw new Error(`adapter.getCopper: cannot read ${actor?.name ?? "actor"}'s coins (PF2e API changed?)`);
+}
+
+export async function addCopper(actor, copper) {
+  if (!actor.inventory?.addCoins) throw new Error("adapter.addCopper: actor.inventory.addCoins is missing (PF2e API changed?)");
+  await actor.inventory.addCoins(coinsFromCopper(copper));
+}
+
+export async function removeCopper(actor, copper) {
+  if (!actor.inventory?.removeCoins) throw new Error("adapter.removeCopper: actor.inventory.removeCoins is missing (PF2e API changed?)");
+  const removed = await actor.inventory.removeCoins(coinsFromCopper(copper), { byValue: true });
+  if (removed === false) throw new Error(`adapter.removeCopper: could not remove ${copper / 100} gp from ${actor.name}`);
+}

@@ -21,14 +21,15 @@ import { formulaRequirement } from "../research/formulas.js";
  * @param {(actorId: string) => string} [args.nameOf]
  * @param {object[]} args.formulas        the crafter's formula entries (owned and loaned)
  * @param {string} [args.crafterName]
+ * @param {string} [args.commissionId]  craft is for this commission: a commission loan is then allowed
  * @param {string} [args.requestedStationId]
  * @param {object} [args.config]
  * @returns {{ ok: boolean, errors: string[], plan: object|null, stations: { verdicts: object[], chosen: object|null } }}
  */
 export function prepareCraft({
-  recipe, registry, selection, stacks, outputs, stations, crafterId, townOf, townName, nameOf, requestedStationId, formulas, crafterName, config
+  recipe, registry, selection, stacks, outputs, stations, crafterId, townOf, townName, nameOf, requestedStationId, formulas, crafterName, config, commissionId
 }) {
-  const formula = formulaRequirement(formulas ?? [], recipe, crafterName ?? nameOf?.(crafterId) ?? crafterId);
+  const formula = formulaRequirement(formulas ?? [], recipe, crafterName ?? nameOf?.(crafterId) ?? crafterId, { commissionId });
   const verdicts = evaluateForRecipe(evaluateStations({ crafterId, stations, townOf, townName, nameOf }), recipe);
   const picked = selectStation({ verdicts, recipe, requestedId: requestedStationId });
   const planned = planCraft({ recipe, registry, selection, stacks, outputs, station: picked.ok ? picked.station : undefined, config });

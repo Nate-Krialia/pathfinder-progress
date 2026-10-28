@@ -10,7 +10,10 @@ import * as auditStore from "./audit/store.js";
 import * as queueStore from "./queue/store.js";
 import { openReview, refreshReview } from "./queue/review-app.js";
 import * as exploration from "./exploration/store.js";
-import { AUDIT, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS } from "./config.js";
+import * as commissions from "./commissions/store.js";
+import { suggestPayout } from "./commissions/commission.js";
+import { feeForTier } from "./stations/fees.js";
+import { AUDIT, COMMISSIONS, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS } from "./config.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
 Hooks.once("init", () => {
@@ -68,6 +71,13 @@ Hooks.once("init", () => {
     config: true,
     type: Boolean,
     default: true
+  });
+
+  game.settings.register(MODULE_ID, COMMISSIONS.settingKey, {
+    scope: "world",
+    config: false,
+    type: new foundry.data.fields.ArrayField(new foundry.data.fields.ObjectField()),
+    default: []
   });
 
   game.settings.register(MODULE_ID, NODE_ACTOR.setting, {
@@ -146,6 +156,37 @@ Hooks.once("ready", async () => {
       scan: actors => auditStore.scan(actors),
       accept: actor => auditStore.accept(actor),
       ledger: () => auditStore.readLedger()
+    },
+    // Commissions (see scripts/commissions/store.js). Players use the queue-based calls; the rest is GM only.
+    commissions: {
+      /** Commissions you may see: a GM sees all, a player those of characters they own. { status?, open? } */
+      list: filter => commissions.listCommissions(filter),
+      get: id => commissions.getCommission(id),
+      /** GM: issue a commission, usually for an NPC patron: { patron: "Old Brannock" | actor, crafter, recipe, access?, selection?, materialsFrom?, payout?, teaches?, learnRoll? } */
+      issue: spec => commissions.issue(api, spec),
+      /** Player (patron): ask a crafter. spec: { crafter, recipe, access?: "loan"|"copy", selection: { slot: materialId }, payout, learnRoll? } */
+      request: (patron, spec) => queueStore.submit(patron, "commission", { step: "request", ...spec }, 0),
+      /** Player (crafter): accept, optionally { as: "loan" } on a copy offer. */
+      queueAccept: (crafter, id, options) => queueStore.submit(crafter, "commission", { step: "accept", id, ...options }, 0),
+      queueDecline: (crafter, id) => queueStore.submit(crafter, "commission", { step: "decline", id }, 0),
+      /** Player (patron): cancel before delivery. */
+      queueCancel: (patron, id) => queueStore.submit(patron, "commission", { step: "cancel", id }, 0),
+      /** Player (crafter): ask the GM to run the craft. options: { selection?, station?, learnSkill? } */
+      queueCraft: (crafter, id, options) => queueStore.submit(crafter, "commission", { step: "craft", id, ...options }, 0),
+      /** GM, directly (no queue): accept, decline, cancel, craft. */
+      accept: (id, options) => commissions.acceptStep(api, id, options),
+      decline: id => commissions.declineStep(id),
+      cancel: (id, options) => commissions.cancelStep(id, options),
+      /** GM: craft for a commission. options: { selection?, station?, degree?, learnSkill?, learnDegree?, chat? } */
+      craft: (id, options) => commissions.craftForCommission(api, id, options),
+      /** Dry run of the craft checks: { ok, errors }. */
+      preview: (id, options) => { const r = commissions.prepareCommissionCraft(api, id, options); return { ok: r.ok, errors: r.errors }; },
+      /** A suggested payout for a recipe and a selection of materials. */
+      suggestPayout: (recipeId, selection) => {
+        const recipe = api.definitions?.recipe.get(recipeId);
+        if (!recipe) throw new Error(`suggestPayout: unknown recipe "${recipeId}"`);
+        return suggestPayout({ recipe, selection, registry: api.definitions, feeGp: feeForTier(recipe.stationTierMin) });
+      }
     },
     // Exploration (GM tools; see scripts/exploration/store.js). Queue an expedition with api.queue.submit(actor, "explore", { region, skill? }, days).
     /** Mark a scene as belonging to a region: tagScene(scene, "oak-wood"). Pass a scene, its id or its name. */

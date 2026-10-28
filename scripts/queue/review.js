@@ -27,9 +27,10 @@ function renderRow(row, results) {
     <strong>${esc(row.actorName)}</strong>: ${esc(row.label)}
     <div class="pfp-detail">${esc(row.detail)}</div>${problem}${failure}
   </div>
-  <div class="pfp-row-days">
-    <input type="number" min="1" step="1" value="${esc(row.action.daysReserved)}" data-days-for="${esc(row.action.id)}" aria-label="Days reserved">
-    ${button("edit-days", "Set days", ids)}
+  <div class="pfp-row-days">${row.action.daysReserved === 0
+    ? '<span class="pfp-detail">no days</span>'
+    : `<input type="number" min="1" step="1" value="${esc(row.action.daysReserved)}" data-days-for="${esc(row.action.id)}" aria-label="Days reserved">
+    ${button("edit-days", "Set days", ids)}`}
   </div>
   <div class="pfp-row-buttons">${button("resolve", "Resolve", ids)} ${button("reject", "Reject", ids)}</div>
 </li>`;

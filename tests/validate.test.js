@@ -181,11 +181,13 @@ test("live: project outcome is a tagged variant", () => {
 });
 
 test("live: commission variants, defaults enums and patron forms", () => {
-  const base = { id: "c1", crafter: "a1", formulaId: "blade", itemSpec: { name: "x" }, status: "open",
-    materialsFrom: "crafter", payout: 50, teaches: { type: "none" }, formulaAccess: "loan" };
+  const base = { id: "c1", source: "gm", status: "requested", crafter: "a1", formulaId: "blade", access: "loan",
+    materialsFrom: "crafter", payout: 50, teaches: { type: "none" }, learnRoll: true, learnAttempted: false, attempts: 0, createdAt: 1, log: [] };
   assert.deepEqual(validateRecord("commission", { ...base, patron: { type: "lightweight", name: "Old Brannock" } }, ctx), []);
   assert.deepEqual(validateRecord("commission", { ...base, patron: { type: "actor", actorId: "a2" }, teaches: { type: "progress", amount: 2 } }, ctx), []);
-  assert.ok(validateRecord("commission", { ...base, patron: { type: "lightweight", name: "x" }, materialsFrom: "patron" }, ctx).length > 0);
+  assert.deepEqual(validateRecord("commission", { ...base, patron: { type: "actor", actorId: "a2" }, materialsFrom: "patron", selection: { edge: "iron" } }, ctx), []);
+  assert.ok(validateRecord("commission", { ...base, patron: { type: "actor", actorId: "a2" }, materialsFrom: "everyone" }, ctx).length > 0);
+  assert.ok(validateRecord("commission", { ...base, patron: { type: "actor", actorId: "a2" }, status: "open" }, ctx).length > 0, "status is one of the six");
 });
 
 test("live: station location is fixed{town} or carried{holder}; pendingAction is checked", () => {
@@ -195,7 +197,7 @@ test("live: station location is fixed{town} or carried{holder}; pendingAction is
   assert.ok(validateRecord("stationRecord", { ...st, location: { type: "fixed" } }, ctx).length > 0);
   const act = { id: "q1", type: "research", params: {}, daysReserved: 1, submittedAt: 1 };
   assert.deepEqual(validateRecord("pendingAction", act, ctx), []);
-  assert.ok(validateRecord("pendingAction", { ...act, daysReserved: 0 }, ctx).length > 0, "a queued action must reserve at least a day");
+  assert.ok(validateRecord("pendingAction", { ...act, daysReserved: -1 }, ctx).length > 0, "days cannot be negative (commission steps reserve 0)");
   assert.ok(validateRecord("pendingAction", { ...act, actor: "a1" }, ctx).length > 0, "the actor is implied by where the flag lives");
 });
 

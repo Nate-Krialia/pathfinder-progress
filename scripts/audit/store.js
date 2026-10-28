@@ -9,7 +9,8 @@
  * Like recipe visibility, this is an honor-system aid, not security (see docs/10).
  */
 import { AUDIT, MODULE_ID, QUEUE_KEYS, RESEARCH_KEYS as K } from "../config.js";
-import { applyChange, baselineEntry, compare, emptyEntry, hasModuleData } from "./audit.js";
+import { applyChange, baselineEntry, compare, compareLoans, emptyEntry, hasModuleData } from "./audit.js";
+import { readCommissions } from "../commissions/list.js";
 
 const requireGM = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
 
@@ -60,12 +61,13 @@ export async function commit(actor, update, changes = [], now = Date.now()) {
 /** Actors whose data does not match the ledger. Each row: { actorId, name, mismatches, history }. */
 export function scan(actors = [...game.actors]) {
   const ledger = readLedger();
+  const commissions = readCommissions();
   const rows = [];
   for (const actor of actors) {
     const state = readState(actor);
     const entry = ledger[actor.id];
     if (!entry && !hasModuleData(state)) continue;
-    const mismatches = compare(state, entry ?? emptyEntry(actor.name));
+    const mismatches = [...compare(state, entry ?? emptyEntry(actor.name)), ...compareLoans({ actorId: actor.id, formulas: state.formulas, commissions })];
     if (mismatches.length) rows.push({ actorId: actor.id, name: actor.name, mismatches, history: entry?.history ?? [] });
   }
   return rows;

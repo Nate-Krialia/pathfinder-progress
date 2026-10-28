@@ -20,6 +20,7 @@ import { AUDIT } from "../config.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
 import { pendingTotal } from "../queue/reservation.js";
+import { isOpen } from "../commissions/commission.js";
 
 export const emptyEntry = name => ({ name, days: 0, formulas: {}, projects: {}, history: [] });
 
@@ -138,6 +139,34 @@ export function compare(state, expected) {
   }
   for (const id of Object.keys(expected.projects)) {
     if (!projects.has(id)) add("projectMissing", `no longer has the project "${id}" that the module created`);
+  }
+  return mismatches;
+}
+
+/**
+ * Do an actor's commission loans match the commission list? A loan must belong to an open loan
+ * commission of this crafter for that recipe, and an accepted loan commission must have its loan
+ * (unless the crafter now owns the formula). The list is written only by GM clients, so a mismatch
+ * means the actor's formulas were edited, or a commission step half-failed.
+ * @returns {Array<{ kind: string, message: string }>}
+ */
+export function compareLoans({ actorId, formulas, commissions }) {
+  const mismatches = [];
+  const valid = (Array.isArray(formulas) ? formulas : []).filter(f => check(LIVE_SCHEMAS.formula, f).length === 0);
+  const loans = valid.filter(f => f.access === "loan" && f.commissions?.length);
+  for (const loan of loans) {
+    for (const id of loan.commissions) {
+      const c = commissions.find(x => x.id === id);
+      if (!c || !isOpen(c) || c.status === "requested" || c.crafter !== actorId || c.formulaId !== loan.recipeId || c.access !== "loan") {
+        mismatches.push({ kind: "loanNoCommission", message: `holds a loan of "${loan.recipeId}" for commission "${id}", but there is no accepted loan commission with that id for this character` });
+      }
+    }
+  }
+  for (const c of commissions) {
+    if (c.crafter !== actorId || !["accepted", "inProgress"].includes(c.status) || c.access !== "loan") continue;
+    const owned = valid.some(f => f.recipeId === c.formulaId && f.access === "owned");
+    const loaned = loans.some(f => f.recipeId === c.formulaId && f.commissions.includes(c.id)) || valid.some(f => f.recipeId === c.formulaId && f.access === "loan" && !f.commissions);
+    if (!owned && !loaned) mismatches.push({ kind: "commissionNoLoan", message: `commission "${c.id}" is ${c.status}, but no loan of "${c.formulaId}" is held (the loan is missing)` });
   }
   return mismatches;
 }

@@ -29,6 +29,9 @@ const material = obj({
   effects: record(any()),
   // Percent chance a unit is lost on a failed craft; beats the global default.
   lossChance: optional(int({ min: 0, max: 100 }))
+  ,
+  // Gold value per unit, used only to suggest a commission payout (defaults by tier in config).
+  value: optional(num({ min: 0 }))
 });
 
 const OUTPUT_KEY = /^([1-9]\d*|default)$/;
@@ -263,7 +266,7 @@ const node = obj({
 });
 
 const projectLogEntry = obj({
-  source: oneOf(["research", "addProgress", "gm"]),
+  source: oneOf(["research", "addProgress", "gm", "commission"]),
   delta: int(),
   skill: optional(str()),
   degree: optional(str()),
@@ -314,7 +317,9 @@ const formula = obj({
   recipeId: idField(),
   access: oneOf(["owned", "loan"]),
   source: str(),
-  snapshot: optional(formulaSnapshot)
+  snapshot: optional(formulaSnapshot),
+  // A loan handed over for commissions: the ids of the open commissions it serves (see commissions/loans.js).
+  commissions: optional(arr(str()))
 });
 
 // A full station record (player-owned, or the live form of a public one).
@@ -337,17 +342,30 @@ const stationState = obj({
   tier: optional(tier(TIER_RANGES.station))
 });
 
+// A commission (docs/06-commissions.md). Shape only; the rules between fields (who supplies what,
+// price in whole copper pieces) are in commissions/commission.js.
+export const COMMISSION_STATUSES = ["requested", "accepted", "inProgress", "delivered", "cancelled", "declined"];
 const commission = obj({
   id: str(),
+  source: oneOf(["player", "gm"]),
+  status: oneOf(COMMISSION_STATUSES),
   patron: variant("type", { actor: { actorId: str() }, lightweight: { name: str() } }),
   crafter: str(),
   formulaId: idField(),
-  itemSpec: any(),
-  status: str(),
-  materialsFrom: oneOf(["npc", "crafter"]),
+  access: oneOf(["loan", "copy"]),
+  // slot name -> material id. Required unless the crafter supplies the materials.
+  selection: optional(record(str())),
+  stationId: optional(str()),
+  materialsFrom: oneOf(["patron", "npc", "crafter"]),
   payout: num({ min: 0 }),
   teaches: variant("type", { none: {}, progress: { amount: int({ min: 1 }) }, fullCopy: {} }),
-  formulaAccess: oneOf(["loan", "copy"])
+  learnRoll: bool(),
+  learnAttempted: bool(),
+  attempts: int({ min: 0 }),
+  createdAt: int({ min: 0 }),
+  delivered: optional(obj({ itemName: optional(str()), degree: str(), at: int({ min: 0 }) })),
+  // What the module moved: fees, materials, payouts, items, learn rolls.
+  log: arr(any())
 });
 
 // A queued downtime action, stored in the player's actor flag (the actor is its owner).
@@ -355,9 +373,10 @@ const commission = obj({
 const pendingAction = obj({
   id: str(),
   // The spec leaves this list open ("..."); only "research" has a handler so far.
-  type: oneOf(["research", "explore", "upgrade", "commissionStep"]),
+  type: oneOf(["research", "explore", "upgrade", "commission"]),
   params: any(),
-  daysReserved: int({ min: 1 }),
+  // Research and explore need at least a day (their handlers say so); commission steps cost none.
+  daysReserved: int({ min: 0 }),
   submittedAt: int({ min: 0 })
 });
 

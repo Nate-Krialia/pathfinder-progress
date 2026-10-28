@@ -189,6 +189,37 @@ Corpse yield derived from creature level/traits, auto-creating corpse nodes on d
 - Tokens: `placeAnchor` / `placeAnchors` / `placeNode` create tokens from it. An anchor looks like `icons/svg/mystery-man.svg` named "Anchor"; activation renames and re-images a still-default anchor after its nodeType. `nodeType.img` (optional) sets the image; the default is a Foundry core icon. Hand-made Stage 4 tokens keep working.
 - Corpse nodes still use the dead creature's own token.
 
+# Stage 8 decisions (commissions)
+
+## The record and the list
+- One world setting `commissions` (a list), written only by a GM client; players can read it (an honor-system aid, like the audit ledger, so keep no secrets in it). A player sees the commissions of characters they own.
+- `{ id, source: player|gm, status, patron: {actor}|{lightweight name}, crafter, formulaId, access: loan|copy, selection?, stationId?, materialsFrom: patron|npc|crafter, payout, teaches, learnRoll, learnAttempted, attempts, delivered?, log[] }`. A character patron always supplies the materials; an NPC patron uses `npc` (materials appear for the job) or `crafter` (default).
+- States: requested -> accepted -> inProgress -> delivered, or cancelled / declined. A failed craft keeps it open. `commission.js` holds the table of who may do what: accept/decline = the crafter or the GM, cancel = the patron or the GM (until delivered), craft = the crafter or the GM.
+
+## The queue
+- One queue type `commission` (it replaced the `commissionStep` placeholder) with `params.step`: `request`, `accept` (optionally `as: "loan"` on a copy offer), `decline`, `cancel`, `craft`. These steps cost no days (`daysReserved` 0; research and explore still need at least 1). A player's client validates what it can see; the GM re-validates at review, and a request that can no longer succeed is removed as `invalid`.
+- A request is created idempotently (id `c-<action id>`), so a half-finished resolve is safe to retry.
+
+## The loan
+- Accepting adds `{ access: "loan", commissions: [id] }` to the crafter's formulas (several commissions for one recipe share the entry). A copy is learned for good (`owned`) at accept, and cancelling does not take it back. The generic craft refuses a formula entry that carries a `commissions` list; the commission craft accepts it only for a listed id. GM-granted loans (no list) behave as before.
+- The loan ends on delivery or cancel; if the crafter has learned the formula meanwhile, nothing is removed.
+
+## The craft (escrow at craft time)
+- Nothing is held earlier. A craft first checks everything (formula held by crafter, patron still owns it, recipe, station reachable by the crafter, materials in the supplier's stock, and for a character patron fee + payout in gold; a refusal names the shortfall), then rolls everything (craft check, loss rolls, learn roll), then writes with an undo for every write: consume materials (one stack at a time), take the fee, create the item on the patron, move the payout, write the commission record, and last the crafter's own update (formulas, project, queue) which is already all-or-nothing. Any failure undoes the earlier writes in reverse; if an undo itself fails the error lists what to check by hand.
+- Fee: a character patron pays it; an NPC patron's fee is waived. Materials come from the patron's stock, the crafter's stock, or an NPC's virtual supply (which leaves nothing behind, even after a failed attempt). The finished item goes to a character patron; an NPC-patron job creates no item, only the `delivered` record. The payout is paid only on delivery: patron -> crafter, or created for an NPC patron. A failed craft follows the normal rules (fee lost, per-unit loss rolls, critical failure loses everything) and the commission stays open.
+- Delivery is automatic on a successful craft. Gold moves in whole copper pieces.
+
+## Learn roll and teaches
+- Learn roll: per commission, one attempt, rolled at the first craft attempt (whatever its result), only on a loan the crafter does not own, with the project's skills and DC. No project (or an abandoned one) starts a fresh research project; progress follows the research degrees through the same `applyProgress` that `addProgress` uses, inside the craft's all-or-nothing update. Completing the project makes the formula owned. Default: on for GM-issued loans, off for player jobs.
+- `teaches` (GM-issued): `progress{amount}` adds progress on delivery (starting a project if needed); `fullCopy` makes the formula owned on delivery. Both are skipped when the crafter already owns the formula (warned at issue time).
+
+## Cancel
+- Nothing is held, so nothing is refunded. Fees, material losses and the crafter's own spent stock from failed attempts are sunk; the payout is never paid; a loan disappears, a copy stays. The GM can compensate by hand.
+
+## The audit
+- Loans and copies are formula changes, so the ledger tracks them; every GM write goes through the ledger-first commit. A new check compares loans with the commission list: a loan must belong to an accepted loan commission of that crafter, and an accepted loan commission must have its loan (unless the crafter owns the formula or a GM loan serves it).
+- NOT tracked, and not trackable: gold, materials and items (players earn and spend them outside the module and sheets are editable). Each commission keeps a movement log (fee, materials used and kept, payout, item, learn roll) so a dispute can be settled by hand.
+
 # Notes for later stages
 
 ## Stage 7 (built, see above): a dedicated "Resource Node" actor

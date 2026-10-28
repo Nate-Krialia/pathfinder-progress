@@ -88,11 +88,20 @@ export function refreshSnapshots(list, registry) {
   return { list: next, refreshed, orphaned };
 }
 
-/** Does this crafter hold the formula? Owned and loaned formulas both authorise crafting. */
-export function formulaRequirement(list, recipe, crafterName) {
+/**
+ * Does this crafter hold the formula? Owned and loaned formulas both authorise crafting, with one
+ * limit: a loan handed over for commissions (it carries a `commissions` list) can only be used
+ * through one of those commissions, never by the generic craft.
+ */
+export function formulaRequirement(list, recipe, crafterName, { commissionId } = {}) {
   const entry = findFormula(list, recipe.id);
   if (!entry) {
     return { ok: false, error: `${crafterName} does not know the formula for "${recipe.name}" (research it, or have the GM grant it)` };
+  }
+  const serves = entry.access === "loan" ? (entry.commissions ?? []) : [];
+  if (serves.length) {
+    if (!commissionId) return { ok: false, error: `${crafterName} holds "${recipe.name}" on loan for a commission, so it can only be crafted through that commission (api.commissions.craft)` };
+    if (!serves.includes(commissionId)) return { ok: false, error: `${crafterName}'s loan of "${recipe.name}" is not for commission "${commissionId}"` };
   }
   return { ok: true, access: entry.access };
 }

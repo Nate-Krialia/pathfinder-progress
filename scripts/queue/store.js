@@ -10,7 +10,9 @@
 import { MODULE_ID, QUEUE_KEYS, RESEARCH_KEYS as K } from "../config.js";
 import { commit } from "../audit/store.js";
 import { check } from "../data/schema.js";
+import { daysFrom } from "../research/days.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
+import * as commissions from "../commissions/store.js";
 import * as exploration from "../exploration/store.js";
 import { ResearchRefused, planResearch, planUpdate, postResearchChat, rawList } from "../research/store.js";
 import { HANDLERS, wiredTypes } from "./handlers.js";
@@ -51,7 +53,14 @@ const actorFor = actorId => {
 export function describeAction(actor, action) {
   const handler = HANDLERS[action.type];
   if (!handler) return { label: `${action.type} (not wired yet)`, detail: "no resolver exists for this type yet", problem: "this type cannot be resolved yet" };
-  const info = action.type === "explore" && boundApi ? exploration.describeInfo(boundApi, actor, action) : undefined;
+  let info;
+  try {
+    info = !boundApi ? undefined
+      : action.type === "explore" ? exploration.describeInfo(boundApi, actor, action)
+        : action.type === "commission" ? commissions.describeInfo(boundApi, actor, action) : undefined;
+  } catch (error) {
+    return { label: `${action.type} (could not be described)`, detail: error.message, problem: `could not read this action: ${error.message}` };
+  }
   return handler.describe({ action, projects: rawList(actor, K.projectsFlag), info });
 }
 
@@ -69,9 +78,13 @@ export async function submit(actor, type, params, days) {
   if (!handler) throw new Error(`submit: "${type}" actions cannot be queued yet (wired: ${wiredTypes().join(", ")})`);
   const region = type === "explore" ? needApi("submit").definitions?.region.get(params?.region) : undefined;
   const scenes = type === "explore" && game.user.isGM && region ? exploration.poolFor(region) : null;
-  const checked = handler.validateSubmit({ projects: rawList(actor, K.projectsFlag), params, days, region, scenes });
+  const submitter = type === "commission" ? commissions.submitContext(actor, params) : {};
+  const checked = handler.validateSubmit({ projects: rawList(actor, K.projectsFlag), params, days, region, scenes, ...submitter });
   if (!checked.ok) throw new Error(`submit: ${checked.errors.join("; ")}`);
-  const reserved = planSubmit(actor.getFlag(MODULE_ID, K.daysFlag), days);
+  // Commission steps cost no days; everything else reserves at least one.
+  const reserved = handler.freeOfDays && days === 0
+    ? { ok: true, counter: daysFrom(actor.getFlag(MODULE_ID, K.daysFlag)) }
+    : planSubmit(actor.getFlag(MODULE_ID, K.daysFlag), days);
   if (!reserved.ok) throw new Error(`submit: ${reserved.error}`);
 
   const action = { id: foundry.utils.randomID(), type, params: checked.params, daysReserved: days, submittedAt: Date.now() };
@@ -114,6 +127,7 @@ export async function reject(actor, actionId, { chat = true } = {}) {
 export async function editDays(actor, actionId, newDays) {
   requireGM("editDays");
   const { pending, action } = findAction(actor, actionId);
+  if (action.daysReserved === 0) throw new Error("editDays: this action costs no days");
   const plan = planEdit(actor.getFlag(MODULE_ID, K.daysFlag), action, newDays);
   if (!plan.ok) throw new Error(`editDays: ${plan.error}`);
   await commit(actor, {
@@ -150,6 +164,8 @@ const RESOLVERS = {
     return { status: "resolved", message: `${verb}; progress ${plan.result.project.progress}/${plan.result.project.threshold}; ${refunded} day(s) refunded.${last?.natural ? ` Last natural d20: ${last.natural}.` : ""}` };
   }
 };
+
+RESOLVERS.commission = (api, actor, action, pending, { chat, degree }) => commissions.resolveStep(api, actor, action, pending, { chat, degree });
 
 RESOLVERS.explore = async function explore(api, actor, action, pending, { chat, degree }) {
   const others = pending.filter(a => a.id !== action.id);

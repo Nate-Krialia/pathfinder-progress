@@ -27,4 +27,4 @@ One world-level list (GM-owned, single source of truth). The UI filters per play
 
 ## Open
 - Whether crafting from a loaned formula banks practice insight (unconfirmed).
-- Commission failure handling (what happens to loaned/supplied materials if the craft fails) follows `03-crafting.md` loss rules; confirm payout behavior on failure with the user.
+- Decided (Stage 8): a failed craft follows the `03-crafting.md` rules (fee lost, loss rolls on the supplier's materials), the commission stays open, and the payout is paid only on delivery. See `10-stage2-decisions.md`.
