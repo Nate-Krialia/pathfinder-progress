@@ -687,7 +687,7 @@ test("when no GM is connected, or the socket is missing, a player gets a plain m
 
 test("the real wiring registers the relay functions and exposes cancel on the api", async () => {
   await world();
-  assert.deepEqual([...env.handlers.keys()].sort(), ["queueCancel", "queueSubmit", "search"]);
+  assert.deepEqual([...env.handlers.keys()].sort(), ["queueCancel", "queueSubmit", "search", "workshopAside", "workshopStart"]);
   assert.equal(typeof api.queue.cancel, "function");
   assert.match(readFileSync("module.json", "utf8"), /"socket": true/);
 });
@@ -1001,6 +1001,8 @@ test("the source never uses the removed '-=' update syntax (ForcedDeletion only)
 
 // The gate checklist (docs/13-stage10a-gate.md): every block is run, in order, as the right client ---------------------------
 const gateDoc = readFileSync("docs/13-stage10a-gate.md", "utf8");
+// The docs/13 gate asks for the version it shipped with; the block itself just reports the installed one, so the test compares with module.json.
+const MODULE_VERSION = JSON.parse(readFileSync("module.json", "utf8")).version;
 const GATE = new Map();
 for (const match of gateDoc.matchAll(/^## Step (\d+) ((?:\[[^\]]+\](?: and )?)+)[^\n]*\n([\s\S]*?)(?=^## Step |(?![\s\S]))/gm)) {
   const block = match[3].match(/```js\n([\s\S]*?)```/);
@@ -1035,8 +1037,8 @@ test("GATE: every step runs, in order, as the right client, and reports ALL PASS
   const { gm, testUser } = users;
   const annBefore = snapshot(w);
   await quietly(async () => {
-    assert.deepEqual(await runBlock(1, gm), ["GM", true, "0.14.1"]);
-    assert.deepEqual(await runBlock(1, testUser), ["Test", false, "0.14.1"]);
+    assert.deepEqual(await runBlock(1, gm), ["GM", true, MODULE_VERSION]);
+    assert.deepEqual(await runBlock(1, testUser), ["Test", false, MODULE_VERSION]);
 
     const setup = await runBlock(2, gm);
     assert.deepEqual(setup.baseline, { gold: 20, ore: 8, free: 6, reserved: 0, items: [] });
@@ -1153,10 +1155,10 @@ test("RELAY: guard() and unwrap() turn only Refusals into plain messages and eve
 
 test("RELAY: the module registers exactly the handlers we know about, and every one is guarded", async () => {
   await world();
-  assert.deepEqual([...env.handlers.keys()].sort(), ["queueCancel", "queueSubmit", "search"]);
+  assert.deepEqual([...env.handlers.keys()].sort(), ["queueCancel", "queueSubmit", "search", "workshopAside", "workshopStart"]);
   const source = readFileSync("scripts/socket.js", "utf8");
   const registers = source.split("\n").filter(line => /\.register\("/.test(line));
-  assert.equal(registers.length, 3);
+  assert.equal(registers.length, 5);
   for (const line of registers) assert.match(line, /register\("\w+", guard\("\w+",/, `an unguarded handler: ${line.trim()}`);
   // every file that relays through the socket unwraps what comes back
   for (const file of ["scripts/queue/work.js", "scripts/exploration/store.js"]) {
@@ -1182,7 +1184,7 @@ test("RELAY: walking every registered handler with refusals, nonsense and bugs: 
       }
     }
   });
-  assert.equal(results, 3 * payloads.length * 2);
+  assert.equal(results, 5 * payloads.length * 2);
   assert.deepEqual(env.handlerThrows, []);
 });
 

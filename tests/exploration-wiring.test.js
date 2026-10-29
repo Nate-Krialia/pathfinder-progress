@@ -422,7 +422,10 @@ test("NOTHING LEAKS to players: no public chat, no scene flag, no result on the 
   assert.ok(env.chat.length >= 1);
   for (const message of env.chat) assert.deepEqual(message.whisper, ["gm1"], "every expedition message is whispered to the GM only");
   assert.deepEqual(Object.keys(scene.flags[M]), ["sceneTags"], "the scene's flags hold only its tag");
-  assert.deepEqual(Object.keys(bb.flags).sort(), ["downtimeDays", "pendingActions"], "the player's sheet holds no results");
+  // The Compendium may now hold the region the character explored (a fact they know), and nothing else: no node, no encounter, no odds.
+  assert.deepEqual(Object.keys(bb.flags).sort(), ["compendium", "downtimeDays", "pendingActions"], "the player's sheet holds no results");
+  const book = bb.getFlag(M, "compendium");
+  assert.deepEqual([Object.keys(book.regions), book.regions["oak-wood"].nodeTypes, book.materials, book.creatures], [["oak-wood"], [], {}, {}], "only the region itself");
   assert.deepEqual(bb.getFlag(M, "pendingActions"), []);
   const everything = JSON.stringify([env.chat.filter(m => !m.whisper), scene.flags, bb.flags]);
   assert.doesNotMatch(everything, /encounter|Perception DC|natural|hidden node/i);
@@ -796,6 +799,12 @@ test("FAULT INJECTION: failing each write of an expedition in turn leaves the sc
     if (clean.labels[k - 1] === "settings.set downtime") {
       // The "days spent" bookkeeping after a finished action never fails it (it only logs).
       assert.equal(run.outcome.status, "resolved", `the bookkeeping write ${k} failing must not undo a finished expedition`);
+      continue;
+    }
+    if (!run.error && run.outcome?.status === "resolved") {
+      // The only other write that may fail without failing the expedition is the best-effort Compendium entry for the region.
+      assert.equal(clean.labels[k - 1], "actor.update");
+      assert.equal(run.bb.getFlag(M, "compendium"), undefined, `only the best-effort Compendium write (${k}) may fail without failing the expedition`);
       continue;
     }
     assert.ok(run.error, `a failure at write ${k} (${clean.labels[k - 1]}) must surface`);

@@ -15,7 +15,10 @@ import * as downtime from "./downtime/store.js";
 import { installSocketHooks, socketStatus } from "./socket.js";
 import { suggestPayout } from "./commissions/commission.js";
 import { feeForTier } from "./stations/fees.js";
-import { AUDIT, COMMISSIONS, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS } from "./config.js";
+import { AUDIT, COMMISSIONS, COMPENDIUM, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
+import * as compendium from "./compendium/store.js";
+import * as workshop from "./workshop/store.js";
+import { UPGRADE_KINDS } from "./workshop/rules.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
 Hooks.once("init", () => {
@@ -60,6 +63,21 @@ Hooks.once("init", () => {
   });
 
   game.settings.register(MODULE_ID, STATION_KEYS.stationStateSetting, {
+    scope: "world",
+    config: false,
+    type: new foundry.data.fields.ArrayField(new foundry.data.fields.ObjectField()),
+    default: []
+  });
+
+  // The Compendium entries the GM approved for the whole party, and the workshops the party built (both written only by a GM client).
+  game.settings.register(MODULE_ID, COMPENDIUM.sharedSetting, {
+    scope: "world",
+    config: false,
+    type: new foundry.data.fields.ObjectField(),
+    default: {}
+  });
+
+  game.settings.register(MODULE_ID, WORKSHOP.partyStationsSetting, {
     scope: "world",
     config: false,
     type: new foundry.data.fields.ArrayField(new foundry.data.fields.ObjectField()),
@@ -169,6 +187,31 @@ Hooks.once("ready", async () => {
       editDays: (actor, actionId, days) => queueStore.editDays(actor, actionId, days),
       resolve: (actor, actionId, options) => queueStore.resolveAction(api, actor, actionId, options),
       resolveAll: options => queueStore.resolveAll(api, options)
+    },
+    /**
+     * The per-character Compendium (Stage 10b). view(actor): the character's own entries plus the party's shared ones
+     * (the owner or a GM only: an API courtesy, not security). all(): GM only, every character's progress.
+     * hasMaterial(actor, id): has the character discovered it? Share an entry with api.queue.submit(actor, "share", { kind, key }).
+     */
+    compendium: {
+      view: actor => compendium.view(api.definitions, actor),
+      all: () => compendium.all(api.definitions),
+      hasMaterial: (actor, materialId) => compendium.hasMaterial(actor, materialId)
+    },
+    /**
+     * Workshops (Stage 10c). Players can call startUpgrade / startDesign / putAside (relayed to the GM client; immediate; no downtime needed).
+     * startUpgrade(actor, { stationId, kind: "tier"|"craftDays"|"hearth", materials: { materialId: units } }) holds the target-tier materials in escrow on the
+     * research project (no gold); putAside(actor, projectId) gives them back; the research days go through the ordinary research queue item.
+     * Hearths are a counter with NO EFFECT YET. startDesign(actor, { blueprint }) researches a workshop design; build it with
+     * api.queue.submit(actor, "build", { blueprint, selection }) (materials + gold + days; no roll; a party-owned workshop at the party's town, no station fee).
+     */
+    workshop: {
+      upgradeKinds: UPGRADE_KINDS,
+      startUpgrade: (actor, params) => workshop.relayStartUpgrade(actor, params),
+      startDesign: (actor, params) => workshop.relayStartDesign(actor, params),
+      putAside: (actor, projectId) => workshop.relayPutAside(actor, projectId),
+      /** GM testing tool: give a character a design without the research. */
+      grantDesign: (actor, blueprintId) => workshop.grantDesign(api, actor, blueprintId)
     },
     /** GM only: open the review window. */
     openReview: () => openReview(api),
@@ -294,6 +337,7 @@ Hooks.once("ready", async () => {
   };
   game.modules.get(MODULE_ID).api = api;
   queueStore.bind(api);
+  workshop.bind(api);
 
   for (const warning of adapter.checkVersions()) {
     console.warn(`${MODULE_ID} | ${warning}`);
@@ -327,6 +371,11 @@ Hooks.on("createChatMessage", message => {
 });
 
 Hooks.on("renderChatMessageHTML", (message, html) => addGrantButton(message, html));
+
+// Compendium recording (best-effort and idempotent; only the one active GM client records, so it happens once).
+const isActiveGM = () => game.user.isGM && game.users.activeGM?.id === game.user.id;
+Hooks.on("createItem", item => (isActiveGM() ? compendium.onItemCreated(item) : undefined));   // the promise is returned so a test can wait for it; Foundry ignores it
+Hooks.on("createCombatant", combatant => (isActiveGM() ? compendium.noteCombat(combatant.parent ?? combatant.combat) : undefined));
 
 /** Tell the GM what is waiting, and open the review window if that is switched on. */
 async function announce(api) {

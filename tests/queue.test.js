@@ -86,7 +86,10 @@ test("research validateSubmit needs a real, active unlockFormula project and an 
   assert.match(v([project({ status: "complete" })], { projectId: "p" }).errors[0], /complete, not active/);
   assert.match(v([project({ skillWhitelist: ["arcana", "occultism"] })], { projectId: "p" }).errors[0], /choose one with skill/);
   assert.match(v([project()], { projectId: "p", skill: "crafting" }).errors[0], /not allowed/);
-  assert.match(v([project({ outcome: { type: "upgradeStation", stationId: "s" } })], { projectId: "p" }).errors[0], /unlockFormula/);
+  // Upgrade and design projects are researched the same way (the targets are checked on the GM client, when it resolves).
+  assert.equal(v([project({ outcome: { type: "upgradeStation", stationId: "s", kind: "tier", from: 1, to: 2 } })], { projectId: "p" }).ok, true);
+  assert.equal(v([project({ outcome: { type: "designBlueprint", blueprintId: "camp-forge" } })], { projectId: "p" }).ok, true);
+  assert.match(v([project({ outcome: { type: "somethingElse" } })], { projectId: "p" }).errors[0], /"somethingElse" project cannot be researched/);
 });
 
 // Review window --------------------------------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import { exploreOdds, planExpedition, rollEncounter, simulateExpeditions } from 
 import { anchorTokenData, nodeTokenData, occupyUpdate, randomPositions, revealUpdate, vacateUpdate } from "./tokens.js";
 import { formatGmSummary } from "./summary.js";
 import { unwrap } from "../queue/relay.js";
+import { noteNodesFound } from "../compendium/store.js";
 import { SEARCHED_ALREADY_TEXT, SEARCH_TEXT, searchMessage, spottedIds } from "./search.js";
 
 /** A request that can never succeed as stated (the region no longer exists, the skill is not allowed). The queue refunds these. */
@@ -469,6 +470,7 @@ export async function runSearch({ actorId, sceneId, userId }) {
       await writeSceneState(scene.id, afterState).catch(() => {});
       throw error;
     }
+    await noteNodesFound(globalThis.game?.modules?.get?.(MODULE_ID)?.api?.definitions, actor, spottedNodes.map(n => ({ nodeType: n.record.nodeType, region: n.record.region })));   // best-effort
   }
 
   const names = spottedNodes.map(n => n.token.name);

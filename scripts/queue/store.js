@@ -21,6 +21,10 @@ import { planEdit, planReject, planResolve, planSubmit } from "./reservation.js"
 import { runBatch } from "./queue.js";
 import { esc } from "./review.js";
 import * as work from "./work.js";
+import { noteRegionExplored } from "../compendium/store.js";
+import { resolveShare } from "../compendium/share.js";
+import { applyStationUpgrade } from "../stations/store.js";
+import { resolveBuild } from "../workshop/build.js";
 import { refusal } from "./relay.js";
 
 let boundApi = null;
@@ -137,7 +141,7 @@ async function returnQueued(actor, actionId, { chat, verb }) {
   return work.withActionLocks(actor, first, async () => {
     const { pending, action } = findAction(actor, actionId); // read again inside the lock
     const described = describeAction(actor, action);
-    const { undos, text } = await work.takeBack(actor, action);
+    const { undos, text, landed } = await work.takeBack(actor, action);
     const { counter } = planReject(actor.getFlag(MODULE_ID, K.daysFlag), action);
     try {
       await commit(actor, {
@@ -148,8 +152,9 @@ async function returnQueued(actor, actionId, { chat, verb }) {
       await work.undoAll(undos).catch(undoError => { throw new Error(`${error.message}. ${undoError.message}`); });
       throw error;
     }
+    await work.recordReturned(actor, landed);
     if (work.isWorkType(action.type)) {
-      await work.note(`${action.type} ${verb}: ${described.label} for ${actor.name}; ${text}${action.daysReserved ? `; ${action.daysReserved} day(s) refunded` : ""}`);
+      await work.note([`${action.type} ${verb}: ${described.label} for ${actor.name}`, text, action.daysReserved ? `${action.daysReserved} day(s) refunded` : ""].filter(Boolean).join("; "));
     }
     if (chat) await postNote(actor, `<p><strong>${esc(actor.name)}</strong>: the GM returned "${esc(described.label)}". ${action.daysReserved} day(s) refunded.${text ? ` ${esc(text)}.` : ""}</p>`);
     return { refunded: action.daysReserved, ...(text ? { returned: text } : {}) };
@@ -158,7 +163,8 @@ async function returnQueued(actor, actionId, { chat, verb }) {
 
 export async function reject(actor, actionId, { chat = true } = {}) {
   requireGM("reject");
-  return returnQueued(actor, actionId, { chat, verb: "returned by the GM" });
+  const { action } = findAction(actor, actionId);
+  return returnQueued(actor, actionId, { chat, verb: action.type === "share" ? "rejected by the GM" : "returned by the GM" });
 }
 
 /**
@@ -185,6 +191,7 @@ export async function editDays(actor, actionId, newDays) {
   requireGM("editDays");
   const { pending, action } = findAction(actor, actionId);
   if (action.type === "craft") throw new Error("editDays: a craft's time is set by the recipe and the station; reject the craft to get everything back");
+  if (action.type === "build") throw new Error("editDays: a build's time is set by the blueprint; reject the build to get everything back");
   if (action.daysReserved === 0) throw new Error("editDays: this action costs no days");
   const plan = planEdit(actor.getFlag(MODULE_ID, K.daysFlag), action, newDays);
   if (!plan.ok) throw new Error(`editDays: ${plan.error}`);
@@ -215,7 +222,15 @@ const RESOLVERS = {
     }
     const spent = plan.result.daysSpent;
     const { counter: after, refunded } = planResolve(counter, action.daysReserved, spent);
-    await commit(actor, { ...planUpdate(plan), [flagKey(QUEUE_KEYS.pendingFlag)]: others, [flagKey(K.daysFlag)]: after }, plan.changes);
+    // A finished upgrade changes the station FIRST (under the station's lock, with an undo); if the actor's commit then fails, it is put back.
+    const undoStation = plan.stationEffect ? await applyStationUpgrade(api, plan.stationEffect.stationId, plan.stationEffect) : null;
+    try {
+      await commit(actor, { ...planUpdate(plan), [flagKey(QUEUE_KEYS.pendingFlag)]: others, [flagKey(K.daysFlag)]: after }, plan.changes);
+    } catch (error) {
+      if (undoStation) await undoStation();
+      throw error;
+    }
+    if (plan.stationEffect) await work.note(`upgrade finished: ${plan.result.project.goalName} (researched by ${actor.name})`);
     if (chat) await postResearchChat(actor, plan);
     const last = plan.result.results.at(-1);
     const verb = plan.result.completed ? "finished the research" : `researched (${spent} day(s))`;
@@ -224,6 +239,8 @@ const RESOLVERS = {
 };
 
 RESOLVERS.commission = (api, actor, action, pending, { chat, degree }) => commissions.resolveStep(api, actor, action, pending, { chat, degree });
+RESOLVERS.build = (api, actor, action, pending, options) => resolveBuild(api, actor, action, pending, options, work.dropAction);
+RESOLVERS.share = (api, actor, action, pending, options) => resolveShare(api, actor, action, pending, options);
 RESOLVERS.craft = (api, actor, action, pending, options) => work.resolveCraft(api, actor, action, pending, options);
 RESOLVERS.gather = (api, actor, action, pending, options) => work.resolveGatherAction(api, actor, action, pending, options);
 
@@ -255,6 +272,7 @@ RESOLVERS.explore = async function explore(api, actor, action, pending, { chat, 
     }
     throw error;
   }
+  await noteRegionExplored(api.definitions, actor, run.region.id);   // best-effort: never fails the expedition
   if (chat) await exploration.postExploreChat(api, actor, run);
   const { plan } = run;
   const short = plan.notPlaced ? ` (${plan.rolled} found, only ${plan.freeBefore} free anchor(s): ${plan.notPlaced} not placed)` : "";
@@ -282,7 +300,7 @@ export async function resolveAction(api, actor, actionId, { chat = true, degree 
     if (spendsTime(valid.type, valid.params, valid.daysReserved)) {
       const reason = downtime.gateReason(actor);
       if (reason) {
-        if (valid.type === "craft") return work.dropAction(actor, valid, pending, reason);
+        if (work.ESCROW_TYPES.includes(valid.type)) return work.dropAction(actor, valid, pending, reason);
         const { counter } = planReject(actor.getFlag(MODULE_ID, K.daysFlag), valid);
         await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: pending.filter(a => a.id !== valid.id), [flagKey(K.daysFlag)]: counter });
         return { status: "invalid", message: `${reason}. ${valid.daysReserved} day(s) refunded.` };
@@ -294,8 +312,8 @@ export async function resolveAction(api, actor, actionId, { chat = true, degree 
   });
 }
 
-/** How many queued actions block "End downtime": everything except gathers (they cost charges, not days). */
-export const blockingCount = () => list().filter(row => row.action.type !== "gather").length;
+/** How many queued actions block "End downtime": everything except gathers and shares (they cost no days). */
+export const blockingCount = () => list().filter(row => !work.NON_BLOCKING_TYPES.includes(row.action.type)).length;
 
 /**
  * Return queued actions to their owners (days refunded, escrow handed back). Used by a forced end of downtime, which
@@ -305,7 +323,7 @@ export async function rejectAll({ chat = false, keepGathers = false } = {}) {
   requireGM("rejectAll");
   let count = 0;
   for (const row of list()) {
-    if (keepGathers && row.action.type === "gather") continue;
+    if (keepGathers && work.NON_BLOCKING_TYPES.includes(row.action.type)) continue;
     await reject(actorFor(row.actorId), row.action.id, { chat });
     count++;
   }

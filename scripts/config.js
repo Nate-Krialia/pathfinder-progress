@@ -201,3 +201,34 @@ export const CRAFT_DAYS = {
   // No reduction can take a craft below this many days.
   minDays: 1
 };
+
+/**
+ * Workshops (docs/10, Stage 10c). All numbers are placeholders for Stage 12.
+ * Upgrade kinds: "tier" (raise the station's tier), "craftDays" (cut craft days), "hearth" (a counter; NO EFFECT YET).
+ */
+export const WORKSHOP = {
+  // Highest tier a town (fixed) station can reach. A carried kit is capped by STATIONS.portableTierCap.
+  townTierCap: 4,
+  // Highest level of the other two upgrade kinds.
+  maxLevel: { craftDays: 3, hearth: 3 },
+  // The skill(s) an upgrade or design project may be researched with.
+  researchSkills: ["crafting"],
+  // The research DC of a project is the PF2e level DC of this level (by the target tier) plus the research tier's offset.
+  levelByTier: { 1: 1, 2: 3, 3: 6, 4: 9, 5: 12 },
+  // Units of materials of the TARGET tier an upgrade holds in escrow, by target tier. No gold.
+  upgradeUnits: { 1: 2, 2: 3, 3: 4, 4: 5, 5: 6 },
+  // Stored in a station's `owner` field for a party-owned workshop (the access list holds the party's characters).
+  partyOwner: "party",
+  partyStationsSetting: "partyStations",
+  // Said wherever the hearth counter is shown, so nobody mistakes it for a working feature.
+  hearthNote: "no effect yet"
+};
+
+/** The per-character Compendium (docs/10, Stage 10b). */
+export const COMPENDIUM = {
+  flag: "compendium",
+  version: 1,
+  sharedSetting: "sharedCompendium",
+  // Entries shared with the whole party are kept in this order.
+  categories: ["materials", "creatures", "regions"]
+};

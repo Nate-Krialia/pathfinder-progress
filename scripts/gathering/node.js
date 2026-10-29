@@ -93,12 +93,15 @@ export function activateRecord(record, { nodeType, tier, charges, source, region
 }
 
 /** A corpse node: the same shape, with its own ladder and a decay timer. */
-export function makeCorpseRecord({ tier, ladder, charges, decayTimer, nodeType = "corpse", region, discoveredBy = [] }, registry, config) {
+export function makeCorpseRecord({ tier, ladder, charges, decayTimer, nodeType = "corpse", region, discoveredBy = [], creature }, registry, config) {
   if (!ladder) return { ok: false, errors: ["a corpse node needs its own ladder (the trait-to-material mapping that would derive one is not built yet)"] };
+  if (creature !== undefined && (typeof creature?.name !== "string" || !creature.name.trim() || typeof creature?.type !== "string" || !creature.type.trim())) {
+    return { ok: false, errors: ['creature must be { name: "Goblin Warrior", type: "humanoid" } (both non-empty)'] };
+  }
   const type = registry.nodeType.get(nodeType);
   if (!type) return { ok: false, errors: [`unknown nodeType "${nodeType}" (known: ${[...registry.nodeType.keys()].join(", ") || "none"})`] };
   return validated({
     source: "corpse", state: "active", nodeType, tier, charges: charges ?? type.charges, decayTimer, ladder,
-    discoveredBy, ...(region ? { region } : {})
+    discoveredBy, ...(region ? { region } : {}), ...(creature ? { creature: { name: creature.name.trim(), type: creature.type.trim() } } : {})
   }, registry, config);
 }

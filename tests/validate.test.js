@@ -175,7 +175,9 @@ test("live: a ladder rung's quantity must be a number or dice", () => {
 test("live: project outcome is a tagged variant", () => {
   const base = { id: "unlock-blade", goalName: "Blade", tier: 2, dc: 20, threshold: 12, progress: 0, skillWhitelist: ["arcana"], status: "active", log: [] };
   assert.deepEqual(validateRecord("project", { ...base, outcome: { type: "unlockFormula", recipeId: "blade" } }, ctx), []);
-  assert.deepEqual(validateRecord("project", { ...base, outcome: { type: "upgradeStation", stationId: "s1", fromTier: 1, toTier: 2 } }, ctx), []);
+  assert.deepEqual(validateRecord("project", { ...base, outcome: { type: "upgradeStation", stationId: "s1", kind: "tier", from: 1, to: 2 } }, ctx), []);
+  assert.deepEqual(validateRecord("project", { ...base, outcome: { type: "designBlueprint", blueprintId: "camp-forge" } }, ctx), []);
+  assert.ok(validateRecord("project", { ...base, outcome: { type: "upgradeStation", stationId: "s1", kind: "gold", from: 1, to: 2 } }, ctx).length, "an unknown upgrade kind is refused");
   const bad = validateRecord("project", { ...base, outcome: { type: "explode" } }, ctx);
   assert.equal(bad[0].field, "outcome.type");
 });

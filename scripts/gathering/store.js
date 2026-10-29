@@ -11,6 +11,7 @@ import { LIVE_SCHEMAS } from "../data/schemas.js";
 import { activateRecord, makeAnchorRecord, makeCorpseRecord, makeNodeRecord, normalizeNode } from "./node.js";
 import { checkGatherable, hiddenSuccessChance, neededD20, pickSkill, resolveGather, visiblePassChance } from "./resolve.js";
 import { formatGatherSummary } from "./summary.js";
+import { noteGather, whileHandled } from "../compendium/store.js";
 
 const rollDie = sides => Math.floor(CONFIG.Dice.randomUniform() * sides) + 1;
 const PASS = ["success", "criticalSuccess"];
@@ -105,7 +106,7 @@ export async function activateNode(api, token, spec = {}) {
   return record;
 }
 
-/** Make a token a corpse node with a hand-authored ladder. spec: { tier, ladder, charges?, decayTimer, region?, replace? } */
+/** Make a token a corpse node with a hand-authored ladder. spec: { tier, ladder, charges?, decayTimer, region?, creature?: { name, type }, replace? } (creature lets gathering from it be recorded on that creature's Compendium entry) */
 export async function makeCorpseNode(api, token, { replace, ...spec } = {}) {
   requireGM("makeCorpseNode");
   const doc = resolveToken(token);
@@ -138,7 +139,8 @@ export async function grantAll(actor, gains, definitions) {
     for (const gain of gains) {
       const material = definitions.material.get(gain.materialId);
       const before = adapter.getMaterialStacks(actor).find(s => s.materialId === gain.materialId)?.quantity ?? 0;
-      const item = await adapter.giveMaterial(actor, material, gain.quantity);
+      // The gather records the Compendium itself, with place and rung, once it has committed: the createItem hook stays out of it.
+      const item = await whileHandled(actor.id, [gain.materialId], () => adapter.giveMaterial(actor, material, gain.quantity));
       done.push({ item, before });
     }
   } catch (error) {
@@ -245,6 +247,7 @@ export async function gather({ actor, node: nodeRef, skill, degree: forced, chat
     );
   }
   for (const gain of result.gains) materialNames[gain.materialId] = api.definitions.material.get(gain.materialId).name;
+  await noteGather(api.definitions, actor, { gains: result.gains, node: previous, scene: doc.parent ?? null });   // best-effort: never fails the gather
 
   if (chat) {
     try {

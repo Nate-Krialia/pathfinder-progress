@@ -32,15 +32,25 @@ import { daysFrom } from "../research/days.js";
 import { rawList } from "../research/store.js";
 import { describeEscrow, escrowFromPlan, escrowProblems, refusalText, unusedUnits, virtualStacks } from "./escrow.js";
 import { actorKey, nodeKey, withLocks } from "./lock.js";
+import { noteGather } from "../compendium/store.js";
+import { submitShare } from "../compendium/share.js";
+import { submitBuild } from "../workshop/build.js";
+import { stationReductions } from "../workshop/rules.js";
 import { GENERIC_FAILURE, refusal, unwrap } from "./relay.js";
+import { appendAction, assertOwner, callerOf, flagKey, gmIds, giveBack, note, ownerIds, pendingOf, recordReturned, takeEscrow, undoAll, undoThenThrow, whisper } from "./common.js";
+
+// Re-exported: the queue store and the tests reach these through work.js.
+export { assertOwner, callerOf, note, recordReturned, undoAll };
 import { planReject, planResolve, planSubmit } from "./reservation.js";
 
-export const WORK_TYPES = ["craft", "gather"];
+export const WORK_TYPES = ["craft", "gather", "share", "build"];
+/** Queued actions that cost no downtime days: they never block "End downtime", and a forced end leaves them queued. */
+export const NON_BLOCKING_TYPES = ["gather", "share"];
+/** Queued actions that hold an escrow record (materials and gold taken when queued): a craft and a build. */
+export const ESCROW_TYPES = ["craft", "build"];
 export const isWorkType = type => WORK_TYPES.includes(type);
 
-const flagKey = key => `flags.${MODULE_ID}.${key}`;
 const readRecord = doc => doc.getFlag(MODULE_ID, "node");
-const pendingOf = actor => rawList(actor, QUEUE_KEYS.pendingFlag);
 const d100 = () => Math.floor(CONFIG.Dice.randomUniform() * 100) + 1;
 const rollDie = sides => Math.floor(CONFIG.Dice.randomUniform() * sides) + 1;
 const PASS = ["success", "criticalSuccess"];
@@ -52,38 +62,16 @@ export function bind(api) { boundApi = api; }
 /** Set by socket.js once the module has registered with socketlib. */
 export function setSocket(s) { socket = s; }
 
-/** Workshop upgrades will cut craft days. Until they exist nothing reduces them; tests plug a function in here. */
-let reductionsFor = () => [];
-export function setCraftReductions(fn) { reductionsFor = typeof fn === "function" ? fn : () => []; }
-
-/** A line in the audit ledger's world events. The operation it describes is already done, so a failed log never fails it. */
-export async function note(text) {
-  try {
-    await logWorldEvent(text);
-  } catch (error) {
-    console.error(`${MODULE_ID} | could not write to the audit log: ${text}`, error);
-  }
-}
+/**
+ * The craft-day reductions for a craft at a station: the station's craft-day upgrades PLUS any extra source plugged in
+ * with setCraftReductions (tools, a bench, a later stage). The 1-day floor is applied by craftDays() AFTER all of them.
+ * Passing nothing removes the extra source.
+ */
+let extraReductions = () => [];
+export function setCraftReductions(fn) { extraReductions = typeof fn === "function" ? fn : () => []; }
+const reductionsFor = (actor, station) => [...stationReductions(station), ...extraReductions(actor, station)];
 
 // Who is asking ---------------------------------------------------------------------------------------------------
-/**
- * The user behind a relayed call. socketlib may say who called (`socketdata.userId`); otherwise it is the id the
- * caller sent. Foundry cannot prove identity to a module, so this is an honor-system check (see docs/10): it stops
- * the buttons and the API being used on someone else's character, not a player determined to forge an id.
- */
-export function callerOf(payload, context) {
-  const id = context?.socketdata?.userId ?? payload?.userId;
-  const user = game.users.get(id);
-  if (!user) throw refusal(`the GM client does not know the user "${id}"`);
-  return user;
-}
-
-/** The GM or an owner of the actor. Throws otherwise, before anything is read or written. */
-export function assertOwner(actor, user, what) {
-  if (user.isGM) return;
-  if (!actor.testUserPermission(user, "OWNER")) throw refusal(`${what}: ${user.name} does not own ${actor.name}`);
-}
-
 /**
  * Run `direct` here on a GM client (a refusal throws a plain Error, as it always did), or ask the GM client over the
  * socket. Over the socket the GM-side handler is guarded (relay.js): a refusal comes back as data and is rethrown here
@@ -102,92 +90,12 @@ export async function asGM(name, payload, direct) {
   return unwrap(result);   // a refusal travelled as data: this throws it again, with its plain message
 }
 
-// Undo plumbing ---------------------------------------------------------------------------------------------------
-export async function undoAll(undos) {
-  const failures = [];
-  for (const undo of [...undos].reverse()) {
-    try { await undo.run(); } catch (error) { failures.push(`${undo.what} (${error.message})`); }
-  }
-  if (failures.length) throw new Error(`could not undo: ${failures.join("; ")}. Check these by hand.`);
-}
-
-async function undoThenThrow(undos, error) {
-  try {
-    await undoAll(undos);
-  } catch (undoError) {
-    throw new Error(`${error.message}. ${undoError.message}`, { cause: error });
-  }
-  throw error;
-}
-
-/** Take the materials (one stack at a time, each with its own undo) and the fee. Returns the undos. */
-async function takeEscrow(actor, byStack, feeCopper) {
-  const undos = [];
-  try {
-    for (const [stackId, units] of Object.entries(byStack)) {
-      const item = actor.items.get(stackId);
-      if (!item) throw new Error(`${actor.name} no longer has that stack of materials`);
-      const snapshot = { quantity: item.system?.quantity ?? 1, data: item.toObject() };
-      await adapter.consumeMaterialStacks(actor, { [stackId]: units });
-      undos.push({
-        what: `materials on ${actor.name}`,
-        run: async () => {
-          const existing = actor.items.get(stackId);
-          if (existing) await existing.update({ "system.quantity": snapshot.quantity });
-          else await adapter.createItemOnActor(actor, snapshot.data);
-        }
-      });
-    }
-    if (feeCopper > 0) {
-      await adapter.removeCopper(actor, feeCopper);
-      undos.push({ what: `${gpText(feeCopper)} on ${actor.name}`, run: () => adapter.addCopper(actor, feeCopper) });
-    }
-  } catch (error) {
-    await undoThenThrow(undos, error);
-  }
-  return undos;
-}
-
-/** Hand materials (and optionally the fee) back to the stash and purse. Returns the undos. */
-async function giveBack(actor, units, feeCopper = 0) {
-  const undos = [];
-  try {
-    for (const u of units) {
-      const before = adapter.getMaterialStacks(actor).find(s => s.materialId === u.materialId)?.quantity ?? 0;
-      const item = await adapter.giveMaterial(actor, { id: u.materialId, name: u.name ?? u.materialId, tier: u.tier }, u.units);
-      undos.push({
-        what: `${u.units}x ${u.materialId} on ${actor.name}`,
-        run: () => (before === 0 ? item.delete() : item.update({ "system.quantity": before }))
-      });
-    }
-    if (feeCopper > 0) {
-      await adapter.addCopper(actor, feeCopper);
-      undos.push({ what: `${gpText(feeCopper)} on ${actor.name}`, run: () => adapter.removeCopper(actor, feeCopper) });
-    }
-  } catch (error) {
-    await undoThenThrow(undos, error);
-  }
-  return undos;
-}
-
 /** Where a gather's node is: { scene, token } (either may be missing). */
 function nodeOf(params) {
   const scene = game.scenes.get(params.sceneId) ?? null;
   const token = scene?.tokens.get(params.tokenId) ?? null;
   return { scene, token };
 }
-
-const ownerIds = actor => [...game.users].filter(u => !u.isGM && actor.testUserPermission(u, "OWNER")).map(u => u.id);
-
-async function whisper(recipients, content) {
-  if (!recipients.length) return;
-  try {
-    await ChatMessage.create({ whisper: recipients, content });
-  } catch (error) {
-    console.error(`${MODULE_ID} | the result is saved, but the chat message failed`, error);
-  }
-}
-const gmIds = () => ChatMessage.getWhisperRecipients("GM").map(u => u.id);
 
 // Locks -----------------------------------------------------------------------------------------------------------
 /** Everything that changes one actor's queue (and, for a gather, one node) takes these, node first. */
@@ -198,6 +106,8 @@ export function withActionLocks(actor, action, fn) {
 // Submitting ------------------------------------------------------------------------------------------------------
 /** Normalise what a caller passed (a token document or plain ids) into plain, sendable params. */
 function plainParams(type, params = {}) {
+  if (type === "share") return { kind: params.kind, key: params.key };
+  if (type === "build") return { blueprint: params.blueprint ?? params.blueprintId, selection: { ...(params.selection ?? {}) } };
   if (type === "craft") return { recipe: params.recipe ?? params.recipeId, selection: { ...(params.selection ?? {}) }, ...(params.stationId ? { stationId: params.stationId } : {}) };
   const token = params.node?.documentName === "Token" ? params.node : null;
   return { sceneId: params.sceneId ?? token?.parent?.id, tokenId: params.tokenId ?? token?.id, ...(params.skill ? { skill: params.skill } : {}) };
@@ -215,15 +125,13 @@ export async function runSubmit(payload, context) {
   if (!actor) throw refusal(`submit: no character with id "${payload.actorId}"`);
   assertOwner(actor, user, "submit");
   if (!boundApi) throw new Error("submit: the queue is not bound to the module api yet");
-  return payload.type === "craft"
-    ? submitCraft(boundApi, actor, user, payload.params, payload.days)
-    : submitGather(boundApi, actor, payload.params, payload.days);
-}
-
-async function appendAction(actor, action, extraUpdate = {}) {
-  const problems = check(LIVE_SCHEMAS.pendingAction, action);
-  if (problems.length) throw new Error(`submit: built an invalid action: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
-  await actor.update({ [flagKey(QUEUE_KEYS.pendingFlag)]: [...pendingOf(actor), action], ...extraUpdate });
+  switch (payload.type) {
+    case "craft": return submitCraft(boundApi, actor, user, payload.params, payload.days);
+    case "gather": return submitGather(boundApi, actor, payload.params, payload.days);
+    case "share": return submitShare(actor, payload.params, payload.days);
+    case "build": return submitBuild(boundApi, actor, user, payload.params, payload.days);
+    default: throw refusal(`${payload.type} actions cannot be queued this way`);
+  }
 }
 
 /**
@@ -244,7 +152,7 @@ export function submitCraft(api, actor, user, params, days) {
     const { plan } = preview;
     if (plan.fee === null || plan.fee === undefined || !plan.station) throw refusal(refusalText(["no station can make this"]));
 
-    const needed = craftDays(recipe, reductionsFor(actor, plan.station)).days;
+    const needed = craftDays(recipe, reductionsFor(actor, preview.stations.chosen)).days;
     if (days !== undefined && days !== null && days !== 0 && days !== needed) throw refusal(`craft: this craft takes ${needed} day(s) (got ${days}); the time is set by the recipe and the station, leave days out`);
     const counter = actor.getFlag(MODULE_ID, K.daysFlag);
     const reserved = planSubmit(counter, needed);
@@ -309,12 +217,12 @@ export function submitGather(api, actor, params, days) {
  * Gather: the claimed charge. Returns { undos, text } so the caller can undo it if its own write fails.
  */
 export async function takeBack(actor, action) {
-  if (action.type === "craft") {
+  if (ESCROW_TYPES.includes(action.type)) {
     const problems = escrowProblems(action);
     if (problems.length) throw new Error(`cannot return this craft's escrow: ${problems.join("; ")}`);
     const { escrow } = action.params;
     const undos = await giveBack(actor, escrow.units, escrow.feeCopper);
-    return { undos, text: `escrow returned: ${describeEscrow(escrow)}` };
+    return { undos, text: `escrow returned: ${describeEscrow(escrow)}`, landed: escrow.units };
   }
   if (action.type === "gather") {
     const { token } = nodeOf(action.params);
@@ -329,15 +237,16 @@ export async function takeBack(actor, action) {
 
 /** Drop an action that can never succeed: give everything back, refund the days, say why. Caller holds the locks. */
 export async function dropAction(actor, action, pending, message) {
-  const { undos, text } = await takeBack(actor, action);
+  const { undos, text, landed } = await takeBack(actor, action);
   const { counter } = planReject(actor.getFlag(MODULE_ID, K.daysFlag), action);
   try {
     await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: pending.filter(a => a.id !== action.id), [flagKey(K.daysFlag)]: counter });
   } catch (error) {
     await undoThenThrow(undos, error);
   }
+  await recordReturned(actor, landed);
   await note(`${action.type} could not be resolved for ${actor.name} (${message}); ${text}${action.daysReserved ? `; ${action.daysReserved} day(s) refunded` : ""}`);
-  const tail = action.type === "craft" ? "Your days, materials and fee were returned." : "Nothing was spent.";
+  const tail = action.type === "craft" ? "Your days, materials and fee were returned." : action.type === "build" ? "Your days, materials and gold were returned." : "Nothing was spent.";
   return { status: "invalid", message: `${message}. ${tail}` };
 }
 
@@ -393,6 +302,7 @@ export async function resolveCraft(api, actor, action, pending, { chat, degree: 
     await undoThenThrow(undos, error);
   }
 
+  await recordReturned(actor, back);
   await note(`resolved craft: ${recipe.name} for ${actor.name}: ${outcome.made ? "item made" : "no item"}; ${gpText(escrow.feeCopper)} fee and ${action.daysReserved} day(s) spent; `
     + `${back.length ? `escrow returned: ${back.map(u => `${u.units}x ${u.name ?? u.materialId}`).join(", ")}` : "no materials returned"}`);
   if (chat) {
@@ -455,6 +365,7 @@ export async function resolveGatherAction(api, actor, action, pending, { chat, d
   }
 
   const materialNames = Object.fromEntries(result.gains.map(g => [g.materialId, api.definitions.material.get(g.materialId).name]));
+  await noteGather(api.definitions, actor, { gains: result.gains, node: record, scene });   // best-effort: never fails the gather
   let gone = false;
   if (next.state === "depleted" && exploration.isModuleNode(token, record)) gone = await exploration.retireNode(scene, token, { by: actor.name });
   await note(`resolved gather: ${actor.name} at ${nodeName ?? token.name}: ${result.gains.length ? result.gains.map(g => `${g.quantity}x ${materialNames[g.materialId]}`).join(", ") : "nothing"} gathered; 1 charge spent`

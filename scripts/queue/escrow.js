@@ -82,7 +82,7 @@ export function describeEscrow(escrow) {
 /**
  * Turn the problems of a refused craft into one plain sentence. A shortage points at the Compendium: nothing is bought.
  */
-export function refusalText(errors) {
+export function refusalText(errors, what = "queue this craft") {
   const short = errors.some(e => /available|no material selected/.test(e));
-  return `Cannot queue this craft: ${errors.join("; ")}.${short ? " Nothing can be bought: check the Compendium for where to find what you are missing." : ""}`;
+  return `Cannot ${what}: ${errors.join("; ")}.${short ? " Nothing can be bought: check the Compendium for where to find what you are missing." : ""}`;
 }

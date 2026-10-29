@@ -177,6 +177,23 @@ const stationDef = obj({
   town: str()
 });
 
+// A workshop blueprint: what it takes to BUILD a party-owned workshop (docs/10, Stage 10c). The design is researched first.
+const blueprint = obj({
+  kind: kind("blueprint"),
+  id: idField(),
+  name: str(),
+  // The station category it provides ("smithing", "alchemy", ...) and the tier it is built at.
+  category: str(),
+  tier: tier(TIER_RANGES.station),
+  // Materials: any material of at least the floor's tier fills a slot, one material type per slot (like a recipe).
+  slots: arr(obj({ name: str(), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
+  // Gold (gp) and downtime days the build costs.
+  gold: num({ min: 0 }),
+  buildDays: int({ min: 1 }),
+  // The research that designs it (tier from the research table).
+  researchProject: obj({ tier: tier(TIER_RANGES.research) })
+});
+
 // Gathering ------------------------------------------------------------------------
 const ladderRung = obj({
   materialId: idField(),
@@ -222,7 +239,7 @@ const nodeType = obj({
   }))
 });
 
-export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef, nodeType };
+export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef, nodeType, blueprint };
 
 // Live records ----------------------------------------------------------------
 // A gathering node, stored in a token flag. The token is its identity.
@@ -246,7 +263,9 @@ const node = obj({
   // Charges claimed by queued gathers (see gathering/reserve.js). Never more than the charges the node has.
   reservedCharges: optional(int({ min: 1 })),
   // On an anchor: the node token standing on it right now (cleared by clearMap).
-  occupiedBy: optional(str())
+  occupiedBy: optional(str()),
+  // A corpse node: which creature it was (so gathering from it can be recorded on that creature's Compendium entry).
+  creature: optional(obj({ name: str(), type: str() }))
 }, {
   refine(value, path, errors) {
     const problem = (field, message) => errors.push({ field, message });
@@ -275,6 +294,7 @@ const node = obj({
     } else if (value.decayTimer !== undefined) {
       problem("decayTimer", 'only applies when source is "corpse"');
     }
+    if (value.creature !== undefined && !isCorpse) problem("creature", 'only applies when source is "corpse"');
   }
 });
 
@@ -286,13 +306,19 @@ const projectLogEntry = obj({
   note: optional(str())
 });
 
+// A workshop design a character holds (the actor flag `blueprints`), earned by research. Building needs the builder to hold it.
+const blueprintHold = obj({ blueprintId: idField(), name: str(), source: oneOf(["research", "gm"]), at: int({ min: 0 }) });
+
 // A research project, stored in the researcher's actor flag (the actor is its owner).
 const project = obj({
   id: str(),
   goalName: str(),
   outcome: variant("type", {
     unlockFormula: { recipeId: idField() },
-    upgradeStation: { stationId: str(), fromTier: tier(TIER_RANGES.station), toTier: tier(TIER_RANGES.station) }
+    // kind "tier": from and to are tiers; "craftDays" and "hearth": from and to are levels (hearth has no effect yet).
+    upgradeStation: { stationId: str(), kind: oneOf(["tier", "craftDays", "hearth"]), from: int({ min: 0 }), to: int({ min: 1 }) },
+    // Designing a workshop blueprint (building it is a separate queue item).
+    designBlueprint: { blueprintId: idField() }
   }),
   tier: tier(TIER_RANGES.research),
   dc: int(),
@@ -336,6 +362,9 @@ const formula = obj({
 });
 
 // A full station record (player-owned, or the live form of a public one).
+// Upgrades a station has: craft days cut and hearths. The tier is the station's tier itself. `hearths` has NO EFFECT YET.
+const stationUpgrades = obj({ craftDays: optional(int({ min: 0 })), hearths: optional(int({ min: 0 })) });
+
 const stationRecord = obj({
   id: str(),
   name: str(),
@@ -343,7 +372,21 @@ const stationRecord = obj({
   tier: tier(TIER_RANGES.station),
   location: variant("type", { fixed: { town: str() }, carried: { holder: str() } }),
   owner: optional(str()),
-  access: arr(str())
+  access: arr(str()),
+  upgrades: optional(stationUpgrades)
+});
+
+// A party-owned workshop (world setting `partyStations`): fixed where it was built, usable by every party character.
+const partyStation = obj({
+  id: str(),
+  name: str(),
+  category: str(),
+  tier: tier(TIER_RANGES.station),
+  town: str(),
+  builtBy: str(),
+  blueprintId: str(),
+  builtAt: int({ min: 0 }),
+  upgrades: optional(stationUpgrades)
 });
 
 // World-level state for a public station definition: who owns it, who may use it,
@@ -352,7 +395,8 @@ const stationState = obj({
   stationId: idField(),
   owner: optional(str()),
   access: arr(str()),
-  tier: optional(tier(TIER_RANGES.station))
+  tier: optional(tier(TIER_RANGES.station)),
+  upgrades: optional(stationUpgrades)
 });
 
 // A commission (docs/06-commissions.md). Shape only; the rules between fields (who supplies what,
@@ -383,10 +427,25 @@ const commission = obj({
 
 // A queued downtime action, stored in the player's actor flag (the actor is its owner).
 // `daysReserved` is the days it uses, already taken out of the actor's unreserved counter.
+// The per-character Compendium (docs/10, Stage 10b): only facts the character has experienced, nothing locked is stored.
+const compPlace = obj({ key: str(), label: str() });
+const compRung = obj({ nodeType: str(), tier: int({ min: 1 }), rung: oneOf(["base", "higher"]) });
+const compEntry = {
+  material: obj({ id: idField(), name: str(), tier: optional(int({ min: 1 })), firstAt: int({ min: 0 }), places: arr(compPlace), rungs: arr(compRung) }),
+  creature: obj({ key: str(), name: str(), type: str(), firstAt: int({ min: 0 }), yields: arr(obj({ materialId: idField(), name: str() })) }),
+  region: obj({ id: str(), name: str(), firstAt: int({ min: 0 }), nodeTypes: arr(obj({ id: str(), name: str() })) })
+};
+const compendium = obj({
+  v: int({ min: 1, max: 1 }),
+  materials: record(compEntry.material),
+  creatures: record(compEntry.creature),
+  regions: record(compEntry.region)
+});
+
 const pendingAction = obj({
   id: str(),
   // "upgrade" is reserved for workshop upgrades. Craft and gather are queued through the GM client (queue/work.js).
-  type: oneOf(["research", "explore", "upgrade", "commission", "craft", "gather"]),
+  type: oneOf(["research", "explore", "upgrade", "commission", "craft", "gather", "share", "build"]),
   params: any(),
   // Research and explore need at least a day (their handlers say so); commission steps cost none.
   daysReserved: int({ min: 0 }),
@@ -402,6 +461,6 @@ const auditEntry = obj({
   history: arr(obj({ at: int(), text: str() }))
 });
 
-export const LIVE_SCHEMAS = { node, project, formula, stationRecord, stationState, commission, pendingAction, auditEntry };
+export const LIVE_SCHEMAS = { node, project, formula, stationRecord, stationState, partyStation, commission, pendingAction, auditEntry, compendium, blueprintHold };
 
 export const DEFINITION_KINDS = Object.keys(DEFINITION_SCHEMAS);

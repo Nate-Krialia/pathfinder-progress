@@ -71,6 +71,15 @@ export function getCreatureInfo(actor) {
   return { level, traits: raw.map(String) };
 }
 
+/** PF2e's creature types, in the order we look for them in an NPC's traits. */
+const CREATURE_TYPES = ["aberration", "animal", "beast", "celestial", "construct", "dragon", "elemental", "fey", "fiend", "fungus", "giant", "humanoid", "monitor", "ooze", "plant", "spirit", "undead"];
+
+/** Who a creature is, for the Compendium: its name and creature type (the first creature-type trait, else "creature"). */
+export function getCreatureIdentity(actor) {
+  const { traits } = getCreatureInfo(actor);
+  return { name: String(actor?.name ?? "").trim(), type: CREATURE_TYPES.find(type => traits.includes(type)) ?? "creature" };
+}
+
 // Version check -------------------------------------------------------------
 const toNumbers = v => String(v).split(".").map(n => parseInt(n, 10) || 0);
 

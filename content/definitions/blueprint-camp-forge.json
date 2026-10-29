@@ -1,0 +1,14 @@
+{
+  "kind": "blueprint",
+  "id": "camp-forge",
+  "name": "Camp Forge",
+  "category": "smithing",
+  "tier": 1,
+  "slots": [
+    { "name": "anvil", "tierFloor": 1, "qty": 3 },
+    { "name": "hearthstone", "tierFloor": 2, "qty": 1 }
+  ],
+  "gold": 25,
+  "buildDays": 3,
+  "researchProject": { "tier": 1 }
+}

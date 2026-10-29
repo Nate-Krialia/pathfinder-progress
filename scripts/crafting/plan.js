@@ -140,7 +140,8 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       uses,
       description,
       station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null,
-      fee: station ? feeForTier(station.tier) : null,
+      // A workshop the party built charges no station fee; every other station charges its tier's fee.
+      fee: station ? (station.source === "party" ? 0 : feeForTier(station.tier)) : null,
       provenance: {
         recipeId: recipe.id,
         stationId: station?.id ?? null,

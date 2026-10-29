@@ -221,7 +221,7 @@ test("join: with no world state, definitions are public stations", () => {
   assert.deepEqual(ids({ stations }), ["forge", "lab"]);
   assert.deepEqual(stations.find(s => s.id === "forge"), {
     id: "forge", name: "Forge", category: "smithing", tier: 2,
-    location: { type: "fixed", town: "oakhaven" }, owner: null, access: [], source: "public"
+    location: { type: "fixed", town: "oakhaven" }, owner: null, access: [], source: "public", upgrades: { craftDays: 0, hearths: 0 }
   });
 });
 

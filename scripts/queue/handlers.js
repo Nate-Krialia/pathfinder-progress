@@ -20,7 +20,7 @@ const research = {
   validateSubmit({ projects, params }) {
     const project = findProject(projects, params?.projectId);
     if (!project) return { ok: false, errors: [`no project "${params?.projectId}" (projects: ${projects.map(p => p?.id).join(", ") || "none"})`] };
-    if (project.outcome?.type !== "unlockFormula") return { ok: false, errors: ["only unlockFormula projects can be researched for now"] };
+    if (!["unlockFormula", "upgradeStation", "designBlueprint"].includes(project.outcome?.type)) return { ok: false, errors: [`a "${project.outcome?.type}" project cannot be researched`] };
     if (project.status !== "active") return { ok: false, errors: [`project "${project.id}" is ${project.status}, not active`] };
 
     const allowed = project.skillWhitelist ?? [];
@@ -154,5 +154,21 @@ const gather = {
   }
 };
 
-export const HANDLERS = { research, explore, commission, craft, gather };
+import { describeShare } from "../compendium/share.js";
+
+const share = {
+  /** A share costs no days and needs no downtime. */
+  freeOfDays: true,
+  validateSubmit: relayedOnly("share"),
+  describe: ({ action }) => describeShare(action)
+};
+
+import { describeBuild } from "../workshop/build.js";
+
+const build = {
+  validateSubmit: relayedOnly("build"),
+  describe: ({ action }) => describeBuild(action)
+};
+
+export const HANDLERS = { research, explore, commission, craft, gather, share, build };
 export const wiredTypes = () => Object.keys(HANDLERS);

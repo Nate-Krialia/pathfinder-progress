@@ -69,15 +69,15 @@ This is the agreed design for everything the player and GM see. It supersedes ol
 ### Workshop
 - Left: stations with status (Here now / Travels with you / Away), Build your own workshop.
 - Right: tier ladder (1 to 4) and plain line of what tier allows, station fee, who can use it, where it is, Upgrades list, Craft here (jumps to Formulae with station chosen; disabled with reason if party is not there).
-- Upgrades are Research projects (raise tier cap, cut craft days but never below 1, extra hearth, etc).
+- Upgrades are research projects on a station: raise its tier (1 to 4 in a town), cut craft days (never below 1 day in total), or add a hearth. **A hearth is a counter with no effect yet** (show it as "no effect yet"). They cost research days plus materials of the target tier and **no gold**; the materials are taken when the project starts, returned if the project is put aside, and spent when it finishes (`api.workshop.startUpgrade` / `putAside`; no downtime needed, never blocks End downtime).
 - Traveling stations have a lower tier cap than town stations.
-- **Build your own workshop** = Research project to design it, THEN craft it from real materials (plus gold). Result is a party-owned station at a fixed location.
+- **Build your own workshop** = research the design first, THEN queue a Build item: materials, gold and days are taken at queue time, it blocks End downtime like a craft, the GM resolves it with no roll, and it is invalid (everything returned) if the party has moved on. Result is a party-owned station at the town the party is in, usable by every party character, with **no station fee** (other stations still charge theirs).
 
 ### Compendium
 - Per character. Categories: Materials, Creatures, Regions. Count line "N entries discovered. New ones appear as you find them."
 - **No "???" placeholders anywhere.** Entries are created on first experience and extended as more is learned: where it can be found (only places experienced), how it is gathered (only ladder rungs reached), what can be taken from a creature (only yields seen), used in (formulae the character knows).
-- Creature entries matter: some materials come only from creatures.
-- Share with party: private by default ("Only you"). Pressing Share creates a GM queue item ("Queued"); cancel while queued; once approved "Shared" and the whole party can read it. Resolved by the same Resolve all.
+- Creature entries matter: some materials come only from creatures. A creature gets a barebones entry (name and type) when the character is in a combat with it; what it yields stays locked (not shown) until the character collects it from a corpse.
+- Share with party: private by default ("Only you"). Pressing Share creates a GM queue item ("Queued"); cancel while queued; once approved "Shared" and the whole party (every character an ordinary user owns) can read it. Resolved by the same Resolve all. A share needs no days or downtime and never blocks End downtime.
 - GM sees everything (full list and per-player progress).
 
 ## Queue panel (View queue)

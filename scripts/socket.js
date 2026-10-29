@@ -12,6 +12,7 @@ import { MODULE_ID } from "./config.js";
 import * as exploration from "./exploration/store.js";
 import * as queueStore from "./queue/store.js";
 import * as work from "./queue/work.js";
+import { runWorkshopAside, runWorkshopStart } from "./workshop/store.js";
 import { guard } from "./queue/relay.js";
 
 let socket = null;
@@ -35,9 +36,12 @@ export function ensureSocket() {
   // EVERY handler is wrapped in guard(): real socketlib hides the message of anything a handler throws, so a refusal
   // must travel as data (see queue/relay.js). A test walks every registered handler and fails if one can still throw.
   registered.register("search", guard("search", options => exploration.runSearch(options)));
-  // Craft and gather are queued and cancelled on the GM client (see queue/work.js). `this` carries socketlib's sender, if it gives one.
+  // Craft, gather and share are queued and cancelled on the GM client (see queue/work.js). `this` carries socketlib's sender, if it gives one.
   registered.register("queueSubmit", guard("queueSubmit", function queueSubmit(payload) { return queueStore.runSubmit(payload, this); }));
   registered.register("queueCancel", guard("queueCancel", function queueCancel(payload) { return queueStore.runCancel(payload, this); }));
+  // Upgrade / design projects: starting one takes materials into escrow, putting one aside gives them back (workshop/store.js).
+  registered.register("workshopStart", guard("workshopStart", function workshopStart(payload) { return runWorkshopStart(payload, this); }));
+  registered.register("workshopAside", guard("workshopAside", function workshopAside(payload) { return runWorkshopAside(payload, this); }));
   socket = registered;
   exploration.setSocket(socket);
   work.setSocket(socket);

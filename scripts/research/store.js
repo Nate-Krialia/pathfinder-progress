@@ -8,7 +8,7 @@
  */
 import { MODULE_ID, RESEARCH_KEYS as K } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
-import { commit } from "../audit/store.js";
+import { commit, logWorldEvent } from "../audit/store.js";
 import { noteOverride, recordSpent } from "../downtime/store.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
@@ -20,6 +20,8 @@ import { afterGrant, daysFrom, validateSetDays } from "./days.js";
 import { expectedDaysToFinish, expectedProgressPerDay } from "./odds.js";
 import { addFormula, findFormula, refreshSnapshots, removeFormula as removeFromList, reportFormulas } from "./formulas.js";
 import { formatProgressSummary, formatResearchSummary } from "./summary.js";
+import { applyStationUpgrade } from "../stations/store.js";
+import { targetProblem, withDesign, BLUEPRINTS_FLAG } from "../workshop/targets.js";
 
 const requireGM = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
 
@@ -58,7 +60,7 @@ function findProject(actor, projectId) {
 }
 
 function requireUnlockProject(project, what) {
-  if (project.outcome.type !== "unlockFormula") refuse(`${what}: only unlockFormula projects can be researched for now (upgradeStation arrives in Stage 9)`);
+  if (project.outcome.type !== "unlockFormula") refuse(`${what}: this works on formula projects only (an upgrade or a design is researched, not given progress by hand)`);
 }
 
 const flagUpdate = (key, value) => ({ [flagKey(key)]: value });
@@ -105,6 +107,9 @@ export async function startProject(api, { actor, recipe: recipeId, dc, threshold
 export async function abandonProject(actor, projectId) {
   requireGM("abandonProject");
   const { list, index, project } = findProject(actor, projectId);
+  if (project.status === "active" && project.materials?.length) {
+    throw new Error(`abandonProject: "${project.goalName}" holds escrowed materials; put it aside with api.workshop.putAside so they come back to ${actor.name}`);
+  }
   const next = [...list];
   next[index] = abandonRecord(project, "abandoned by the GM");
   await commit(actor, flagUpdate(K.projectsFlag, next), [{ type: "projectSet", project: next[index], note: "abandoned" }]);
@@ -135,6 +140,10 @@ export function projectInfo(api, actor, projectId) {
   });
 
   const hints = [];
+  if (project.outcome.type !== "unlockFormula") {
+    const problem = project.status === "active" ? targetProblem(api, actor, project) : null;
+    if (problem) hints.push(problem);
+  }
   const recipe = project.outcome.type === "unlockFormula" ? api.definitions?.recipe.get(project.outcome.recipeId) : null;
   if (project.outcome.type === "unlockFormula" && !recipe) hints.push(`recipe "${project.outcome.recipeId}" no longer exists; abandon this project`);
   if (recipe && recipe.researchProject.tier !== project.tier) hints.push(`the recipe's research tier is now ${recipe.researchProject.tier}, but this project began at tier ${project.tier}`);
@@ -150,10 +159,16 @@ export function projectInfo(api, actor, projectId) {
  */
 export async function planResearch(api, { actor, project: projectId, days: dayCount, daysAvailable, skill, degree }) {
   const { list, index, project } = findProject(actor, projectId);
-  requireUnlockProject(project, "research");
   if (project.status !== "active") refuse(`research: project "${projectId}" is ${project.status}, not active`);
-  const recipe = api.definitions?.recipe.get(project.outcome.recipeId);
-  if (!recipe) refuse(`research: recipe "${project.outcome.recipeId}" no longer exists; abandon the project with api.abandonProject`);
+  // A recipe project needs its recipe; an upgrade or a design needs its target (the workshop at the right level, the blueprint).
+  let recipe = null;
+  if (project.outcome.type === "unlockFormula") {
+    recipe = api.definitions?.recipe.get(project.outcome.recipeId);
+    if (!recipe) refuse(`research: recipe "${project.outcome.recipeId}" no longer exists; abandon the project with api.abandonProject`);
+  } else {
+    const problem = targetProblem(api, actor, project);
+    if (problem) refuse(`research: ${problem}`);
+  }
 
   const picked = pickSkill(project.skillWhitelist, skill, `"${project.goalName}"`, noun);
   if (!picked.ok) refuse(`research: ${picked.error}`);
@@ -189,10 +204,14 @@ export async function planResearch(api, { actor, project: projectId, days: dayCo
   const changes = [];
   if (result.daysSpent) changes.push({ type: "days", delta: -result.daysSpent, note: `research: ${project.goalName}` });
   changes.push({ type: "projectSet", project: result.project, note: "researched" });
-  if (result.completed) changes.push({ type: "formulaAdd", recipeId: recipe.id, access: "owned", note: "research completed" });
+  if (result.completed && recipe) changes.push({ type: "formulaAdd", recipeId: recipe.id, access: "owned", note: "research completed" });
+  const outcome = project.outcome;
   return {
     result, skill: picked.skill, projects: nextProjects,
-    formulas: result.completed ? unlockedFormulas(actor, recipe, "research") : null,
+    formulas: result.completed && recipe ? unlockedFormulas(actor, recipe, "research") : null,
+    // A finished design is held by the researcher; a finished upgrade is applied to the station by whoever commits the plan.
+    blueprints: result.completed && outcome.type === "designBlueprint" ? withDesign(actor, api.definitions.blueprint.get(outcome.blueprintId), "research") : null,
+    stationEffect: result.completed && outcome.type === "upgradeStation" ? { stationId: outcome.stationId, kind: outcome.kind, from: outcome.from, to: outcome.to } : null,
     changes
   };
 }
@@ -201,6 +220,7 @@ export async function planResearch(api, { actor, project: projectId, days: dayCo
 export function planUpdate(plan) {
   const update = flagUpdate(K.projectsFlag, plan.projects);
   if (plan.formulas) Object.assign(update, flagUpdate(K.formulasFlag, plan.formulas));
+  if (plan.blueprints) Object.assign(update, flagUpdate(BLUEPRINTS_FLAG, plan.blueprints));
   return update;
 }
 
@@ -222,9 +242,18 @@ export async function research({ actor, project: projectId, days: dayCount, skil
   const plan = await planResearch(api, { actor, project: projectId, days: dayCount, daysAvailable: readDays(actor), skill, degree });
   const { result } = plan;
 
-  // Commit everything in ONE update: progress, days, and (on completion) the formula.
-  await commit(actor, { ...planUpdate(plan), ...flagUpdate(K.daysFlag, result.daysRemaining) }, plan.changes);
+  // A finished upgrade is applied to the station FIRST (with an undo), then everything is committed in ONE update: progress, days, and (on completion) the formula or design.
+  const undoStation = plan.stationEffect ? await applyStationUpgrade(api, plan.stationEffect.stationId, plan.stationEffect) : null;
+  try {
+    await commit(actor, { ...planUpdate(plan), ...flagUpdate(K.daysFlag, result.daysRemaining) }, plan.changes);
+  } catch (error) {
+    if (undoStation) await undoStation();
+    throw error;
+  }
   await recordSpent(actor, result.daysSpent);
+  if (plan.stationEffect) {
+    try { await logWorldEvent(`upgrade finished: ${result.project.goalName} (researched by ${actor.name})`); } catch (error) { console.error(`${MODULE_ID} | could not log the finished upgrade`, error); }
+  }
 
   if (chat) await postResearchChat(actor, plan);
   return {
