@@ -8,6 +8,7 @@
  * gives the same book.
  */
 import { COMPENDIUM } from "../config.js";
+import { mergeExperiment, pickExperiment } from "./experiments.js";
 
 export const emptyBook = () => ({ v: COMPENDIUM.version, materials: {}, creatures: {}, regions: {} });
 
@@ -109,7 +110,8 @@ export function usedIn(material, formulas) {
   return formulas
     .filter(f => (f?.snapshot?.slots ?? []).some(slot => {
       const roles = Array.isArray(slot.drives) ? slot.drives : [slot.drives];
-      return (material.tier ?? 0) >= slot.tierFloor && roles.every(role => role in (material.effects ?? {}));
+      // A player's copy of a material has no effects (docs/11b): the tier floor is then the only fact to go on.
+      return (material.tier ?? 0) >= slot.tierFloor && (material.effects === undefined || roles.every(role => role in material.effects));
     }))
     .map(f => ({ recipeId: f.recipeId, name: f.snapshot?.name ?? f.recipeId }));
 }
@@ -136,6 +138,7 @@ export const countBook = book => ({ materials: Object.keys(book.materials).lengt
 // Sharing -------------------------------------------------------------------------------------------------------
 /** The facts of one entry, for a share request. Returns null when the character has no such entry. */
 export function pickEntry(book, kind, key) {
+  if (kind === "experiment") return pickExperiment(book, key);
   const category = { material: "materials", creature: "creatures", region: "regions" }[kind];
   if (!category || typeof key !== "string" || !own(book[category], key)) return null;
   return clone(book[category][key]);
@@ -146,6 +149,7 @@ export function pickEntry(book, kind, key) {
  * rungs, yields and node types; the earliest first-seen time.
  */
 export function mergeShared(book, kind, entry) {
+  if (kind === "experiment") return mergeExperiment(book, entry);
   const category = { material: "materials", creature: "creatures", region: "regions" }[kind];
   if (!category) throw new RangeError(`compendium: unknown entry kind "${kind}"`);
   const key = kind === "material" ? entry.id : kind === "creature" ? entry.key : entry.id;

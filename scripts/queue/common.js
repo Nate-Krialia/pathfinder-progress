@@ -123,17 +123,7 @@ export function recordReturned(actor, units) {
   return units?.length ? ensureMaterials(actor, units.map(u => ({ id: u.materialId, name: u.name, tier: u.tier }))) : undefined;
 }
 
-export const ownerIds = actor => [...game.users].filter(u => !u.isGM && actor.testUserPermission(u, "OWNER")).map(u => u.id);
-
-export async function whisper(recipients, content) {
-  if (!recipients.length) return;
-  try {
-    await ChatMessage.create({ whisper: recipients, content });
-  } catch (error) {
-    console.error(`${MODULE_ID} | the result is saved, but the chat message failed`, error);
-  }
-}
-export const gmIds = () => ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+export { ownerIds, whisper, gmIds } from "../chat.js";
 
 export async function appendAction(actor, action, extraUpdate = {}) {
   const problems = check(LIVE_SCHEMAS.pendingAction, action);

@@ -35,7 +35,7 @@ test("DISPLAY-COPY GUARD: nothing from the hidden fields leaks into the serialis
 test("a snapshot shows what a crafter needs: slots with their roles, tier floors and quantities, and the station", () => {
   const snapshot = makeSnapshot(dagger);
   assert.deepEqual(snapshot, {
-    name: "Spider Fang Dagger", category: "weapon", craftLevel: 2,
+    name: "Spider Fang Dagger", category: "weapon",
     slots: [
       { name: "blade", drives: ["basePower"], tierFloor: 1, qty: 1 },
       { name: "fang", drives: ["bonusDamage", "specialAbility"], tierFloor: 2, qty: 1 }
@@ -54,9 +54,9 @@ test("snapshots validate against the formula schema, and the snapshot is a deep 
 
 test("snapshotsEqual ignores key order but not content", () => {
   const a = makeSnapshot(dagger);
-  const reordered = { stationTierMin: a.stationTierMin, stationCategory: a.stationCategory, slots: a.slots, craftLevel: a.craftLevel, category: a.category, name: a.name };
+  const reordered = { stationTierMin: a.stationTierMin, stationCategory: a.stationCategory, slots: a.slots, category: a.category, name: a.name };
   assert.ok(snapshotsEqual(a, reordered));
-  assert.ok(!snapshotsEqual(a, { ...a, craftLevel: 3 }));
+  assert.ok(!snapshotsEqual(a, { ...a, stationTierMin: 3 }));
 });
 
 // Adding and removing ----------------------------------------------------------------------------
@@ -79,10 +79,10 @@ test("one entry per recipe: owned upgrades a loan, a loan never replaces owned",
 test("granting the same access again refreshes a stale snapshot, or changes nothing", () => {
   const list = addFormula([], dagger).list;
   assert.equal(addFormula(list, dagger).change, "unchanged");
-  const stale = [{ ...list[0], snapshot: { ...list[0].snapshot, craftLevel: 9 } }];
+  const stale = [{ ...list[0], snapshot: { ...list[0].snapshot, stationTierMin: 4 } }];
   const again = addFormula(stale, dagger);
   assert.equal(again.change, "refreshed");
-  assert.equal(again.list[0].snapshot.craftLevel, 2);
+  assert.equal(again.list[0].snapshot.stationTierMin, 1);
 });
 
 test("bad access values are refused; other formulas are untouched by adding", () => {
@@ -123,12 +123,12 @@ test("a recipe without a snapshot (older data) counts as stale", () => {
 
 test("refreshing updates stale copies, leaves good ones, and lists orphans without touching them", () => {
   const good = addFormula([], longsword).list[0];
-  const stale = { ...addFormula([], dagger).list[0], snapshot: { ...makeSnapshot(dagger), craftLevel: 9 } };
+  const stale = { ...addFormula([], dagger).list[0], snapshot: { ...makeSnapshot(dagger), stationTierMin: 4 } };
   const orphan = { recipeId: "ghost", access: "owned", source: "gm" };
   const { list, refreshed, orphaned } = refreshSnapshots([good, stale, orphan], registry);
   assert.deepEqual([refreshed, orphaned], [[dagger.id], ["ghost"]]);
   assert.equal(list[0], good, "the good entry is returned as-is");
-  assert.equal(list[1].snapshot.craftLevel, 2);
+  assert.equal(list[1].snapshot.stationTierMin, 1);
   assert.equal(list[2], orphan);
 });
 

@@ -33,10 +33,25 @@ const emptyDescription = () => ({
  * @param {object} [args.config]
  * @returns {{ ok: true, plan: object } | { ok: false, errors: string[] }}
  */
-export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING }) {
+/**
+ * The effect each driven role gets from `material` in `slot` of `recipe`: the ONE place effects are resolved
+ * (recipe override > material default, via the shared resolver). Used by planCraft and by the Experiments recorder.
+ * @returns {{ resolved: Object<string, any>, missing: string[] }}  role -> value, and the roles with no effect
+ */
+export function resolveSlotEffects(recipe, slot, material) {
+  const resolved = {};
+  const missing = [];
+  for (const role of slotRoles(slot)) {
+    const effect = resolveMaterialEffect(material, role, recipe, slot.name);
+    if (!effect) missing.push(role); else resolved[role] = effect.value;
+  }
+  return { resolved, missing };
+}
+
+export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING, mechanical = false }) {
   const errors = [];
   const remaining = new Map(stacks.map(s => [s.stackId, s.quantity]));
-  const customRoles = [...registry.customRole.values()];
+  const customRoles = mechanical ? [] : [...registry.customRole.values()];
   const baseRole = baseRoleFor(recipe);
   const uses = [];
   const description = emptyDescription();
@@ -56,19 +71,15 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       continue;
     }
 
-    const roles = slotRoles(slot);
-    const resolved = {};
-    let usable = true;
-    for (const role of roles) {
-      const effect = resolveMaterialEffect(material, role, recipe, slot.name);
-      if (!effect) {
-        errors.push(`slot "${slot.name}": ${material.name} has no effect for role "${role}"`);
-        usable = false;
-      } else {
-        resolved[role] = effect.value;
-      }
+    // MECHANICAL mode (a player's preview, docs/11b): the player's copy of a material has no effects, so only the facts are checked here
+    // (slot, tier floor, quantity). The GM checks the effects when the craft is queued.
+    let resolved = {};
+    if (!mechanical) {
+      const found = resolveSlotEffects(recipe, slot, material);
+      for (const role of found.missing) errors.push(`slot "${slot.name}": ${material.name} has no effect for role "${role}"`);
+      if (found.missing.length) continue;
+      resolved = found.resolved;
     }
-    if (!usable) continue;
 
     // Take units from this material's stacks, in order.
     const from = [];
@@ -93,8 +104,7 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       materialName: material.name,
       units: slot.qty,
       from,
-      slotLossChance: slot.lossChance,
-      materialLossChance: material.lossChance
+      ...(mechanical ? {} : { slotLossChance: slot.lossChance, materialLossChance: material.lossChance })
     });
 
     const source = { slot: slot.name, materialId };
@@ -109,6 +119,11 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
         if (custom) description.fields.push({ path: custom.modifies, value, source });
       }
     }
+  }
+
+  if (mechanical) {
+    if (errors.length) return { ok: false, errors };
+    return { ok: true, plan: { recipeId: recipe.id, recipeName: recipe.name, uses, station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null, fee: station ? (station.source === "party" ? 0 : feeForTier(station.tier)) : null, provenance: { recipeId: recipe.id, stationId: station?.id ?? null, materials: uses.map(u => ({ slot: u.slot, materialId: u.materialId, units: u.units })) } } };
   }
 
   // Pick the output item.

@@ -15,7 +15,10 @@ import { callerOf } from "../queue/common.js";
 import { asGM } from "../queue/work.js";
 import { refusal } from "../queue/relay.js";
 import { defsState } from "./playerState.js";
-import { factsKey, loadPlayerRecords, normalizeFacts, selectRecords } from "./playerSet.js";
+import { factsKey, loadPlayerRecords, normalizeFacts, selectRecords, stationIdsFor } from "./playerSet.js";
+import { readStations } from "../stations/store.js";
+import { stationReductions } from "../workshop/rules.js";
+import { craftDays } from "../crafting/days.js";
 
 let boundApi = null;
 export const bind = api => { boundApi = api; };
@@ -102,13 +105,18 @@ export async function runDefinitionsFor(payload, context) {
   const api = boundApi;
   if (!api?.definitions) throw refusal("The GM's definitions are not loaded yet; try again in a moment.");
   const facts = normalizeFacts(gatherFacts(user));
-  const { records, missingRecipes, recipeIds } = selectRecords(facts, api.definitions);
-  const resolvedOutputs = {};
-  for (const id of recipeIds) if (api.resolvedOutputs?.has(id)) resolvedOutputs[id] = api.resolvedOutputs.get(id);
+  // Craft days are worked out HERE (craft level + the station's upgrades + the 1-day floor) so a player copy needs no craft level.
+  const ownedIds = new Set(facts.actors.map(a => a.id));
+  const publicIds = stationIdsFor(facts, api.definitions);
+  const stations = readStations(api).stations.filter(s => (s.source === "public" ? publicIds.has(s.id) : s.source === "party" || ownedIds.has(s.owner)));
+  const daysFor = recipe => ({
+    default: craftDays(recipe, []).days,
+    byStation: Object.fromEntries(stations.map(s => [s.id, craftDays(recipe, stationReductions(s)).days]))
+  });
+  const { records, missingRecipes, recipeIds } = selectRecords(facts, api.definitions, { daysFor });
   return {
     records,
     missingRecipes,
-    resolvedOutputs,
     uncraftable: recipeIds.filter(id => api.uncraftable?.has(id)),
     revision: game.settings.get(MODULE_ID, DEFINITIONS_SYNC.revisionSetting) ?? ""
   };
@@ -154,7 +162,7 @@ async function loadOnce({ force }) {
   const { registry, errors } = loadPlayerRecords(result?.records);
   if (errors.length) console.error(`${MODULE_ID} | the GM sent definitions this client could not load:\n${errors.join("\n")}`);
   boundApi.definitions = attachRefresh(registry);
-  boundApi.resolvedOutputs = new Map(Object.entries(result?.resolvedOutputs ?? {}));
+  boundApi.resolvedOutputs = new Map();     // a player never receives the output items (docs/11b)
   boundApi.uncraftable = new Set(result?.uncraftable ?? []);
   boundApi.contexts = new Map();
   boundApi.errors = [];

@@ -34,11 +34,11 @@ const research = {
     return { ok: true, params: { projectId: project.id, skill } };
   },
 
-  /** A short label and detail for the review window. */
-  describe({ action, projects }) {
+  /** A short label and detail. `gm` (default true, for the pure tests) adds the DC; a player's row never carries it (docs/11b). */
+  describe({ action, projects, gm = true }) {
     const project = findProject(projects, action.params?.projectId);
     if (!project) return { label: `Research: ${action.params?.projectId ?? "?"}`, detail: "project not found", problem: "the project no longer exists" };
-    const detail = `${action.params.skill ?? "?"}, DC ${project.dc}, progress ${project.progress}/${project.threshold}`;
+    const detail = `${action.params.skill ?? "?"}, ${gm ? `DC ${project.dc}, ` : ""}progress ${project.progress}/${project.threshold}`;
     const problem = project.status !== "active" ? `project is ${project.status}` : null;
     return { label: `Research: ${project.goalName}`, detail, problem };
   }
@@ -68,10 +68,11 @@ const explore = {
     return { ok: true, params: { region: region.id, skill: picked.skill, forceCombat: params.forceCombat === true } };
   },
 
-  /** ctx: { action, info } where info comes from exploration/store.js describeInfo. */
-  describe({ action, info }) {
+  /** ctx: { action, info, gm } where info comes from exploration/store.js describeInfo. A player's row (gm false) is plain: skill and days, no DC, no odds. */
+  describe({ action, info, gm = true }) {
     if (!info?.region) return { label: `Explore: ${action.params?.region ?? "?"}`, detail: "region not found", problem: "the region no longer exists" };
     const { region } = info;
+    if (!gm) return { label: `Explore: ${region.name}`, detail: `${action.params.skill}; ${action.daysReserved} day(s)${action.params.forceCombat ? "; FORCE COMBAT" : ""}`, problem: null };
     const odds = info.odds
       ? `${action.params.skill} ${info.modifier >= 0 ? "+" : ""}${info.modifier} vs DC ${region.explorationDC}: crit ${pct(info.odds.chances.criticalSuccess)} / success ${pct(info.odds.chances.success)} / fail ${pct(info.odds.chances.failure)} / crit-fail ${pct(info.odds.chances.criticalFailure)}, expect ~${(info.odds.expectedAnchors * action.daysReserved).toFixed(1)} nodes`
       : `${action.params.skill} (no modifier found) vs DC ${region.explorationDC}`;

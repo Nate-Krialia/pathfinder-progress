@@ -22,6 +22,7 @@ import { asGM } from "../queue/work.js";
 import { mayUse, readStations } from "../stations/store.js";
 import { allocateFromStacks, buildDesignProject, buildUpgradeProject, checkUpgradeMaterials, planUpgrade } from "./rules.js";
 import { BLUEPRINTS_FLAG, heldDesigns, holdsDesign, withDesign } from "./targets.js";
+import { playerProject } from "../difficulty.js";
 
 let boundApi = null;
 /** Give the workshop calls the module api (definitions). */
@@ -124,8 +125,10 @@ export async function runWorkshopStart(payload, context) {
   if (!actor) throw refusal(`There is no character with id "${payload?.actorId}".`);
   assertOwner(actor, user, "workshop");
   if (!boundApi) throw new Error("workshop: not bound to the module api yet");
-  if (payload.mode === "upgrade") return startUpgrade(boundApi, actor, payload.params);
-  if (payload.mode === "design") return startDesign(boundApi, actor, payload.params);
+  // The GM client builds the project, then a player is handed a copy without its DC (docs/11b); a GM keeps the full record.
+  const shown = project => (user.isGM ? project : playerProject(project));
+  if (payload.mode === "upgrade") return shown(await startUpgrade(boundApi, actor, payload.params));
+  if (payload.mode === "design") return shown(await startDesign(boundApi, actor, payload.params));
   throw refusal(`Unknown workshop request "${payload.mode}".`);
 }
 

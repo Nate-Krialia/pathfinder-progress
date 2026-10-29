@@ -9,6 +9,9 @@
 import { MODULE_ID, RESEARCH_KEYS as K } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { commit, logWorldEvent } from "../audit/store.js";
+import { gmIds, resultRecipients, whisper } from "../chat.js";
+import { playerProject } from "../difficulty.js";
+import { emit } from "../events.js";
 import { noteOverride, recordSpent } from "../downtime/store.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
@@ -125,6 +128,13 @@ export function projectInfo(api, actor, projectId) {
     return rawList(actor, K.projectsFlag).map(p => ({ id: p?.id, goalName: p?.goalName, status: p?.status, progress: p?.progress, threshold: p?.threshold }));
   }
   const { project } = findProject(actor, projectId);
+  if (!game.user.isGM) {
+    // A player gets the project without its DC, their own modifier for each allowed skill (the PF2e sheet shows it), and no odds (docs/11b).
+    const modifierFor = skill => { try { return adapter.getSkillModifier(actor, skill); } catch { return null; } };
+    const hints = [];
+    if (project.outcome.type !== "unlockFormula" && project.status === "active") { const problem = targetProblem(api, actor, project); if (problem) hints.push(problem); }
+    return { project: playerProject(project), daysAvailable: readDays(actor), perSkill: project.skillWhitelist.map(skill => ({ skill, modifier: modifierFor(skill) })), hints };
+  }
   const perSkill = project.skillWhitelist.map(skill => {
     let modifier = null;
     try { modifier = adapter.getSkillModifier(actor, skill); } catch { /* the actor lacks this skill */ }
@@ -224,11 +234,15 @@ export function planUpdate(plan) {
   return update;
 }
 
-/** One summary chat message for a planned run (call after it is committed). */
-export function postResearchChat(actor, plan) {
-  return postChat(actor, formatResearchSummary({
-    actorName: actor.name, project: plan.result.project, skillName: adapter.skillLabel(plan.skill), results: plan.result.results, completed: plan.result.completed
-  }));
+/**
+ * The summary of a planned run (call after it is committed): a WHISPER to the owners and the GM with degree words only, and a
+ * separate GM-only whisper with the totals and the DC. Nothing public, and no DC or total for a player (docs/11b).
+ */
+export async function postResearchChat(actor, plan) {
+  const base = { actorName: actor.name, project: plan.result.project, skillName: adapter.skillLabel(plan.skill), results: plan.result.results, completed: plan.result.completed };
+  await postChat(actor, formatResearchSummary(base));
+  const gm = gmIds();
+  if (gm.length && plan.result.results.some(r => r.total !== null)) await whisper(gm, `<p>GM only:<br>${formatResearchSummary({ ...base, forGM: true })}</p>`);
 }
 
 /**
@@ -251,6 +265,7 @@ export async function research({ actor, project: projectId, days: dayCount, skil
     throw error;
   }
   await recordSpent(actor, result.daysSpent);
+  if (result.completed && result.project.outcome?.type === "unlockFormula") await emit("formulaOwned", { actor, recipeId: result.project.outcome.recipeId });
   if (plan.stationEffect) {
     try { await logWorldEvent(`upgrade finished: ${result.project.goalName} (researched by ${actor.name})`); } catch (error) { console.error(`${MODULE_ID} | could not log the finished upgrade`, error); }
   }
@@ -286,6 +301,7 @@ export async function addProgress(api, actor, projectId, amount, reason, { chat 
     changes.push({ type: "formulaAdd", recipeId: recipe.id, access: "owned", note: "research completed" });
   }
   await commit(actor, update, changes);
+  if (applied.completed) await emit("formulaOwned", { actor, recipeId: recipe.id });
 
   if (chat) {
     await postChat(actor, formatProgressSummary({ actorName: actor.name, project: applied.project, applied: applied.applied, reason: reason.trim(), completed: applied.completed }));
@@ -323,6 +339,7 @@ export async function grantFormula(api, actor, recipeId, { access = "owned", sou
     }
   }
   await commit(actor, update, changes);
+  if (access === "owned") await emit("formulaOwned", { actor, recipeId });
   return { entry: findFormula(added.list, recipeId), change: added.change };
 }
 
@@ -385,8 +402,10 @@ export async function refreshAllFormulas(api) {
 }
 
 async function postChat(actor, content) {
+  const recipients = resultRecipients(actor);
+  if (!recipients.length) return;            // never post publicly: a result goes to the owners and the GM only
   try {
-    await ChatMessage.create({ speaker: ChatMessage.getSpeaker({ actor }), content });
+    await ChatMessage.create({ speaker: ChatMessage.getSpeaker({ actor }), whisper: recipients, content });
   } catch (error) {
     // The change itself is saved; a chat failure must not undo or hide it.
     console.error(`${MODULE_ID} | research saved, but the chat message failed`, error);

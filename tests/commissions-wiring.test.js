@@ -604,7 +604,14 @@ for (const degree of ["success", "failure", "criticalFailure"]) {
     assert.equal(clean.error, null);
     const writes = clean.ops;
     assert.ok(writes >= (degree === "success" ? 7 : 5), `the craft makes ${writes} writes`);
-    for (let k = 1; k <= writes; k++) {
+    // After a SUCCESS the crafter's Compendium learns what they made: one extra, best-effort write AFTER everything committed (docs/11b, B).
+    const transactional = degree === "success" ? writes - 1 : writes;
+    if (degree === "success") {
+      const last = await craftWithFailureAt(writes, degree);
+      assert.equal(last.error, null, "a failed Compendium write never fails the craft that already committed");
+      assert.equal(status(last.id), "delivered");
+    }
+    for (let k = 1; k <= transactional; k++) {
       const run = await craftWithFailureAt(k, degree);
       assert.ok(run.error, `a failure at write ${k} must surface`);
       assert.match(run.error.message, new RegExp(`injected failure at operation ${k} `));

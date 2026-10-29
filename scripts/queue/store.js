@@ -27,6 +27,7 @@ import { applyStationUpgrade } from "../stations/store.js";
 import { resolveBuild } from "../workshop/build.js";
 import { refusal } from "./relay.js";
 import { refresh as refreshDefinitions } from "../data/playerDefs.js";
+import { emit } from "../events.js";
 
 let boundApi = null;
 /** Give the queue the module api (definitions). Needed by explore actions. */
@@ -61,15 +62,17 @@ const actorFor = actorId => {
 export function describeAction(actor, action) {
   const handler = HANDLERS[action.type];
   if (!handler) return { label: `${action.type} (not wired yet)`, detail: "no resolver exists for this type yet", problem: "this type cannot be resolved yet" };
+  const gm = game.user.isGM;
   let info;
   try {
+    // A player's client never computes the DC or the odds at all (docs/11b): the row is built from the region's public name only.
     info = !boundApi ? undefined
-      : action.type === "explore" ? exploration.describeInfo(boundApi, actor, action)
+      : action.type === "explore" ? (gm ? exploration.describeInfo(boundApi, actor, action) : { region: boundApi.definitions?.region.get(action.params?.region) ?? null })
         : action.type === "commission" ? commissions.describeInfo(boundApi, actor, action) : undefined;
   } catch (error) {
     return { label: `${action.type} (could not be described)`, detail: error.message, problem: `could not read this action: ${error.message}` };
   }
-  return handler.describe({ action, projects: rawList(actor, K.projectsFlag), info });
+  return handler.describe({ action, projects: rawList(actor, K.projectsFlag), info, gm });
 }
 
 /** Does this action take downtime? Days reserved (research, explore, craft), or a commission craft step (which still costs no days). */
@@ -237,6 +240,7 @@ const RESOLVERS = {
       if (undoStation) await undoStation();
       throw error;
     }
+    if (plan.result.completed && plan.result.project.outcome?.type === "unlockFormula") await emit("formulaOwned", { actor, recipeId: plan.result.project.outcome.recipeId });
     if (plan.stationEffect) await work.note(`upgrade finished: ${plan.result.project.goalName} (researched by ${actor.name})`);
     if (chat) await postResearchChat(actor, plan);
     const last = plan.result.results.at(-1);

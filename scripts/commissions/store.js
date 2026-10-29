@@ -8,7 +8,9 @@
  * Nothing is held in escrow before crafting. A craft checks everything first, rolls everything,
  * and only then writes, with an undo for every write, so a failure leaves the world as it was.
  */
-import { COMMISSIONS, CRAFTING, MODULE_ID, RESEARCH_KEYS as K } from "../config.js";
+import { COMMISSIONS, CRAFTING, EXPERIMENTS, MODULE_ID, RESEARCH_KEYS as K } from "../config.js";
+import { noteCrafted } from "../compendium/store.js";
+import { emit } from "../events.js";
 import * as adapter from "../adapter/pf2e.js";
 import { commit } from "../audit/store.js";
 import { noteOverride } from "../downtime/store.js";
@@ -369,7 +371,7 @@ async function craftLocked(api, id, options) {
   if (degree) {
     if (!adapter.normalizeDegree(degree)) throw new Error(`craft: unknown degree "${degree}"`);
   } else {
-    degree = (await adapter.rollCraftCheck(crafter, adapter.levelDC(plan.craftLevel))).degree;
+    degree = (await adapter.rollCraftCheck(crafter, adapter.levelDC(plan.craftLevel), options.rollCard ? {} : { createMessage: false })).degree;
   }
   const outcome = resolveOutcome({ plan, degree, rng: d100, config: CRAFTING });
 
@@ -467,6 +469,12 @@ async function craftLocked(api, id, options) {
     throw error;
   }
 
+  if (outcome.made) {
+    // The crafter learns what they made (a loaned formula teaches the CRAFTER). The formula's owner (the patron) learns too only if the tunable says so.
+    await noteCrafted(api.definitions, crafter, recipe, plan.uses);
+    if (EXPERIMENTS.ownerLearnsFromLoan && patronActor && plan.formulaAccess === "loan") await noteCrafted(api.definitions, patronActor, recipe, plan.uses);
+  }
+  if (learned.size) await emit("formulaOwned", { actor: crafter, recipeId: recipe.id });
   if (options.chat !== false) await postCraftChat({ c, crafter, patronActor, plan, outcome, entry, next });
   console.log(`${MODULE_ID} | commission craft`, { id: c.id, degree: outcome.degree, made: outcome.made });
   return { outcome, commission: next, delivered, learn: learnLog, steps };

@@ -8,13 +8,13 @@
  */
 
 /** The only recipe fields a snapshot may contain (a test guards this list). */
-export const SNAPSHOT_KEYS = ["name", "category", "craftLevel", "slots", "stationCategory", "stationTierMin"];
+// craftLevel is NOT here (docs/11b): the level gives the craft DC through the public PF2e table, and this copy sits on the actor.
+export const SNAPSHOT_KEYS = ["name", "category", "slots", "stationCategory", "stationTierMin"];
 
 export function makeSnapshot(recipe) {
   return {
     name: recipe.name,
     category: recipe.category,
-    craftLevel: recipe.craftLevel,
     slots: recipe.slots.map(slot => ({
       name: slot.name,
       drives: Array.isArray(slot.drives) ? [...slot.drives] : [slot.drives],

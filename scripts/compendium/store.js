@@ -16,6 +16,8 @@ import { LIVE_SCHEMAS } from "../data/schemas.js";
 import { isPartyCharacter } from "../party.js";
 import { readFormulaList } from "../research/store.js";
 import { withLock } from "../queue/lock.js";
+import { resolveSlotEffects } from "../crafting/plan.js";
+import { computeBaseline, describeExperiments, effectKnown, recordBaseline, recordExperiment } from "./experiments.js";
 import {
   countBook, describeBook, emptyBook, hasMaterial as bookHasMaterial, mergeShared, recordCreature, recordCreatureYield,
   recordMaterial, recordRegion, recordRegionNodeType
@@ -154,6 +156,55 @@ export function onItemCreated(item) {
   return noteLanded(actor, { id: flags.materialId, name: item.name, tier: flags.tier });
 }
 
+// Experiments (docs/11b, B) ---------------------------------------------------------------------------------------------
+/**
+ * A craft MADE the item (a success or a critical success; a failure teaches nothing): the crafter learns, for each slot, what the
+ * material they used gives there. Effects come from the shared resolver. Best-effort and idempotent; call it after the craft committed.
+ * @param {object} recipe  the full recipe (GM registry)
+ * @param {Array<{ slot: string, materialId: string }>} uses  what went into the craft
+ */
+export function noteCrafted(definitions, actor, recipe, uses, at = Date.now()) {
+  return safely("experiments", () => mutate(actor, book => uses.reduce((next, use) => {
+    const slot = recipe.slots.find(s => s.name === use.slot);
+    const material = definitions?.material.get(use.materialId);
+    if (!slot || !material) return next;
+    const { resolved, missing } = resolveSlotEffects(recipe, slot, material);
+    if (missing.length) return next;
+    return recordExperiment(next, { recipeId: recipe.id, recipeName: recipe.name, slot: slot.name, materialId: material.id, materialName: material.name, tier: material.tier, effects: resolved, at });
+  }, book)));
+}
+
+/** A character gained an OWNED formula (research done, a GM grant, a commission that teaches): reveal its baseline. Best-effort; a loan does not call this. */
+export function noteFormulaOwned(definitions, actor, recipeId, at = Date.now()) {
+  return safely("baseline", () => {
+    const recipe = definitions?.recipe.get(recipeId);
+    const baseline = recipe ? computeBaseline(recipe, definitions) : null;
+    if (!recipe || !baseline) return false;
+    return mutate(actor, book => recordBaseline(book, { recipeId, recipeName: recipe.name, baseline, at }));
+  });
+}
+
+/** GM tool: reveal the baselines of the OWNED formulas a character (or every character) already holds. Returns how many were revealed. */
+export async function revealBaselines(definitions, actor) {
+  requireGM("compendium.revealBaselines");
+  let revealed = 0;
+  for (const target of actor ? [actor] : [...game.actors].filter(a => a.type === "character")) {
+    for (const formula of readFormulaList(target).filter(f => f.access === "owned")) {
+      if (readBook(target).experiments?.[formula.recipeId]?.baseline) continue;
+      if (await noteFormulaOwned(definitions, target, formula.recipeId)) revealed++;
+    }
+  }
+  return revealed;
+}
+
+/** Has the character learned what `materialId` gives in `slot` of the recipe? Their own book, the party's, or the formula's baseline. */
+export function knownEffect(actor, recipeId, slot, materialId) {
+  return effectKnown(booksFor(actor), recipeId, slot, materialId);
+}
+
+/** What a character knows, for a preview: their own book and, for a party character, the shared one. */
+export const booksFor = actor => ({ own: readBook(actor), shared: isPartyCharacter(actor) ? readShared() : emptyBook() });
+
 // Reading API ---------------------------------------------------------------------------------------------------------
 const toList = (definitions, actor, book, shared) => describeBook(book, { materialDefs: definitions?.material, formulas: actor ? readFormulaList(actor) : [], shared });
 
@@ -180,11 +231,12 @@ export function view(definitions, actor) {
     return { ...e, source: inOwn && inShared ? "both" : inOwn ? "own" : "shared" };
   });
   const entries = toList(definitions, actor, merged, false);
+  const experiments = describeExperiments({ own, shared });
   return {
     actor: { id: actor.id, name: actor.name },
-    entries: { materials: mark(entries.materials, "materials", "id"), creatures: mark(entries.creatures, "creatures", "key"), regions: mark(entries.regions, "regions", "id") },
-    own: toList(definitions, actor, own, false),
-    shared: toList(definitions, null, shared, true)
+    entries: { materials: mark(entries.materials, "materials", "id"), creatures: mark(entries.creatures, "creatures", "key"), regions: mark(entries.regions, "regions", "id"), experiments },
+    own: { ...toList(definitions, actor, own, false), experiments: describeExperiments({ own, shared: emptyBook() }) },
+    shared: { ...toList(definitions, null, shared, true), experiments: describeExperiments({ own: emptyBook(), shared }) }
   };
 }
 
@@ -193,8 +245,8 @@ export function all(definitions) {
   requireGM("compendium.all");
   const characters = [...game.actors].filter(a => a.type === "character" && a.getFlag(MODULE_ID, COMPENDIUM.flag) !== undefined);
   return {
-    characters: characters.map(actor => ({ actorId: actor.id, name: actor.name, counts: countBook(readBook(actor)), ...toList(definitions, actor, readBook(actor), false) })),
-    shared: { counts: countBook(readShared()), ...toList(definitions, null, readShared(), true) }
+    characters: characters.map(actor => ({ actorId: actor.id, name: actor.name, counts: countBook(readBook(actor)), ...toList(definitions, actor, readBook(actor), false), experiments: describeExperiments({ own: readBook(actor), shared: emptyBook() }) })),
+    shared: { counts: countBook(readShared()), ...toList(definitions, null, readShared(), true), experiments: describeExperiments({ own: emptyBook(), shared: readShared() }) }
   };
 }
 

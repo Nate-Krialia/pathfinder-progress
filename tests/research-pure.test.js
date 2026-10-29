@@ -288,11 +288,13 @@ test("the research summary lists each day and the progress, naming the goal but 
   assert.match(text, /Progress: 1\/8\./);
 });
 
-test("the summary shows the roll when there is one, and announces an unlock", () => {
+test("the summary: players get degree words only; the GM version shows the roll and the DC; both announce an unlock", () => {
   const p = project({ progress: 8, status: "complete", goalName: "Blade" });
-  const text = formatResearchSummary({ actorName: "Aelwyn", project: p, skillName: "Crafting", completed: true,
-    results: [{ day: 1, degree: "criticalSuccess", total: 26, delta: 2 }] });
-  assert.match(text, /Day 1: 26 vs DC 14: Critical Success \(\+2\)/);
+  const input = { actorName: "Aelwyn", project: p, skillName: "Crafting", completed: true, results: [{ day: 1, degree: "criticalSuccess", total: 26, delta: 2 }] };
+  const text = formatResearchSummary(input);
+  assert.match(text, /Day 1: Critical Success \(\+2\)/);
+  assert.doesNotMatch(text, /\bDC\b|26|vs/, "docs/11b: a player never sees the DC or the total");
+  assert.match(formatResearchSummary({ ...input, forGM: true }), /Day 1: 26 vs DC 14: Critical Success \(\+2\)/);
   assert.match(text, /Aelwyn.*has learned.*Blade/);
   assert.doesNotMatch(text, /Progress:/);
 });

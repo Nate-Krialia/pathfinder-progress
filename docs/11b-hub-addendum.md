@@ -24,11 +24,20 @@ Supersedes: `docs/10` "Players see no odds" and "Players are shown no odds or re
 - Share: a new queue "share" kind for experiments, same flow as materials, creatures and regions (0 days, no downtime, the GM approves into the shared Compendium). Shared knowledge is read-only for the party and merges additively with private knowledge.
 - `api.compendium.view(actor)` gains an experiments section. The player copy carries only what was experienced.
 
-## C. Still to confirm at the Stage 10d go-ahead (proposed in the plan, not decided)
+## C. Confirmed at the Stage 10d go-ahead
 
-- Whether the formula OWNER also learns from a loan (proposal: no, behind a config flag).
-- How "baseline" is computed and what a player sees if they have never met a valid material.
-- Whether knowledge is keyed (recipe, slot, material) or (recipe, material).
-- Whether research progress `current/needed` stays visible (it is progress, not difficulty).
-- Whether a recipe's `craftLevel` stays in the player copy (it gives the craft DC through the public PF2e level table).
-- Whether blueprints a character has not designed should be visible so the Hub can offer "research a design" (open since Stage 16; a Stage 11 question).
+- Research progress stays as `current/needed` (step boxes): it is progress, not difficulty.
+- Knowledge is keyed by (recipe, slot, material).
+- One `experiment` share = all known facts of one recipe at queue time, merged additively.
+- The player copy gets precomputed `days` (station upgrades and the 1-day floor included) and NO `craftLevel`.
+- Direct GM tools (`api.gather`, `api.craft`) roll without PF2e's own card by default (it shows the DC); the GM opts in with `rollCard: true`.
+- Stored project DCs in actor flags are NOT removed (honor system, reported).
+- Baseline: the cheapest valid material per slot (lowest tier at or above the floor, then lowest gp value, then lowest id), computed on the GM, stored without material names, revealed when a character gains an OWNED formula (research, a GM grant, a commission that teaches); a loan does not reveal it.
+- Loaned formula: only the crafter learns; `EXPERIMENTS.ownerLearnsFromLoan` (default false) is the tunable.
+- The player copy strips a region's `explorationDC` and `spawnTable`, a material's `effects`, a recipe's `overrides`, `output`, `itemTemplate`, `researchProject`, and the resolved outputs.
+- Research summary chat: a whisper to the owners and the GM with degree words only, plus a GM-only whisper with the total and the DC. `audit.scan/accept/ledger` are GM-only.
+
+## D. Still open
+
+- Whether blueprints a character has not designed should be visible so the Hub can offer "research a design" (open since Stage 16; decided for Stage 11).
+- Whether the Hub should show the result of a partly known selection as an assembled item description (Stage 10d returns per-slot facts and the result's base tier only).

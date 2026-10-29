@@ -119,13 +119,13 @@ function makeActor(name, { copper = 0, owners = [] } = {}) {
       coins: { get copperValue() { return actor.copper; } },
       async addCoins(c) {
         tick("addCoins");
-        actor.copper += c.gp * 100 + c.sp * 10 + c.cp;
+        actor.copper += (c.gp ?? 0) * 100 + (c.sp ?? 0) * 10 + (c.cp ?? 0);
         // Real PF2e keeps coins as an inventory item. Only the actors a test creates "like PF2e" (Actor.create) have one.
         if (actor.coinItem && !items.some(i => i.system.stackGroup === "coins")) items.push(makeItem(actor, { name: "Gold Pieces", type: "treasure", system: { stackGroup: "coins", quantity: 1 } }));
       },
       async removeCoins(c) {
         tick("removeCoins");
-        const cost = c.gp * 100 + c.sp * 10 + c.cp;
+        const cost = (c.gp ?? 0) * 100 + (c.sp ?? 0) * 10 + (c.cp ?? 0);   // like PF2e, a partial coin object (just gp) is fine
         if (cost > actor.copper) return false;
         actor.copper -= cost;
         return true;
@@ -200,6 +200,8 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
     users: Object.assign(collection([gm, annUser, bobUser, testUser]), { activeGM: gm }), actors: collection([]), scenes: collection([]), combats: collection([]),
     packs: { get: id => (id === "pf2e.equipment-srd" ? { getIndex: async () => [{ name: "Dagger", _id: "AAAAAAAAAAAAAAAA" }] } : undefined), filter: () => [] }, system: { id: "pf2e", version: "8.6.1" }, version: "14.369", i18n: { localize: t => t },
     modules: { get: id => modules.get(id) ?? (modules.set(id, { id, active: true }), modules.get(id)) },
+    // The chat messages the CURRENT user can see: public ones and whispers addressed to them (a GM sees all), like game.messages in Foundry.
+    messages: { get contents() { return env.chat.filter(m => game.user.isGM || !m.whisper || m.whisper.includes(game.user.id)); } },
     settings: { register() {}, get: (s, k) => clone(env.values[k]), set: async (s, k, v) => { await latency(); tick(`settings.set ${k}`); env.values[k] = clone(v); } }
   };
   globalThis.foundry = {
@@ -293,6 +295,14 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
   if (fang) await api.giveMaterial(ann, "spider-fang", fang);
   await api.grantFormula(ann, DAGGER);
   if (downtime) await api.downtime.start({ days: downtime, actorIds: [ann.id, bob.id] });
+  // Owning a formula reveals its baseline in the Compendium (Stage 10d). The older suites assume a fresh character has NO Compendium yet,
+  // so the setup's own grant is not left behind; a test that wants the baseline grants the formula itself.
+  const startBook = ann.getFlag(M, "compendium");
+  if (startBook?.experiments) {
+    const { experiments, ...rest } = startBook; void experiments;
+    const empty = !Object.keys(rest.materials).length && !Object.keys(rest.creatures).length && !Object.keys(rest.regions).length;
+    await ann.update({ [`flags.${M}.compendium`]: empty ? new FakeForcedDeletion() : rest });
+  }
   env.ops = 0;
   const { setCraftReductions } = await import("../scripts/queue/work.js");
   setCraftReductions(null);

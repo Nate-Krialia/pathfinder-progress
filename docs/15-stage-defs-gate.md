@@ -7,7 +7,7 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 **What the gate shows.**
 - A Player whose character holds `g3-loom-blade` can preview it. A Player character who does NOT hold it is told `<name> does not know this formula.`, never "unknown" or "orphaned"; only a held formula with no recipe at all on the GM says "orphaned".
 - An explore submit is validated for a region in play (tagged on the scene the character stands on) and refused plainly for one that is not.
-- The GM's copy and the Player's copy differ as designed: the Player has no recipe they do not hold, no region that is not in play, no unmet material, and, for what they do have, a region without its spawn table and a node type without its ladders and charges. The GM keeps everything.
+- The GM's copy and the Player's copy differ as designed: the Player has no recipe they do not hold, no region that is not in play, no unmet material, and, for what they do have, a region without its spawn table and DC, a node type without its ladders and charges, a material without its effects, and a recipe without its overrides, outputs, craft level or loss chances. The GM keeps everything.
 - A formula the GM grants (or takes away) reaches the Player without a reload, a moment later (the debounced refresh); so does a definition the GM edits and publishes.
 - socketlib's own sender is what decides whose definitions come back: a forged user id in the call changes nothing.
 
@@ -165,8 +165,8 @@ await (async () => {
   p.check("the bush that is out in the meadow is here", d.nodeType.has("g3-bush"));
   p.check("the hut nobody has designed is NOT here", !d.blueprint.has("g3-hut"));
   const region = d.region.get("g3-meadow"), bush = d.nodeType.get("g3-bush");
-  p.check("the meadow has no spawn table in this window", region && !("spawnTable" in region), JSON.stringify(Object.keys(region ?? {})));
-  p.check("the meadow keeps what a player needs (and its DC, which the queue list already shows)", region?.name === "Gate Meadow" && region.daysRequired === 2 && region.skillWhitelist.includes("survival") && region.explorationDC === 18);
+  p.check("the meadow has no spawn table and no DC in this window", region && !("spawnTable" in region) && !("explorationDC" in region), JSON.stringify(Object.keys(region ?? {})));
+  p.check("the meadow keeps what a player needs ", region?.name === "Gate Meadow" && region.daysRequired === 2 && region.skillWhitelist.includes("survival") && !("explorationDC" in region));
   p.check("the bush has no ladders and no charges in this window", bush && !("ladders" in bush) && !("charges" in bush), JSON.stringify(Object.keys(bush ?? {})));
   p.check("the window says it is ready", p.api.definitionsStatus().status === "ready");
   return p.done();
@@ -176,7 +176,7 @@ await (async () => {
 ## Step 5 [GM]: the GM's copy is the full one
 
 ```js
-// [GM] the GM window still has everything, with the spawn table, the ladders and the charges.
+// [GM] the GM window still has everything, with the spawn table, the DC, the ladders and the charges.
 await (async () => {
   const g = globalThis.__g3 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
   const d = g.api.definitions;

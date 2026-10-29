@@ -75,16 +75,16 @@ test("regions are those tagged on a scene in play, and the node types are those 
   assert.deepEqual(ids(selectRecords(facts({ sceneTags: ["no-such-tag"] }), registry), "region"), []);
 });
 
-test("STRIPPED: the player copy of a region has no spawnTable, a node type no ladders and no charges; nothing else is lost", () => {
+test("STRIPPED: the player copy of a region has no spawnTable and no explorationDC, a node type no ladders and no charges; nothing else is lost", () => {
   const set = selectRecords(facts({ sceneTags: ["oak-wood"], nodeTypes: ["herb"] }), registry);
   const region = set.records.find(r => r.kind === "region").data;
   const nodeType = set.records.find(r => r.kind === "nodeType").data;
   assert.equal("spawnTable" in region, false);
-  assert.equal(region.explorationDC, registry.region.get("oak-wood").explorationDC, "the DC stays: api.queue.list() already shows it to a player (see docs/10)");
+  assert.equal("explorationDC" in region, false, "docs/11b: no DC in the player copy (the explore row no longer carries it either)");
   assert.equal("ladders" in nodeType, false);
   assert.equal("charges" in nodeType, false);
   const full = registry.region.get("oak-wood");
-  for (const key of ["id", "name", "sceneTag", "skillWhitelist", "daysRequired", "explorationDC", "danger"]) assert.deepEqual(region[key], full[key], `${key} is kept`);
+  for (const key of ["id", "name", "sceneTag", "skillWhitelist", "daysRequired", "danger"]) assert.deepEqual(region[key], full[key], `${key} is kept`);
   assert.deepEqual(nodeType.skills, registry.nodeType.get("herb").skills);
   assert.equal(nodeType.name, registry.nodeType.get("herb").name);
   // and the strip is a COPY: the GM's records are untouched

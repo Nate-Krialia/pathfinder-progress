@@ -17,6 +17,7 @@ import { suggestPayout } from "./commissions/commission.js";
 import { feeForTier } from "./stations/fees.js";
 import { AUDIT, COMMISSIONS, COMPENDIUM, DEFINITIONS_SYNC, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
 import * as playerDefs from "./data/playerDefs.js";
+import * as events from "./events.js";
 import { defsState } from "./data/playerState.js";
 import * as compendium from "./compendium/store.js";
 import * as workshop from "./workshop/store.js";
@@ -148,6 +149,8 @@ Hooks.once("init", () => {
   });
 });
 
+const requireGMApi = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
+
 Hooks.once("ready", async () => {
   const api = {
     getXp,
@@ -206,7 +209,11 @@ Hooks.once("ready", async () => {
     compendium: {
       view: actor => compendium.view(api.definitions, actor),
       all: () => compendium.all(api.definitions),
-      hasMaterial: (actor, materialId) => compendium.hasMaterial(actor, materialId)
+      hasMaterial: (actor, materialId) => compendium.hasMaterial(actor, materialId),
+      /** Has this character learned what `materialId` gives in `slot` of `recipeId`? { known: true, effects, via } or { known: false }. */
+      knownEffect: (actor, recipeId, slot, materialId) => compendium.knownEffect(actor, recipeId, slot, materialId),
+      /** GM: reveal the baseline of every OWNED formula an actor already holds (formulas gained before Stage 10d). Pass no actor for every character. */
+      revealBaselines: actor => compendium.revealBaselines(api.definitions, actor)
     },
     /**
      * Workshops (Stage 10c). Players can call startUpgrade / startDesign / putAside (relayed to the GM client; immediate; no downtime needed).
@@ -226,10 +233,11 @@ Hooks.once("ready", async () => {
     /** GM only: open the review window. */
     openReview: () => openReview(api),
     /** GM only: compare what players hold with what the module granted. */
+    // GM only: the ledger and the mismatch rows carry project DCs (docs/11b).
     audit: {
-      scan: actors => auditStore.scan(actors),
-      accept: actor => auditStore.accept(actor),
-      ledger: () => auditStore.readLedger()
+      scan: actors => { requireGMApi("audit.scan"); return auditStore.scan(actors); },
+      accept: actor => { requireGMApi("audit.accept"); return auditStore.accept(actor); },
+      ledger: () => { requireGMApi("audit.ledger"); return auditStore.readLedger(); }
     },
     // Commissions (see scripts/commissions/store.js). Players use the queue-based calls; the rest is GM only.
     commissions: {
@@ -358,6 +366,8 @@ Hooks.once("ready", async () => {
   queueStore.bind(api);
   workshop.bind(api);
   playerDefs.bind(api);
+  // A character gained an owned formula: reveal its baseline (the Compendium's Experiments). Only a GM client writes.
+  events.on("formulaOwned", ({ actor, recipeId }) => (game.user.isGM ? compendium.noteFormulaOwned(api.definitions, actor, recipeId) : undefined));
   playerDefs.installPlayerHooks();
 
   for (const warning of adapter.checkVersions()) {

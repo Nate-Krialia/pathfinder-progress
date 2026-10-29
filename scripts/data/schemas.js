@@ -116,9 +116,6 @@ const regionPlayerFields = {
     }
   }),
   daysRequired: int({ min: 1 }),
-  // Kept in the player copy: api.queue.list() (not GM-gated) already shows it in an explore row's text, so removing it would change what
-  // players see (docs/10, Stage 16). Whether to gate that row is a Stage 11 question.
-  explorationDC: int({ min: 1 }),
   // How dangerous the region is. Players see the label (later, in the Hub); the encounter chance behind it stays with the GM.
   danger: optional(oneOf(["low", "moderate", "high"]))
 };
@@ -138,7 +135,8 @@ const region = obj({
         seen.add(key);
       });
     }
-  })
+  }),
+  explorationDC: int({ min: 1 })
 });
 
 // The spec names the override but not its shape; this is the minimal sensible one.
@@ -255,7 +253,31 @@ export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, cus
 // What a PLAYER client holds (Stage 16, docs/10): the same kinds, but a region without its spawn table, and a node type
 // without its ladders and charges. These are strict like the others, so a stripped copy that still carried a hidden field
 // would fail to load. Every other kind is delivered whole.
-export const PLAYER_SCHEMAS = { ...DEFINITION_SCHEMAS, region: obj(regionPlayerFields), nodeType: obj(nodeTypePlayerFields) };
+const playerMaterial = obj({ kind: kind("material"), id: idField(), name: str(), tier: tier(TIER_RANGES.material), value: optional(num({ min: 0 })) });
+const playerRecipe = obj({
+  kind: kind("recipe"),
+  id: idField(),
+  name: str(),
+  category: str(),
+  baseRole: optional(oneOf(["basePower", "spellPower"])),
+  slots: arr(obj({ name: str(), drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
+  stationCategory: str(),
+  stationTierMin: tier(TIER_RANGES.station),
+  skillWhitelist: arr(str(), { min: 1 }),
+  // Craft days, worked out on the GM client (the craft level, the station's upgrades and the 1-day floor): by station id, and with no station.
+  days: obj({ default: int({ min: 1 }), byStation: record(int({ min: 1 })) })
+});
+const playerBlueprint = obj({
+  kind: kind("blueprint"),
+  id: idField(),
+  name: str(),
+  category: str(),
+  tier: tier(TIER_RANGES.station),
+  slots: arr(obj({ name: str(), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
+  gold: num({ min: 0 }),
+  buildDays: int({ min: 1 })
+});
+export const PLAYER_SCHEMAS = { ...DEFINITION_SCHEMAS, region: obj(regionPlayerFields), nodeType: obj(nodeTypePlayerFields), material: playerMaterial, recipe: playerRecipe, blueprint: playerBlueprint };
 
 // Live records ----------------------------------------------------------------
 // A gathering node, stored in a token flag. The token is its identity.
@@ -361,7 +383,8 @@ const project = obj({
 const formulaSnapshot = obj({
   name: str(),
   category: str(),
-  craftLevel: int({ min: CRAFT_LEVEL_RANGE.min, max: CRAFT_LEVEL_RANGE.max }),
+  // Legacy: snapshots made before v0.17.0 carry the craft level. It is accepted and ignored; the GM load rewrites the snapshot without it (docs/11b).
+  craftLevel: optional(int({ min: CRAFT_LEVEL_RANGE.min, max: CRAFT_LEVEL_RANGE.max })),
   slots: arr(obj({ name: str(), drives: arr(str(), { min: 1 }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
   stationCategory: str(),
   stationTierMin: tier(TIER_RANGES.station)
@@ -451,11 +474,22 @@ const compEntry = {
   creature: obj({ key: str(), name: str(), type: str(), firstAt: int({ min: 0 }), yields: arr(obj({ materialId: idField(), name: str() })) }),
   region: obj({ id: str(), name: str(), firstAt: int({ min: 0 }), nodeTypes: arr(obj({ id: str(), name: str() })) })
 };
+// Experiments (docs/11b, B): what a character has learned about a recipe, per SLOT and MATERIAL (never per exact combination). `effects`
+// is role -> value as the shared resolver gave it. A baseline holds the result of the cheapest valid materials, revealed when the
+// formula is owned; it keeps the material ids only to match a preview, and the view never names a material the character has not met.
+const compFact = obj({ materialId: idField(), materialName: str(), tier: optional(int({ min: 1 })), effects: record(any()), at: int({ min: 0 }) });
+const compBaseline = obj({
+  baseTier: optional(int({ min: 1 })),
+  at: int({ min: 0 }),
+  slots: arr(obj({ slot: str(), tierFloor: int({ min: 1 }), materialId: idField(), effects: record(any()) }))
+});
+const compExperiment = obj({ recipeId: idField(), name: str(), firstAt: int({ min: 0 }), slots: record(record(compFact)), baseline: optional(compBaseline) });
 const compendium = obj({
   v: int({ min: 1, max: 1 }),
   materials: record(compEntry.material),
   creatures: record(compEntry.creature),
-  regions: record(compEntry.region)
+  regions: record(compEntry.region),
+  experiments: optional(record(compExperiment))
 });
 
 const pendingAction = obj({

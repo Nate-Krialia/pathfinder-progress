@@ -375,8 +375,8 @@ test("SHARE refusals reach a player as the real plain message and change nothing
   const before = snapshot(w);
   const refused = async (call, message) => assert.rejects(call(), e => e.message === message && !/exception occured/.test(e.message), message);
   await refused(() => share(w, w.annUser, w.ann, { kind: "material", key: "silver" }), "Ann has not discovered that yet, so there is nothing to share.");
-  await refused(() => share(w, w.annUser, w.ann, { kind: "spell", key: "x" }), 'share: say what to share: kind must be one of material, creature, region (got "spell")');
-  await refused(() => share(w, w.annUser, w.ann, { kind: "material" }), "share: say which entry (its id, or for a creature its key)");
+  await refused(() => share(w, w.annUser, w.ann, { kind: "spell", key: "x" }), 'share: say what to share: kind must be one of material, creature, region, experiment (got "spell")');
+  await refused(() => share(w, w.annUser, w.ann, { kind: "material" }), "share: say which entry (its id; for a creature its key; for an experiment the recipe id)");
   await refused(() => share(w, w.annUser, w.ann, { kind: "material", key: "iron" }, 2), "share: sharing costs no days (got 2); leave days out");
   await refused(() => share(w, w.bobUser, w.ann, { kind: "material", key: "iron" }), "submit: you do not own Ann");
   assert.equal(snapshot(w), before);

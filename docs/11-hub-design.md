@@ -1,5 +1,7 @@
 # 11 — Downtime Hub design (decisions from the design chat)
 
+> **Superseded in part by `docs/11b-hub-addendum.md`** (hidden difficulty everywhere; the Experiments Compendium category): a player never sees a DC, odds, a percentage or difficulty wording, and craft slots start EMPTY with unknown effects until learned. Where the two disagree, 11b wins.
+
 This is the agreed design for everything the player and GM see. It supersedes older notes where they disagree (especially node refill, which is REMOVED). All numbers are placeholders for Stage 12 tuning.
 
 ## Global rules
@@ -42,13 +44,13 @@ This is the agreed design for everything the player and GM see. It supersedes ol
 - Left: filter chips (All, Weapon, Armor, Consumable), cards with status pill (Known / Researching).
 - Right (known formula): slots, each with a one-line role ("Metal sets the weapon's power"). Each slot offers material option cards: name, effect in plain words, stock line ("Uses 3 of 5" or "Need 1, you have 0" in red).
 - Only offer options for materials the character has DISCOVERED (see Compendium). Assumption, flag if wrong.
-- "What you will get" box updates live: result text, odds in words and percent ("succeed on 8 or higher, about 65%"), failure explanation (roll decides if it works; on failure you may lose some materials, rolled per unit), and the "What it costs" breakdown.
+- "What you will get" box updates live: result text, failure explanation (roll decides if it works; on failure you may lose some materials, rolled per unit), and the "What it costs" breakdown.
 - Buttons: Queue the craft (disabled with reason if short on materials; queueing takes the materials, fee and days at once), Ask a crafter instead (jumps to Commissions).
 - Unknown formula: shows research progress bar and "Open in Research".
 
 ### Research
 - Left: Active projects, and Leads you could follow (leads come from exploration finds, commissions, shared Compendium notes).
-- Right: progress as step boxes, plain line on what finishing gives, "Roll with" skill cards (modifier and real odds of progress each), difficulty scales with tier.
+- Right: progress as step boxes (current/needed), plain line on what finishing gives, "Roll with" skill cards (your own modifier only; no DC, no odds, no expected days).
 - Each downtime day spent = one check. Outcomes (placeholder): big success +2 steps (cap +2/day), success +1, failure 0, bad failure 0.
 - Days stepper, pace line ("about N days to finish"), recent checks log (includes learn rolls from commission loans), Queue N checks, Put the project aside.
 - Station upgrades and own-workshop design are projects here too.

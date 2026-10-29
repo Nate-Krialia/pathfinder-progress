@@ -10,13 +10,15 @@ import { actorKey, withLocks } from "../queue/lock.js";
 import { appendAction, flagKey, gmIds, note, ownerIds, pendingOf, whisper } from "../queue/common.js";
 import { refusal } from "../queue/relay.js";
 import { mergeShared, pickEntry } from "./entries.js";
+import { experimentFactsText } from "./experiments.js";
 import { mergeIntoShared, readBook, readShared } from "./store.js";
 
-const KINDS = ["material", "creature", "region"];
+const KINDS = ["material", "creature", "region", "experiment"];
 const labelOf = (kind, entry) => `${entry.name} (${kind})`;
 
 /** One line of what an entry holds, for the review row. Facts only. */
 function factsText(kind, entry) {
+  if (kind === "experiment") return experimentFactsText(entry);
   if (kind === "material") return `${entry.places.length} place(s), ${entry.rungs.length} ladder rung(s)`;
   if (kind === "creature") return `${entry.yields.length} yield(s) collected`;
   return `${entry.nodeTypes.length} node type(s) found`;
@@ -27,7 +29,7 @@ export function submitShare(actor, params, days) {
   if (days !== undefined && days !== null && days !== 0) return Promise.reject(refusal(`share: sharing costs no days (got ${days}); leave days out`));
   const { kind, key } = params ?? {};
   if (!KINDS.includes(kind)) return Promise.reject(refusal(`share: say what to share: kind must be one of ${KINDS.join(", ")} (got ${JSON.stringify(kind)})`));
-  if (typeof key !== "string" || !key) return Promise.reject(refusal("share: say which entry (its id, or for a creature its key)"));
+  if (typeof key !== "string" || !key) return Promise.reject(refusal("share: say which entry (its id; for a creature its key; for an experiment the recipe id)"));
   return withLocks([actorKey(actor)], async () => {
     const entry = pickEntry(readBook(actor), kind, key);
     if (!entry) throw refusal(`${actor.name} has not discovered that yet, so there is nothing to share.`);

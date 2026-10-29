@@ -32,7 +32,7 @@ import { daysFrom } from "../research/days.js";
 import { rawList } from "../research/store.js";
 import { describeEscrow, escrowFromPlan, escrowProblems, refusalText, unusedUnits, virtualStacks } from "./escrow.js";
 import { actorKey, nodeKey, withLocks } from "./lock.js";
-import { noteGather } from "../compendium/store.js";
+import { noteCrafted, noteGather } from "../compendium/store.js";
 import { submitShare } from "../compendium/share.js";
 import { submitBuild } from "../workshop/build.js";
 import { stationReductions } from "../workshop/rules.js";
@@ -303,6 +303,7 @@ export async function resolveCraft(api, actor, action, pending, { chat, degree: 
   }
 
   await recordReturned(actor, back);
+  if (outcome.made) await noteCrafted(api.definitions, actor, recipe, plan.uses);     // only a success teaches; best-effort; the crafter learns (a loan teaches the crafter)
   await note(`resolved craft: ${recipe.name} for ${actor.name}: ${outcome.made ? "item made" : "no item"}; ${gpText(escrow.feeCopper)} fee and ${action.daysReserved} day(s) spent; `
     + `${back.length ? `escrow returned: ${back.map(u => `${u.units}x ${u.name ?? u.materialId}`).join(", ")}` : "no materials returned"}`);
   if (chat) {

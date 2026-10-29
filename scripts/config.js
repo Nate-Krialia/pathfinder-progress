@@ -230,7 +230,7 @@ export const COMPENDIUM = {
   version: 1,
   sharedSetting: "sharedCompendium",
   // Entries shared with the whole party are kept in this order.
-  categories: ["materials", "creatures", "regions"]
+  categories: ["materials", "creatures", "regions", "experiments"]
 };
 
 /** Stage 16: what a player client loads, and when it asks the GM again (docs/10, docs/08). */
@@ -239,4 +239,10 @@ export const DEFINITIONS_SYNC = {
   revisionSetting: "definitionsRevision",
   debounceMs: 300,
   socketHandler: "definitionsFor"
+};
+
+/** Stage 10d (docs/11b, B): the Experiments knowledge category. */
+export const EXPERIMENTS = {
+  // Crafting from a LOANED formula teaches the crafter. Does the formula's owner learn too? Proposal: no.
+  ownerLearnsFromLoan: false
 };

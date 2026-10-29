@@ -200,7 +200,7 @@ export function previewGather(api, actor, token, skill) {
  * @param {string} [options.degree]   TEST OVERRIDE: skip the roll and force a visible result
  * @param {boolean} [options.chat=true]  false skips the chat summary (for test loops)
  */
-export async function gather({ actor, node: nodeRef, skill, degree: forced, chat = true }, api) {
+export async function gather({ actor, node: nodeRef, skill, degree: forced, chat = true, rollCard = false }, api) {
   requireGM("gather");
   const doc = resolveToken(nodeRef);
   const node = viewOrThrow(doc, api, "gather");
@@ -217,7 +217,7 @@ export async function gather({ actor, node: nodeRef, skill, degree: forced, chat
     visible = { degree: forced, passed: PASS.includes(forced), total: null, natural: null };
     modifier = adapter.getSkillModifier(actor, picked.skill); // a forced result has no roll, so use the static modifier
   } else {
-    const roll = await adapter.rollSkillCheck(actor, picked.skill, node.ladder.base.dc);
+    const roll = await adapter.rollSkillCheck(actor, picked.skill, node.ladder.base.dc, rollCard ? {} : { createMessage: false });   // PF2e's own card shows the DC: only if the GM asks (rollCard: true)
     visible = { degree: roll.degree, passed: PASS.includes(roll.degree), total: roll.total, natural: roll.natural };
     modifier = roll.modifier;
   }

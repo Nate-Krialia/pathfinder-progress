@@ -76,7 +76,7 @@ function install({ isGM = true, actors = [], settings = {}, packs = new Map() } 
     settings: { get: (scope, key) => (key === "downtime" ? openDowntime(list.map(a => a.id)) : clone(values[key])), set: async (scope, key, value) => { values[key] = clone(value); } }
   };
   globalThis.CONFIG = { PF2E: { skills: { crafting: { label: "Crafting" }, arcana: { label: "Arcana" }, occultism: { label: "Occultism" } } } };
-  globalThis.ChatMessage = { create: async message => { chat.push(message); }, getSpeaker: () => ({}) };
+  globalThis.ChatMessage = { create: async message => { chat.push(message); }, getSpeaker: () => ({}), getWhisperRecipients: () => [{ id: "gm" }] };
   globalThis.ui = { notifications: { info: m => notices.info.push(m), warn: m => notices.warn.push(m), error: m => notices.error.push(m) } };
   return { chat, notices, values };
 }
@@ -234,8 +234,15 @@ test("a real roll goes through PF2e without its own chat card, and the degree an
   const result = await store.research({ actor, project: DAGGER, days: 2 }, api);
   assert.deepEqual(actor.rollParams.map(p => [p.dc.value, p.skipDialog, p.createMessage]), [[14, true, false], [14, true, false]]);
   assert.deepEqual(result.results.map(r => [r.degree, r.total, r.natural, r.delta]), [["success", 15, 16, 1], ["criticalSuccess", 25, 20, 2]]);
-  assert.match(env.chat[0].content, /Day 1: 15 vs DC 14: Success \(\+1\)/);
-  assert.match(env.chat[0].content, /Day 2: 25 vs DC 14: Critical Success \(\+2\)/);
+  // docs/11b: the player-facing card is a whisper with degree words only; a separate GM-only whisper has the totals and the DC.
+  assert.match(env.chat[0].content, /Day 1: Success \(\+1\)/);
+  assert.match(env.chat[0].content, /Day 2: Critical Success \(\+2\)/);
+  assert.doesNotMatch(env.chat[0].content, /\bDC\b|15|25/);
+  assert.ok(Array.isArray(env.chat[0].whisper) && env.chat[0].whisper.length > 0, "never public");
+  assert.match(env.chat[1].content, /GM only/);
+  assert.match(env.chat[1].content, /Day 1: 15 vs DC 14: Success \(\+1\)/);
+  assert.match(env.chat[1].content, /Day 2: 25 vs DC 14: Critical Success \(\+2\)/);
+  assert.deepEqual(env.chat[1].whisper, ["gm"]);
 });
 
 test("a roll PF2e returns in an unreadable shape fails loudly and changes nothing", async () => {
@@ -316,7 +323,7 @@ test("formulasFor reports ok, stale, orphaned and invalid entries", async () => 
   await store.grantFormula(api, actor, "dagger-spider-fang");
   await store.grantFormula(api, actor, "longsword-basic", { access: "loan" });
   const raw = flag(actor, "formulas");
-  raw[1].snapshot.craftLevel = 9; // stale
+  raw[1].snapshot.stationTierMin = 4; // stale
   raw.push({ recipeId: "ghost-recipe", access: "owned", source: "gm" }); // orphaned
   raw.push({ recipeId: "bad", access: "borrowed", source: "gm" }); // invalid
   await actor.setFlag(MODULE, "formulas", raw);
@@ -351,7 +358,7 @@ test("refresh keeps invalid and orphaned entries untouched and reports the orpha
   const raw = flag(actor, "formulas");
   raw.push({ recipeId: "ghost-recipe", access: "owned", source: "gm" }, { recipeId: "bad", access: "borrowed", source: "gm" });
   await actor.setFlag(MODULE, "formulas", raw);
-  const edited = editedApi(r => { r.craftLevel = 5; });
+  const edited = editedApi(r => { r.stationTierMin = 2; });
   const [change] = await store.refreshFormulas(edited, actor);
   assert.deepEqual([change.refreshed, change.orphaned], [["dagger-spider-fang"], ["ghost-recipe"]]);
   const after = flag(actor, "formulas");
@@ -364,7 +371,7 @@ test("on load the GM is told what was refreshed and what is orphaned, so nothing
   await store.grantFormula(api, actor, "dagger-spider-fang");
   await actor.setFlag(MODULE, "formulas", [...flag(actor, "formulas"), { recipeId: "ghost-recipe", access: "owned", source: "gm" }]);
   globalThis.game.actors.push(actor);
-  const edited = editedApi(r => { r.craftLevel = 6; });
+  const edited = editedApi(r => { r.stationTierMin = 3; });
   const changes = await store.refreshAllFormulas(edited);
   assert.equal(changes.length, 1);
   assert.match(env.notices.info[0], /refreshed 1 formula copy\(ies\).*Aelwyn: dagger-spider-fang/);
@@ -376,8 +383,8 @@ test("players never run the refresh", async () => {
   await store.grantFormula(api, actor, "dagger-spider-fang");
   globalThis.game.actors.push(actor);
   globalThis.game.user.isGM = false;
-  assert.deepEqual(await store.refreshAllFormulas(editedApi(r => { r.craftLevel = 7; })), []);
-  assert.equal(flag(actor, "formulas")[0].snapshot.craftLevel, 2);
+  assert.deepEqual(await store.refreshAllFormulas(editedApi(r => { r.stationTierMin = 4; })), []);
+  assert.equal(flag(actor, "formulas")[0].snapshot.stationTierMin, 1);
 });
 
 // projectInfo ---------------------------------------------------------------------------------------------------------

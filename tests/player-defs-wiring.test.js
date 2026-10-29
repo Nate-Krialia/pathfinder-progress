@@ -113,14 +113,14 @@ test("BLUEPRINT: a held design (or one being researched) loads that blueprint; a
   assert.deepEqual(kindIds(w.bobUser, "blueprint"), ["camp-forge"], "an active design project needs it too");
 });
 
-test("REGION IN PLAY: tagged on the scene the character is on, it loads WITHOUT its spawn table; explore submit validates it from the loaded set", async () => {
+test("REGION IN PLAY: tagged on the scene the character is on, it loads WITHOUT its spawn table and DC; explore submit validates it from the loaded set", async () => {
   const w = await world2();
   await api().tagScene(w.table, "oak-wood");
   await as(w.annUser, () => api().definitions.refresh());
   assert.deepEqual(kindIds(w.annUser, "region"), ["oak-wood"]);
   const region = defs(w.annUser).region.get("oak-wood");
   assert.equal("spawnTable" in region, false);
-  assert.equal(region.explorationDC, 18, "the DC stays (api.queue.list() already shows it to a player)");
+  assert.equal("explorationDC" in region, false, "docs/11b: no DC in the player copy");
   assert.equal(region.name, "Oak Wood");
   assert.ok(defs(w.gm).region.get("oak-wood").spawnTable && defs(w.gm).region.get("oak-wood").explorationDC, "the GM copy still has both");
   await api().placeAnchors(3, { scene: w.table });
@@ -150,7 +150,7 @@ test("STRIPPED FIELDS: the player copy and the GM copy differ exactly as designe
   const gmHerb = structuredClone(defs(w.gm).nodeType.get("herb"));
   await as(w.annUser, () => api().definitions.refresh());
   const pr = defs(w.annUser).region.get("oak-wood"), ph = defs(w.annUser).nodeType.get("herb");
-  const { spawnTable, ...regionRest } = gmRegion; void spawnTable;
+  const { spawnTable, explorationDC, ...regionRest } = gmRegion; void spawnTable; void explorationDC;
   const { ladders, charges, ...herbRest } = gmHerb; void ladders; void charges;
   assert.deepEqual(pr, regionRest);
   assert.deepEqual(ph, herbRest);

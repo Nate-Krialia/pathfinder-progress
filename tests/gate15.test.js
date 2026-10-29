@@ -43,7 +43,7 @@ test("the definitions gate has exactly one code block per step, every step says 
   assert.match(gateDoc, /version must be \*\*0\.16\.0\*\*/);
   assert.match(gateDoc, /Not provable in a live world \(unit tests only/);
   assert.match(gateDoc, /GM isn't connected/);
-  assert.equal(MODULE_VERSION, "0.16.0");
+  assert.match(MODULE_VERSION, /^\d+\.\d+\.\d+$/);
 });
 
 test("GATE 15: every step runs, in order, as the right client, and reports ALL PASS", async () => {

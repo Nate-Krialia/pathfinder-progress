@@ -40,24 +40,51 @@ export function normalizeFacts(facts = {}) {
 /** A string that changes exactly when the facts change. The player client asks the GM again only when this changes. */
 export const factsKey = facts => JSON.stringify(normalizeFacts(facts));
 
-/** The player's copy of one record: a region without its spawn table, a node type without ladders and charges. Others whole. (The region's DC stays: see schemas.js.) */
-export function stripForPlayer(kind, record) {
+/**
+ * The player's copy of one record (docs/11b: nothing that carries a DC, an effect or a percentage):
+ *   region    - no spawnTable, no explorationDC
+ *   nodeType  - no ladders, no charges
+ *   material  - no effects, no lossChance
+ *   recipe    - id, name, category, baseRole, slots (name, drives, tierFloor, qty), stationCategory, stationTierMin, skillWhitelist,
+ *               and `days` (worked out on the GM: craft level + station upgrades + the 1-day floor). No overrides, output, craftLevel,
+ *               resultName, itemTemplate, researchProject, or per-slot lossChance.
+ *   blueprint - no researchProject
+ * Every other kind is sent whole. `days` is { default, byStation } for a recipe.
+ */
+export function stripForPlayer(kind, record, { days } = {}) {
   const copy = structuredClone(record);
-  if (kind === "region") delete copy.spawnTable;
+  if (kind === "region") { delete copy.spawnTable; delete copy.explorationDC; }
   if (kind === "nodeType") { delete copy.ladders; delete copy.charges; }
+  if (kind === "material") { delete copy.effects; delete copy.lossChance; }
+  if (kind === "blueprint") delete copy.researchProject;
+  if (kind === "recipe") {
+    const out = { kind: copy.kind, id: copy.id, name: copy.name, category: copy.category };
+    if (copy.baseRole) out.baseRole = copy.baseRole;
+    out.slots = copy.slots.map(s => ({ name: s.name, drives: s.drives, tierFloor: s.tierFloor, qty: s.qty }));
+    Object.assign(out, { stationCategory: copy.stationCategory, stationTierMin: copy.stationTierMin, skillWhitelist: copy.skillWhitelist, days: days ?? { default: 1, byStation: {} } });
+    return out;
+  }
   return copy;
 }
 
 const KINDS_SENT = ["recipe", "blueprint", "material", "station", "town", "region", "nodeType"];
+
+/** The public stations a user's facts call for: those in the party's town or the towns of workshops they own or the party built, those whose saved state names them, those a project of theirs is about. */
+export function stationIdsFor(rawFacts, registry) {
+  const facts = normalizeFacts(rawFacts);
+  const towns = new Set([facts.location, ...facts.stationTowns].filter(Boolean));
+  const named = new Set([...facts.stateStations, ...facts.actors.flatMap(a => a.stations)]);
+  return new Set([...(registry.station?.values() ?? [])].filter(s => towns.has(s.town) || named.has(s.id)).map(s => s.id));
+}
 
 /**
  * Which definitions this set of facts needs, from the GM's full registry (kind -> Map(id -> record)).
  * @returns {{ records: Array<{ kind: string, data: object }>, missingRecipes: string[], recipeIds: string[] }}
  *   missingRecipes = formulas held with no recipe in the GM's registry (a truly orphaned formula).
  */
-export function selectRecords(rawFacts, registry) {
+export function selectRecords(rawFacts, registry, { daysFor } = {}) {
   const facts = normalizeFacts(rawFacts);
-  const pick = (kind, ids) => ids.map(id => registry[kind]?.get(id)).filter(Boolean).map(data => ({ kind, data }));
+  const pick = (kind, ids) => ids.map(id => registry[kind]?.get(id)).filter(Boolean).map(data => ({ kind, data: stripForPlayer(kind, data, { days: kind === "recipe" ? daysFor?.(data) : undefined }) }));
   const all = key => unique(facts.actors.flatMap(a => a[key]));
 
   const formulaIds = all("formulas");
@@ -69,13 +96,13 @@ export function selectRecords(rawFacts, registry) {
   // Stations: those in the town the party is in, the user's own and the party's workshops' towns, any whose saved state names the
   // user's characters, and any a project of theirs is about. Towns follow the stations, plus the places the party or a build names.
   const stationTowns = new Set([facts.location, ...facts.stationTowns].filter(Boolean));
-  const stationIds = new Set([...facts.stateStations, ...all("stations")]);
-  const stations = [...(registry.station?.values() ?? [])].filter(s => stationTowns.has(s.town) || stationIds.has(s.id)).map(data => ({ kind: "station", data }));
+  const stationIds = stationIdsFor(facts, registry);
+  const stations = [...stationIds].map(id => registry.station.get(id)).map(data => ({ kind: "station", data: stripForPlayer("station", data) }));
   const townIds = unique([...stationTowns, ...all("towns"), ...stations.map(s => s.data.town)]);
   const towns = pick("town", townIds);
 
   const regions = [...(registry.region?.values() ?? [])].filter(r => facts.sceneTags.includes(r.sceneTag)).map(data => ({ kind: "region", data: stripForPlayer("region", data) }));
-  const nodeTypes = pick("nodeType", facts.nodeTypes).map(r => ({ kind: "nodeType", data: stripForPlayer("nodeType", r.data) }));
+  const nodeTypes = pick("nodeType", facts.nodeTypes);
 
   return { records: [...recipes, ...blueprints, ...materials, ...stations, ...towns, ...regions, ...nodeTypes], missingRecipes, recipeIds: formulaIds };
 }

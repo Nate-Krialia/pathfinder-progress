@@ -27,12 +27,12 @@ import { formulaRequirement } from "../research/formulas.js";
  * @returns {{ ok: boolean, errors: string[], plan: object|null, stations: { verdicts: object[], chosen: object|null } }}
  */
 export function prepareCraft({
-  recipe, registry, selection, stacks, outputs, stations, crafterId, townOf, townName, nameOf, requestedStationId, formulas, crafterName, config, commissionId
+  recipe, registry, selection, stacks, outputs, stations, crafterId, townOf, townName, nameOf, requestedStationId, formulas, crafterName, config, commissionId, mechanical = false
 }) {
   const formula = formulaRequirement(formulas ?? [], recipe, crafterName ?? nameOf?.(crafterId) ?? crafterId, { commissionId });
   const verdicts = evaluateForRecipe(evaluateStations({ crafterId, stations, townOf, townName, nameOf }), recipe);
   const picked = selectStation({ verdicts, recipe, requestedId: requestedStationId });
-  const planned = planCraft({ recipe, registry, selection, stacks, outputs, station: picked.ok ? picked.station : undefined, config });
+  const planned = planCraft({ recipe, registry, selection, stacks, outputs, station: picked.ok ? picked.station : undefined, config, mechanical });
 
   const errors = [...(formula.ok ? [] : [formula.error]), ...(picked.ok ? [] : picked.errors), ...(planned.ok ? [] : planned.errors)];
   if (errors.length === 0) {

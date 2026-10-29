@@ -12,6 +12,7 @@ import { GENERIC_FAILURE } from "../scripts/queue/relay.js";
 import { applyStationUpgrade } from "../scripts/stations/store.js";
 import { setCraftReductions } from "../scripts/queue/work.js";
 import { UUID, UUID_2 } from "./helpers.js";
+import { withoutDifficulty } from "../scripts/difficulty.js";
 
 const api = () => getApi();
 const crit = () => ({ options: { degreeOfSuccess: 3 }, total: 30, dice: [{ faces: 20, results: [{ result: 15, active: true }] }] });
@@ -45,7 +46,8 @@ test("UPGRADE: starting a project holds the TARGET-tier materials in escrow on i
   assert.equal(api().downtime.isOpen(), false, "no downtime was needed");
   assert.deepEqual(api().queue.list(), [], "and nothing is queued");
   assert.ok(events().includes("upgrade started: Oakhaven Forge: tier 3 by Ann; escrow taken: 4x Starmetal"), events().join(" | "));
-  assert.deepEqual(projectOf(w.ann, project.id), project);
+  assert.deepEqual(withoutDifficulty(projectOf(w.ann, project.id)), project, "a player is handed the project without its DC (docs/11b); the stored record still has it");
+  assert.equal("dc" in project, false);
   clean();
 });
 
@@ -54,7 +56,8 @@ test("UPGRADE: difficulty SCALES with the target tier (research DC and progress 
   await api().giveMaterial(w.ann, "silver", 4);
   const low = await start(w.annUser, w.ann, { stationId: FORGE, kind: "craftDays", materials: { iron: 2 } });            // target tier 1
   const high = await start(w.annUser, w.ann, { ...TIER3 });                                                            // target tier 3
-  assert.ok(high.dc > low.dc && high.threshold > low.threshold, `${low.dc}/${low.threshold} < ${high.dc}/${high.threshold}`);
+  const [lowStored, highStored] = [projectOf(w.ann, low.id), projectOf(w.ann, high.id)];                                // the stored (GM) record has the DC; the player's copy does not
+  assert.ok(highStored.dc > lowStored.dc && high.threshold > low.threshold, `${lowStored.dc}/${low.threshold} < ${highStored.dc}/${high.threshold}`);
   assert.deepEqual([low.tier, high.tier], [1, 3]);
 });
 

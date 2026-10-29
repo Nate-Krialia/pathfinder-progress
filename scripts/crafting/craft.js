@@ -12,6 +12,8 @@ import { prepareCraft } from "./prepare.js";
 import { actorNameOf, readStations, townOfActor } from "../stations/store.js";
 import { readFormulaList } from "../research/store.js";
 import { defsState, notLoadedText } from "../data/playerState.js";
+import { booksFor, noteCrafted } from "../compendium/store.js";
+import { effectKnown, knownResult } from "../compendium/experiments.js";
 
 const d100 = () => Math.floor(CONFIG.Dice.randomUniform() * 100) + 1;
 
@@ -49,6 +51,7 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
   if (api.uncraftable?.has(recipeId)) {
     return { ok: false, errors: [`recipe "${recipeId}" is uncraftable: its output item could not be resolved (see the console errors)`], plan: null, stations: { verdicts: [], chosen: null } };
   }
+  if (!game.user.isGM) return playerPreview(actor, recipe, selection, api, stationId, stacks);
   const { stations } = readStations(api);
   const prepared = prepareCraft({
     recipe,
@@ -65,9 +68,44 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
     formulas: readFormulaList(actor),
     crafterName: actor.name
   });
+  return prepared;
+}
+
+/**
+ * A player's preview (docs/11b). It carries the MECHANICAL facts only: slot validity, tier floors, quantities, the station and its fee,
+ * the craft days, the materials used. A material's EFFECT is included only where the character has learned it for this recipe
+ * (by crafting it, from the shared Compendium, or from the formula's baseline); otherwise that slot is valid and its effect is
+ * `{ known: false }`. Nothing here carries a loss chance, a craft level, an output item or the result's name.
+ */
+function playerPreview(actor, recipe, selection, api, stationId, stacks) {
+  const { stations } = readStations(api);
+  const prepared = prepareCraft({
+    recipe, registry: api.definitions, selection, stacks: stacks ?? stacksFor(actor), stations, crafterId: actor.id, townOf: townOfActor,
+    townName: id => api.definitions.town.get(id)?.name ?? id, nameOf: actorNameOf, requestedStationId: stationId,
+    formulas: readFormulaList(actor), crafterName: actor.name, mechanical: true
+  });
   // A player client only knows the materials the character has met: a material it does not have is "you do not have it", not "unknown".
-  if (game.user.isGM || prepared.ok) return prepared;
-  return { ...prepared, errors: prepared.errors.map(e => e.replace(/unknown material "([^"]+)"/, 'you do not have "$1"')) };
+  if (!prepared.ok) return { ...prepared, errors: prepared.errors.map(e => e.replace(/unknown material "([^"]+)"/, 'you do not have "$1"')) };
+
+  let books;
+  try { books = booksFor(actor); } catch (error) { console.error(`${MODULE_ID} | ${actor.name}'s Compendium could not be read, so no effect is shown as known`, error); books = { own: {}, shared: {} }; }
+  const facts = {};
+  const slots = recipe.slots.map(slot => {
+    const use = prepared.plan.uses.find(u => u.slot === slot.name);
+    const fact = effectKnown(books, recipe.id, slot.name, use.materialId);
+    facts[slot.name] = fact;
+    return {
+      slot: slot.name, materialId: use.materialId, materialName: use.materialName, tier: api.definitions.material.get(use.materialId)?.tier ?? null, units: use.units,
+      effect: fact.known ? { known: true, roles: fact.effects, via: fact.via } : { known: false }
+    };
+  });
+  const station = prepared.plan.station;
+  const plan = {
+    recipeId: recipe.id, recipeName: recipe.name, station, fee: prepared.plan.fee,
+    days: recipe.days?.byStation?.[station?.id] ?? recipe.days?.default ?? null,
+    uses: prepared.plan.uses, slots, result: knownResult(recipe, facts), effectsKnown: slots.filter(s => s.effect.known).length, formulaAccess: prepared.plan.formulaAccess
+  };
+  return { ok: true, errors: [], plan, stations: prepared.stations };
 }
 
 /**
@@ -78,8 +116,9 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
  * @param {Object<string,string>} options.selection  slot name -> material id
  * @param {string} [options.station]  station id; needed only when several stations are usable
  * @param {string} [options.degree]  TEST OVERRIDE: skip the roll and force a degree
+ * @param {boolean} [options.rollCard]  post PF2e's own roll card (it shows the DC to the table). Default false.
  */
-export async function craft({ actor, recipeId, selection, station, degree: forcedDegree }, api) {
+export async function craft({ actor, recipeId, selection, station, degree: forcedDegree, rollCard = false }, api) {
   if (!game.user.isGM) throw new Error("craft: only the GM client can run a craft (hidden rolls). Player requests arrive in a later stage.");
 
   const preview = previewCraft(actor, recipeId, selection, api, station);
@@ -93,7 +132,7 @@ export async function craft({ actor, recipeId, selection, station, degree: force
   if (degree) {
     if (!adapter.normalizeDegree(degree)) throw new Error(`craft: unknown degree "${degree}"`);
   } else {
-    degree = (await adapter.rollCraftCheck(actor, adapter.levelDC(plan.craftLevel))).degree;
+    degree = (await adapter.rollCraftCheck(actor, adapter.levelDC(plan.craftLevel), rollCard ? {} : { createMessage: false })).degree;   // PF2e's own card shows the DC: only if the GM asks (rollCard: true)
   }
 
   const outcome = resolveOutcome({ plan, degree, rng: d100, config: CRAFTING });
@@ -112,6 +151,8 @@ export async function craft({ actor, recipeId, selection, station, degree: force
     }, { name: plan.resultName ?? undefined });
     created = await adapter.createItemOnActor(actor, data);
   }
+
+  if (outcome.made) await noteCrafted(api.definitions, actor, api.definitions.recipe.get(recipeId), plan.uses);   // only a success teaches; best-effort
 
   await ChatMessage.create({
     speaker: ChatMessage.getSpeaker({ actor }),

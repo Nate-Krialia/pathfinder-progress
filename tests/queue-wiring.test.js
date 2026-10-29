@@ -45,7 +45,7 @@ function install({ isGM = true, actors = [] } = {}) {
   };
   globalThis.foundry = { utils: { randomID: () => `id${++idCounter}` } };
   globalThis.CONFIG = { PF2E: { skills: { crafting: { label: "Crafting" }, arcana: { label: "Arcana" }, occultism: { label: "Occultism" } } } };
-  globalThis.ChatMessage = { create: async m => { chat.push(m); }, getSpeaker: () => ({}) };
+  globalThis.ChatMessage = { create: async m => { chat.push(m); }, getSpeaker: () => ({}), getWhisperRecipients: () => [{ id: "gm" }] };
   globalThis.ui = { notifications: { info() {}, warn() {}, error() {} } };
   return { values, chat, list };
 }
@@ -126,7 +126,7 @@ test("resolve spends the used days, refunds the rest, rolls on the GM client, an
   assert.equal(pending(actor).length, 0);
   assert.equal(total(actor), 7 + 0, "3 days spent from 10");
   assert.equal(counter(actor), 7);
-  assert.equal(env.chat.length, 1);
+  assert.equal(env.chat.length, 2, "the players' whisper, then the GM-only whisper with the totals (docs/11b)");
   assert.deepEqual(audit.scan(), []);
 });
 
