@@ -13,7 +13,8 @@ import * as queue from "../scripts/queue/store.js";
 import * as audit from "../scripts/audit/store.js";
 import * as research from "../scripts/research/store.js";
 import { _resetSocketForTests, ensureSocket, installSocketHooks, socketStatus } from "../scripts/socket.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { asPage, openDowntime, seedRecords } from "./helpers.js";
 
 const M = "pathfinder-progress";
@@ -622,7 +623,7 @@ test("searchArea: a player's call is relayed to the GM client; no socket or no G
   globalThis.canvas = { scene };
   globalThis.game.user.isGM = false;
   globalThis.game.user.id = "u-player";
-  await assert.rejects(exploration.searchArea(bb), /socket is not ready/);
+  await assert.rejects(exploration.searchArea(bb), /socket is not registered/);
   let relayed = null;
   exploration.setSocket({
     async executeAsGM(name, args) {
@@ -811,16 +812,21 @@ test("one failing explore does not block a research action in the same batch", a
 // The socket: a PLAYER's search must reach the GM client ------------------------------------------------------------------
 function fakeHooks() {
   const listeners = {};
-  return { once(name, fn) { (listeners[name] ??= []).push(fn); }, fire(name) { const fns = listeners[name] ?? []; listeners[name] = []; for (const fn of fns) fn(); }, pending: name => (listeners[name] ?? []).length };
+  return { once(name, fn) { (listeners[name] ??= []).push(fn); }, fire(name) { const fns = listeners[name] ?? []; listeners[name] = []; for (const fn of fns) fn(); } };
 }
 
-/** A socketlib that records registrations and runs "GM" handlers as the GM client (isGM flips for the call). */
-function fakeSocketlib({ failRegister = false } = {}) {
+/**
+ * A socketlib that records registrations and runs "GM" handlers as the GM client (isGM flips for the call).
+ * `refuse: true` behaves like the real socketlib does when the manifest lacks "socket": true: it logs its own
+ * error and registerModule returns NOTHING.
+ */
+function fakeSocketlib({ refuse = false, throwOnRegister = false } = {}) {
   const lib = {
     functions: new Map(), registrations: 0, calls: [],
     registerModule(id) {
       lib.registrations++;
-      if (failRegister) throw new Error("registerModule failed");
+      if (throwOnRegister) throw new Error("registerModule failed");
+      if (refuse) { console.error(`socketlib | Failed to register socket for module '${id}'. Please set '"socket":true' in your manifest and restart foundry`); return undefined; }
       return {
         register: (name, fn) => lib.functions.set(name, fn),
         async executeAsGM(name, args) {
@@ -835,6 +841,15 @@ function fakeSocketlib({ failRegister = false } = {}) {
     }
   };
   return lib;
+}
+
+/** Run `fn` while capturing console.error lines. */
+async function capturingErrors(fn) {
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => logged.push(args.map(String).join(" "));
+  try { await fn(); } finally { console.error = original; }
+  return logged;
 }
 
 async function playerSearchWorld() {
@@ -855,6 +870,7 @@ test("SOCKET (player client): registered on socketlib.ready, then a player's sea
   globalThis.socketlib = lib;
   const hooks = fakeHooks();
   installSocketHooks(hooks);
+  assert.equal(lib.registrations, 0, "nothing registers before socketlib says it is ready");
   hooks.fire("socketlib.ready");
   assert.equal(lib.registrations, 1);
   assert.ok(lib.functions.has("search"), "the search handler is registered on THIS (player) client");
@@ -864,89 +880,85 @@ test("SOCKET (player client): registered on socketlib.ready, then a player's sea
   globalThis.socketlib = undefined;
 });
 
-test("SOCKET: registration does not depend on the client being a GM; both kinds register the same function", async () => {
+test("SOCKET: registration does not depend on the client being a GM; both kinds register the same function once", async () => {
   for (const isGM of [false, true]) {
     _resetSocketForTests();
     install({ isGM });
     const lib = fakeSocketlib();
     globalThis.socketlib = lib;
-    installSocketHooks(fakeHooks());
-    assert.ok(ensureSocket(), `${isGM ? "GM" : "player"} client registers`);
+    const hooks = fakeHooks();
+    installSocketHooks(hooks);
+    hooks.fire("socketlib.ready");
+    hooks.fire("socketlib.ready");
+    ensureSocket();
+    assert.equal(lib.registrations, 1, `${isGM ? "GM" : "player"} client registers exactly once`);
     assert.ok(lib.functions.has("search"));
+    assert.equal(socketStatus().registered, true);
     assert.equal(socketStatus().client, isGM ? "GM" : "player");
   }
   globalThis.socketlib = undefined;
 });
 
-test("SOCKET: if socketlib.ready fired BEFORE this module was listening, init/setup/ready still register it", async () => {
-  for (const hook of ["init", "setup", "ready"]) {
-    const { bb } = await playerSearchWorld();
-    const lib = fakeSocketlib();
-    globalThis.socketlib = lib;               // socketlib is already there; its hook was missed
+test("SOCKET REAL BUG: socketlib returning NOTHING (no \"socket\": true in the manifest) is reported in plain words, with no TypeError", async () => {
+  const { bb } = await playerSearchWorld();
+  globalThis.socketlib = fakeSocketlib({ refuse: true });
+  const hooks = fakeHooks();
+  installSocketHooks(hooks);
+  const logged = await capturingErrors(async () => {
+    hooks.fire("socketlib.ready");
+    await assert.rejects(exploration.searchArea(bb), /socket is not registered \(api\.socketStatus\(\) shows what is missing; if the manifest was just updated, the Foundry server must be fully restarted\)/);
+  });
+  assert.ok(logged.some(l => /socketlib \| Failed to register socket/.test(l)), "socketlib's own message is still visible");
+  const ours = logged.find(l => /would not register this module/.test(l));
+  assert.ok(ours, "and so is ours");
+  assert.match(ours, /"socket": true/);
+  assert.match(ours, /SERVER must be fully restarted/);
+  assert.ok(!logged.some(l => /TypeError|Cannot read properties of undefined/.test(l)), "no crash on undefined.register");
+  assert.equal(socketStatus().registered, false);
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: if registerModule throws, the real error is logged and the player gets a clear message", async () => {
+  const { bb } = await playerSearchWorld();
+  globalThis.socketlib = fakeSocketlib({ throwOnRegister: true });
+  const hooks = fakeHooks();
+  installSocketHooks(hooks);
+  const logged = await capturingErrors(async () => {
+    hooks.fire("socketlib.ready");
+    await assert.rejects(exploration.searchArea(bb), /socket is not registered/);
+  });
+  assert.ok(logged.some(l => /socketlib refused to register this module.*registerModule failed/.test(l)));
+  globalThis.socketlib = undefined;
+});
+
+test("SOCKET: if the socket is not registered by the time Foundry is ready, the GM is told loudly and the console gets the status", async () => {
+  for (const isGM of [true, false]) {
+    _resetSocketForTests();
+    const { env } = await world({ anchors: 0 });
+    globalThis.game.user.isGM = isGM;
+    globalThis.socketlib = fakeSocketlib({ refuse: true });
     const hooks = fakeHooks();
     installSocketHooks(hooks);
-    assert.equal(lib.registrations, 0, "nothing registered until a hook fires");
-    hooks.fire(hook);
-    assert.equal(lib.registrations, 1, `registered on ${hook}`);
-    assert.equal((await exploration.searchArea(bb)).message, "You search the area. You spot: Herb Patch.");
+    const errors = [];
+    globalThis.ui = { notifications: { error: m => errors.push(m), info() {}, warn() {} } };
+    const logged = await capturingErrors(async () => { hooks.fire("socketlib.ready"); hooks.fire("ready"); });
+    assert.ok(logged.some(l => /the socket is not registered: \{.*"registered":false/.test(l)), "status is in the console");
+    assert.equal(errors.length, isGM ? 1 : 0, isGM ? "the GM gets an on-screen error" : "players get no popup");
+    if (isGM) assert.match(errors[0], /fully restart the Foundry server/);
+    void env;
   }
   globalThis.socketlib = undefined;
 });
 
-test("SOCKET: with no hook at all, the first search registers lazily and still works", async () => {
+test("SOCKET: with socketlib absent a search says the socket is not registered, and works once it registers", async () => {
   const { bb } = await playerSearchWorld();
-  const lib = fakeSocketlib();
-  globalThis.socketlib = lib;
-  installSocketHooks(fakeHooks());            // no hook is ever fired
-  assert.equal(lib.registrations, 0);
-  const result = await exploration.searchArea(bb);
-  assert.equal(result.spotted[0], "Herb Patch");
-  assert.equal(lib.registrations, 1);
-  await playerSearchWorld();
   globalThis.socketlib = undefined;
-});
-
-test("SOCKET: registering twice is harmless (one registration, however many hooks fire)", async () => {
-  await playerSearchWorld();
-  const lib = fakeSocketlib();
-  globalThis.socketlib = lib;
   const hooks = fakeHooks();
   installSocketHooks(hooks);
-  for (const name of ["socketlib.ready", "init", "setup", "ready"]) hooks.fire(name);
-  ensureSocket(); ensureSocket();
-  assert.equal(lib.registrations, 1);
-  globalThis.socketlib = undefined;
-});
-
-test("SOCKET: socketlib missing gives a plain, fixable message that points at api.socketStatus(), and works once it appears", async () => {
-  const { bb } = await playerSearchWorld();
-  globalThis.socketlib = undefined;
-  installSocketHooks(fakeHooks());
-  await assert.rejects(exploration.searchArea(bb), /socket is not ready \(is socketlib installed and active\? api\.socketStatus\(\)/);
-  assert.equal(socketStatus().registered, false);
+  await assert.rejects(exploration.searchArea(bb), /socket is not registered/);
   assert.equal(socketStatus().socketlibGlobal, false);
   globalThis.socketlib = fakeSocketlib();
-  bb.perceptionRolls.push(roll(2, 18, 12));
-  assert.equal((await exploration.searchArea(bb)).spotted[0], "Herb Patch");
-  assert.equal(socketStatus().registered, true);
-  globalThis.socketlib = undefined;
-});
-
-test("SOCKET: if registerModule throws, the error is logged, the player gets a clear message, and the next call tries again", async () => {
-  const { bb } = await playerSearchWorld();
-  const lib = fakeSocketlib({ failRegister: true });
-  globalThis.socketlib = lib;
-  installSocketHooks(fakeHooks());
-  const logged = [];
-  const original = console.error;
-  console.error = (...args) => logged.push(args.map(String).join(" "));
-  try {
-    await assert.rejects(exploration.searchArea(bb), /socket is not ready/);
-  } finally { console.error = original; }
-  assert.ok(logged.some(l => /could not register with socketlib/.test(l)));
-  assert.equal(lib.registrations, 1);
-  const lib2 = fakeSocketlib();
-  globalThis.socketlib = lib2;
+  hooks.fire("socketlib.ready");
   bb.perceptionRolls.push(roll(2, 18, 12));
   assert.equal((await exploration.searchArea(bb)).spotted[0], "Herb Patch");
   globalThis.socketlib = undefined;
@@ -955,17 +967,39 @@ test("SOCKET: if registerModule throws, the error is logged, the player gets a c
 test("SOCKET: no GM connected is a plain message and nothing is revealed", async () => {
   const { bb, scene } = await playerSearchWorld();
   globalThis.socketlib = { registerModule: () => ({ register() {}, executeAsGM: async () => { throw new Error("No GM is connected"); } }) };
+  const hooks = fakeHooks();
+  installSocketHooks(hooks);
+  hooks.fire("socketlib.ready");
   await assert.rejects(exploration.searchArea(bb), /The GM isn't available to run your search right now/);
   assert.equal(scene.tokens.filter(t => t.hidden).length, 1);
   globalThis.socketlib = undefined;
 });
 
-test("module.json lists socketlib as a REQUIRED module, with a reason", () => {
-  const manifest = JSON.parse(readFileSync("module.json", "utf8"));
-  const entry = manifest.relationships.requires.find(r => r.id === "socketlib");
+// The manifest: socketlib refuses a module without "socket": true --------------------------------------------------------
+const manifest = () => JSON.parse(readFileSync("module.json", "utf8"));
+
+test('MANIFEST: module.json has "socket": true (socketlib will not register the module without it)', () => {
+  const m = manifest();
+  assert.strictEqual(m.socket, true, 'add "socket": true to module.json, then fully restart the Foundry server');
+});
+
+test("MANIFEST: socketlib is a REQUIRED module with a reason, not just recommended", () => {
+  const m = manifest();
+  const entry = m.relationships.requires.find(r => r.id === "socketlib");
   assert.ok(entry, "socketlib must be in relationships.requires");
   assert.equal(entry.type, "module");
   assert.match(entry.manifest, /socketlib.*module\.json$/);
   assert.match(entry.reason, /Search the area/);
-  assert.ok(!(manifest.relationships.recommends ?? []).some(r => r.id === "socketlib"), "required, not just recommended");
+  assert.ok(!(m.relationships.recommends ?? []).some(r => r.id === "socketlib"));
+});
+
+test("MANIFEST: any source file that uses socketlib forces both the requirement and the socket flag", () => {
+  const files = [];
+  const walk = dir => { for (const name of readdirSync(dir)) { const path = join(dir, name); statSync(path).isDirectory() ? walk(path) : name.endsWith(".js") && files.push(path); } };
+  walk("scripts");
+  const users = files.filter(f => /\bsocketlib\.(registerModule|ready)|registerModule\(|executeAsGM|executeAsUser|executeForEveryone/.test(readFileSync(f, "utf8")));
+  assert.ok(users.length >= 1, "the scan sees the code that uses the socket");
+  const m = manifest();
+  assert.strictEqual(m.socket, true, `${users.join(", ")} use socketlib, so module.json needs "socket": true`);
+  assert.ok(m.relationships.requires.some(r => r.id === "socketlib"));
 });

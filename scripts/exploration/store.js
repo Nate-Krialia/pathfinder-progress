@@ -385,11 +385,8 @@ export async function postExploreChat(api, actor, run) {
 
 // Searching ---------------------------------------------------------------------------------------------------
 let socket = null;
-let socketProvider = null;
 /** Set by socket.js once the module has registered with socketlib. */
 export function setSocket(s) { socket = s; }
-/** socket.js gives this a way to register lazily, the first time a relay is needed. */
-export function setSocketProvider(fn) { socketProvider = fn; }
 
 const ownerUserIds = actor => [...game.users].filter(u => !u.isGM && actor.testUserPermission(u, "OWNER")).map(u => u.id);
 
@@ -456,10 +453,9 @@ export async function searchArea(actor) {
   if (!sceneId) throw new Error("searchArea: open the scene you are on first");
   if (game.user.isGM) return runSearch({ actorId: actor.id, sceneId, userId: game.user.id });
   if (!actor.isOwner) throw new Error("You can only search with a character you own.");
-  const relay = socket ?? socketProvider?.() ?? null;
-  if (!relay) throw new Error("searchArea: the module's socket is not ready (is socketlib installed and active? api.socketStatus() shows what is missing)");
+  if (!socket) throw new Error("searchArea: the module's socket is not registered (api.socketStatus() shows what is missing; if the manifest was just updated, the Foundry server must be fully restarted)");
   try {
-    return await relay.executeAsGM("search", { actorId: actor.id, sceneId, userId: game.user.id });
+    return await socket.executeAsGM("search", { actorId: actor.id, sceneId, userId: game.user.id });
   } catch (error) {
     console.error(`${MODULE_ID} | search relay failed`, error);
     throw new Error("The GM isn't available to run your search right now.");

@@ -4,6 +4,12 @@ A Foundry VTT module for Pathfinder 2e (Foundry 14, PF2e 8.6.1): use-based skill
 
 Specs live in `docs/`; start with `CLAUDE.md`.
 
+## Installing and updating
+
+Install from the manifest URL (`https://github.com/Nate-Krialia/pathfinder-progress/releases/download/dev/module.json`). The module needs the **socketlib** module, which Foundry offers to install with it.
+
+**After installing a version whose changelog or `module.json` adds or changes a manifest-level setting, fully restart the Foundry SERVER** (stop and start the Foundry process or service). Returning to the setup screen, relaunching the world, or reloading the browser is NOT enough: Foundry reads `module.json` once when the server starts. This applies to the `"socket": true` flag that v0.13.2 added; until the server restarts, players cannot "Search the area" (`api.socketStatus()` shows `registered: false` and the console says socketlib could not register the module).
+
 ## Development
 
 ```
