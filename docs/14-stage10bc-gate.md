@@ -135,10 +135,11 @@ Expected: an object with the baseline `{ gold: 100, ore: 12, gem: 4, hide: 0, fr
 Open **Gate Smith**'s sheet in this window and keep the inventory visible. Run:
 
 ```js
-// [Player] helper for the next steps (lost on reload; just run it again).
-globalThis.__p2 = (() => {
+// [Player] helper for the next steps (lost on reload; just run it again). It also asks the GM for the definitions Gate Smith needs (api.definitions.refresh()): a player client reads no pack.
+await (async () => {
   const M = "pathfinder-progress", api = game.modules.get(M).api, hero = game.user.character;
   if (game.user.isGM || hero?.name !== "Gate Smith") throw new Error('Player window as the user "Test" only, after the GM ran SETUP');
+  await api.definitions.refresh();
   const scene = () => game.scenes.getName("Gate Yard");
   const sum = id => hero.items.filter(i => i.getFlag(M, "material")?.materialId === id).reduce((n, i) => n + i.system.quantity, 0);
   const pending = () => hero.getFlag(M, "pendingActions") ?? [];
@@ -150,13 +151,13 @@ globalThis.__p2 = (() => {
   const until = async (fn, ms = 6000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await new Promise(r => setTimeout(r, 150)); } return false; };
   const book = () => hero.getFlag(M, "compendium") ?? { materials: {}, creatures: {}, regions: {} };
   const p = { M, api, hero, scene, look, pending, check, done, refused, until, book, keep: {}, bystander: game.actors.getName("Gate Bystander") };
+  globalThis.__p2 = p;
   p.base = look();
-  return p;
+  return p.base;
 })();
-globalThis.__p2.base
 ```
 
-Expected: `{ gold: 100, ore: 12, gem: 4, hide: 0, free: 12, reserved: 0 }`. If the scene is not visible to you, the GM should check that Gate Yard exists.
+Expected: `{ gold: 100, ore: 12, gem: 4, hide: 0, free: 12, reserved: 0 }`. If the scene is not visible to you, the GM should check that Gate Yard exists. From here on this window keeps its definitions up to date by itself (a moment after the GM changes something, with no reload); if a later step ever complains that something is "still loading", wait a second and run it again.
 
 ## Step 4 [Player]: the Compendium already knows what you were given
 

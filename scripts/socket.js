@@ -14,6 +14,7 @@ import * as queueStore from "./queue/store.js";
 import * as work from "./queue/work.js";
 import { runWorkshopAside, runWorkshopStart } from "./workshop/store.js";
 import { guard } from "./queue/relay.js";
+import { runDefinitionsFor } from "./data/playerDefs.js";
 
 let socket = null;
 
@@ -42,6 +43,8 @@ export function ensureSocket() {
   // Upgrade / design projects: starting one takes materials into escrow, putting one aside gives them back (workshop/store.js).
   registered.register("workshopStart", guard("workshopStart", function workshopStart(payload) { return runWorkshopStart(payload, this); }));
   registered.register("workshopAside", guard("workshopAside", function workshopAside(payload) { return runWorkshopAside(payload, this); }));
+  // A player client asks for the definitions its characters need (data/playerDefs.js). The recipes and the rest are not readable to players.
+  registered.register("definitionsFor", guard("definitionsFor", function definitionsFor(payload) { return runDefinitionsFor(payload, this); }));
   socket = registered;
   exploration.setSocket(socket);
   work.setSocket(socket);

@@ -15,13 +15,14 @@ export function packIds() {
 }
 
 /**
- * Read every definition pack. A pack this user cannot see (the recipes pack, for players) is
- * skipped quietly, so a player's client never loads recipes through this module. Foundry itself
- * does not stop a player reading the pack from the console; this is an honor system.
+ * Read every definition pack. A PLAYER client reads none of them (Stage 16): it gets the definitions its characters need from
+ * the GM client instead (data/playerDefs.js). Foundry itself does not stop a player reading a pack from the console; this
+ * is an honor system, not secrecy.
  */
 export async function collectSources() {
   const sources = [];
   const problems = [];
+  if (!game.user.isGM) return { sources, problems };
   for (const id of packIds()) {
     const pack = game.packs.get(id);
     if (!pack) {

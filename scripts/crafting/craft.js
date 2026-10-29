@@ -11,11 +11,21 @@ import { formatSummary } from "./summary.js";
 import { prepareCraft } from "./prepare.js";
 import { actorNameOf, readStations, townOfActor } from "../stations/store.js";
 import { readFormulaList } from "../research/store.js";
+import { defsState, notLoadedText } from "../data/playerState.js";
 
 const d100 = () => Math.floor(CONFIG.Dice.randomUniform() * 100) + 1;
 
 function stacksFor(actor) {
   return adapter.getMaterialStacks(actor).map(s => ({ stackId: s.item.id, materialId: s.materialId, quantity: s.quantity }));
+}
+
+/**
+ * A player client has only the recipes its characters hold a formula for (data/playerDefs.js). A HELD formula whose recipe is not
+ * loaded is one of: not loaded yet, or held with no recipe anywhere (the GM reported it as orphaned). Only the last says "orphaned".
+ */
+function playerMissingRecipe(actor, recipeId) {
+  if (defsState().missing.has(recipeId)) return `${actor.name} holds an orphaned formula for this (its recipe no longer exists): ask the GM to remove it or restore the recipe.`;
+  return notLoadedText();
 }
 
 /**
@@ -25,6 +35,12 @@ function stacksFor(actor) {
  */
 export function previewCraft(actor, recipeId, selection, api, stationId, { stacks } = {}) {
   const recipe = api.definitions?.recipe.get(recipeId);
+  // On a player client a formula the character does not hold gets ONE plain answer, whether or not the recipe happens to be loaded
+  // (a sibling character may hold it) or even exists. It never says "unknown".
+  if (!game.user.isGM && !readFormulaList(actor).some(entry => entry.recipeId === recipeId)) {
+    return { ok: false, errors: [`${actor.name} does not know this formula.`], plan: null, stations: { verdicts: [], chosen: null } };
+  }
+  if (!recipe && !game.user.isGM) return { ok: false, errors: [playerMissingRecipe(actor, recipeId)], plan: null, stations: { verdicts: [], chosen: null } };
   if (!recipe) {
     const orphaned = readFormulaList(actor).some(entry => entry.recipeId === recipeId);
     const hint = orphaned ? `; ${actor.name} holds an orphaned formula for it (its recipe no longer exists), so the GM should remove it with api.removeFormula or restore the recipe` : "";
@@ -34,7 +50,7 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
     return { ok: false, errors: [`recipe "${recipeId}" is uncraftable: its output item could not be resolved (see the console errors)`], plan: null, stations: { verdicts: [], chosen: null } };
   }
   const { stations } = readStations(api);
-  return prepareCraft({
+  const prepared = prepareCraft({
     recipe,
     registry: api.definitions,
     selection,
@@ -49,6 +65,9 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
     formulas: readFormulaList(actor),
     crafterName: actor.name
   });
+  // A player client only knows the materials the character has met: a material it does not have is "you do not have it", not "unknown".
+  if (game.user.isGM || prepared.ok) return prepared;
+  return { ...prepared, errors: prepared.errors.map(e => e.replace(/unknown material "([^"]+)"/, 'you do not have "$1"')) };
 }
 
 /**

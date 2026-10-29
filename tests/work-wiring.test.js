@@ -687,7 +687,7 @@ test("when no GM is connected, or the socket is missing, a player gets a plain m
 
 test("the real wiring registers the relay functions and exposes cancel on the api", async () => {
   await world();
-  assert.deepEqual([...env.handlers.keys()].sort(), ["queueCancel", "queueSubmit", "search", "workshopAside", "workshopStart"]);
+  assert.deepEqual([...env.handlers.keys()].sort(), ["definitionsFor", "queueCancel", "queueSubmit", "search", "workshopAside", "workshopStart"]);
   assert.equal(typeof api.queue.cancel, "function");
   assert.match(readFileSync("module.json", "utf8"), /"socket": true/);
 });
@@ -1155,10 +1155,10 @@ test("RELAY: guard() and unwrap() turn only Refusals into plain messages and eve
 
 test("RELAY: the module registers exactly the handlers we know about, and every one is guarded", async () => {
   await world();
-  assert.deepEqual([...env.handlers.keys()].sort(), ["queueCancel", "queueSubmit", "search", "workshopAside", "workshopStart"]);
+  assert.deepEqual([...env.handlers.keys()].sort(), ["definitionsFor", "queueCancel", "queueSubmit", "search", "workshopAside", "workshopStart"]);
   const source = readFileSync("scripts/socket.js", "utf8");
   const registers = source.split("\n").filter(line => /\.register\("/.test(line));
-  assert.equal(registers.length, 5);
+  assert.equal(registers.length, 6);
   for (const line of registers) assert.match(line, /register\("\w+", guard\("\w+",/, `an unguarded handler: ${line.trim()}`);
   // every file that relays through the socket unwraps what comes back
   for (const file of ["scripts/queue/work.js", "scripts/exploration/store.js"]) {
@@ -1184,7 +1184,7 @@ test("RELAY: walking every registered handler with refusals, nonsense and bugs: 
       }
     }
   });
-  assert.equal(results, 5 * payloads.length * 2);
+  assert.equal(results, 6 * payloads.length * 2);
   assert.deepEqual(env.handlerThrows, []);
 });
 

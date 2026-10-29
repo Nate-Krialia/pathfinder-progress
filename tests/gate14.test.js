@@ -9,6 +9,8 @@ import { readFileSync } from "node:fs";
 import { as, env, events, getApi, getUsers, makeRegistry, measure, quietly, snapshot, world } from "./fake-world.js";
 
 const gateDoc = readFileSync("docs/14-stage10bc-gate.md", "utf8");
+// The doc asks for the version it shipped with (0.15.0); the blocks just report the installed one, so the test compares with module.json.
+const MODULE_VERSION = JSON.parse(readFileSync("module.json", "utf8")).version;
 const GATE = new Map();
 for (const match of gateDoc.matchAll(/^## Step (\d+) ((?:\[[^\]]+\](?: and )?)+)[^\n]*\n([\s\S]*?)(?=^## Step |(?![\s\S]))/gm)) {
   const block = match[3].match(/```js\n([\s\S]*?)```/);
@@ -22,7 +24,8 @@ function runBlock(step, user) {
   const code = entry.code.replace(/^(\/\/[^\n]*\n)*\s*await \(/, match => match.replace("await (", "("));
   return as(user, () => (0, eval)(code));
 }
-const gateWorld = options => world({ downtime: 0, iron: 0, fang: 0, ...options });
+// Per-client definitions: the Player window starts with NOTHING loaded and gets what the GM sends (Step 3), as in real Foundry.
+const gateWorld = options => world({ downtime: 0, iron: 0, fang: 0, perClientDefinitions: true, ...options });
 const PLAYER = [2, 3].length; void PLAYER;
 
 // Who runs each step (the doc labels must agree).
@@ -51,8 +54,8 @@ test("GATE 14: every step runs, in order, as the right client, and reports ALL P
   const annBefore = snapshot(w);
   void annBefore;
   await quietly(async () => {
-    assert.deepEqual(await runBlock(1, gm), ["GM", true, "0.15.0"]);
-    assert.deepEqual(await runBlock(1, testUser), ["Test", false, "0.15.0"]);
+    assert.deepEqual(await runBlock(1, gm), ["GM", true, MODULE_VERSION]);
+    assert.deepEqual(await runBlock(1, testUser), ["Test", false, MODULE_VERSION]);
 
     const setup = await runBlock(2, gm);
     assert.deepEqual(setup.baseline, { gold: 100, ore: 12, gem: 4, hide: 0, free: 12, reserved: 0 });
@@ -60,6 +63,8 @@ test("GATE 14: every step runs, in order, as the right client, and reports ALL P
     assert.deepEqual(await runBlock(3, testUser), { gold: 100, ore: 12, gem: 4, hide: 0, free: 12, reserved: 0 });
 
     const run = async (step, user) => {
+      // In real Foundry a player client refreshes itself a moment after the hooks fire; a person takes longer than that between steps.
+      if (!user.isGM && globalThis.__p2) await as(user, () => api.definitions.refresh());
       const lines = [];
       const saved = console.log;
       console.log = (...args) => lines.push(args.map(String).join(" "));

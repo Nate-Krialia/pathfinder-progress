@@ -509,14 +509,14 @@ test("the loader reads the recipes pack for a GM", async () => {
   assert.deepEqual(sources.map(s => s.pack), [PACKS.definitions, PACKS.recipes]);
 });
 
-test("a player skips the recipes pack quietly, however Foundry hides it", async () => {
+test("a player reads NO definition pack (Stage 16: the GM sends what the character needs), however Foundry hides them", async () => {
   for (const recipesPack of [fakePack({ visible: false }), fakePack({ fail: true }), undefined]) {
     const packs = new Map([[PACKS.definitions, fakePack({ entries: [{ name: "Oakhaven", text: sampleText }] })]]);
     if (recipesPack) packs.set(PACKS.recipes, recipesPack);
     install({ isGM: false, packs });
     const { sources, problems } = await collectSources();
     assert.deepEqual(problems, [], "players are never shown pack problems");
-    assert.deepEqual(sources.map(s => s.pack), [PACKS.definitions]);
+    assert.deepEqual(sources, [], "and a player client loads nothing from any pack");
   }
 });
 
@@ -542,7 +542,12 @@ test("MANIFEST GUARD: the recipes pack is hidden from players' interface (Player
   assert.doesNotMatch(recipes.label, /secret|private|protected|gm only|secure/i, "the label must not imply secrecy");
   assert.equal(`${manifest.id}.${recipes.name}`, PACKS.recipes);
   const definitions = manifest.packs.find(p => p.name === "definitions");
-  assert.notEqual(definitions.ownership?.PLAYER, "NONE", "the public pack must stay readable");
+  // Stage 16: players read NO pack. The GM client sends each player the definitions their characters need (an honor system, not secrecy).
+  assert.equal(definitions.ownership?.PLAYER, "NONE", "the definitions pack is hidden from players' interface too");
+  assert.equal(definitions.ownership?.TRUSTED, "NONE");
+  assert.equal(definitions.ownership?.ASSISTANT, "OWNER");
+  assert.match(definitions.label, /hidden from players/);
+  assert.doesNotMatch(definitions.label, /secret|private|protected|gm only|secure/i);
 });
 
 test("CONTENT GUARD: recipes live only in content/recipes (the pack hidden from players' interface)", () => {

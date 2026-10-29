@@ -15,7 +15,9 @@ import * as downtime from "./downtime/store.js";
 import { installSocketHooks, socketStatus } from "./socket.js";
 import { suggestPayout } from "./commissions/commission.js";
 import { feeForTier } from "./stations/fees.js";
-import { AUDIT, COMMISSIONS, COMPENDIUM, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
+import { AUDIT, COMMISSIONS, COMPENDIUM, DEFINITIONS_SYNC, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
+import * as playerDefs from "./data/playerDefs.js";
+import { defsState } from "./data/playerState.js";
 import * as compendium from "./compendium/store.js";
 import * as workshop from "./workshop/store.js";
 import { UPGRADE_KINDS } from "./workshop/rules.js";
@@ -126,6 +128,14 @@ Hooks.once("init", () => {
     config: false,
     type: new foundry.data.fields.ObjectField(),
     default: {}
+  });
+
+  // Bumped by the GM client when the definitions really changed; every player client refreshes its copy when it changes (data/playerDefs.js).
+  game.settings.register(MODULE_ID, DEFINITIONS_SYNC.revisionSetting, {
+    scope: "world",
+    config: false,
+    type: String,
+    default: ""
   });
 
   game.settings.register(MODULE_ID, "extraPacks", {
@@ -322,22 +332,33 @@ Hooks.once("ready", async () => {
     },
     /** Dry run: validates a selection and shows what would be made. */
     previewCraft: (actor, recipeId, selection, stationId) => previewCraft(actor, recipeId, selection, api, stationId),
-    /** Reload definitions. Pass { fresh: true } to also forget cached item lookups. */
+    /** GM: tell every player client the definitions may have changed (a recipe edited in memory, a pack changed). reload() does this itself. */
+    publishDefinitions: () => playerDefs.publishDefinitions(api),
+    /** Where this client stands with its definitions: { status: idle|loading|ready|no-gm|failed, message, loads, ... }. */
+    definitionsStatus: () => { const s = defsState(); return { status: game.user.isGM ? "ready" : s.status, message: s.message, loads: s.loads, loadedAt: s.loadedAt, orphaned: [...s.missing] }; },
+    /** Reload definitions. Pass { fresh: true } to also forget cached item lookups. A player client reads no pack: it asks the GM for what its characters need. */
     async reload(options) {
       const { registry, errors, uncraftable, resolved, contexts } = await loadAll(options);
-      api.definitions = registry;
+      api.definitions = playerDefs.attachRefresh(registry);
       api.contexts = contexts;
       api.errors = [...errors, ...stations.readStations(api).errors];
       api.uncraftable = uncraftable;
       api.resolvedOutputs = resolved;
       reportErrors(api.errors);
       api.formulaNotices = await researchStore.refreshAllFormulas(api);
-      return { registry, errors: api.errors };
+      if (game.user.isGM) {
+        if (game.users.activeGM?.id === game.user.id) await playerDefs.publishDefinitions(api).catch(err => console.error(`${MODULE_ID} | could not publish the definitions revision`, err));
+      } else {
+        await playerDefs.refresh({ force: true }).catch(err => console.warn(`${MODULE_ID} | could not load definitions yet: ${err.message}`));
+      }
+      return { registry: api.definitions, errors: api.errors };
     }
   };
   game.modules.get(MODULE_ID).api = api;
   queueStore.bind(api);
   workshop.bind(api);
+  playerDefs.bind(api);
+  playerDefs.installPlayerHooks();
 
   for (const warning of adapter.checkVersions()) {
     console.warn(`${MODULE_ID} | ${warning}`);

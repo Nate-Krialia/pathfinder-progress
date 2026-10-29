@@ -26,6 +26,7 @@ import { resolveShare } from "../compendium/share.js";
 import { applyStationUpgrade } from "../stations/store.js";
 import { resolveBuild } from "../workshop/build.js";
 import { refusal } from "./relay.js";
+import { refresh as refreshDefinitions } from "../data/playerDefs.js";
 
 let boundApi = null;
 /** Give the queue the module api (definitions). Needed by explore actions. */
@@ -96,7 +97,13 @@ export async function submit(actor, type, params, days) {
       await downtime.noteOverride(actor, `queued a ${type} action`);
     }
   }
-  const region = type === "explore" ? needApi("submit").definitions?.region.get(params?.region) : undefined;
+  let region = type === "explore" ? needApi("submit").definitions?.region.get(params?.region) : undefined;
+  if (type === "explore" && !region && !game.user.isGM) {
+    // A player holds only the regions in play. Ask the GM again (it may just have been tagged), then say so plainly.
+    await refreshDefinitions({ force: true });
+    region = needApi("submit").definitions?.region.get(params?.region);
+    if (!region) throw new Error(`submit: there is no region "${params?.region ?? params?.regionId}" you can explore from where your characters are (a region has to be tagged on a scene one of them is on, or that you are viewing)`);
+  }
   const scenes = type === "explore" && game.user.isGM && region ? exploration.poolFor(region) : null;
   const submitter = type === "commission" ? commissions.submitContext(actor, params) : {};
   const checked = handler.validateSubmit({ projects: rawList(actor, K.projectsFlag), params, days, region, scenes, ...submitter });

@@ -9,6 +9,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { loadDefinitions } from "../scripts/data/validate.js";
 import { asPage, seedRecords, UUID, UUID_2 } from "./helpers.js";
+import { emptyRegistry } from "../scripts/data/playerSet.js";
+import { attachRefresh } from "../scripts/data/playerDefs.js";
+import { _resetDefsStateForTests } from "../scripts/data/playerState.js";
 
 export const M = "pathfinder-progress";
 export const makeRegistry = () => loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -144,8 +147,12 @@ function makeActor(name, { copper = 0, owners = [] } = {}) {
 
 const listeners = {};
 /** Fire a module hook the way Foundry does for the GM client (awaited here so tests are deterministic). */
-async function fireHook(name, docs) {
-  for (const doc of docs) for (const fn of listeners[name] ?? []) await als.run({ user: users.gm }, () => fn(doc));
+async function fireHook(name, docs, ...extra) {
+  for (const doc of docs) for (const fn of listeners[name] ?? []) await als.run({ user: users.gm }, () => fn(doc, ...extra));
+}
+/** Fire a hook as it would fire on THAT user's client (Foundry fires most document hooks on every client). */
+async function fireHookAs(user, name, docs, ...extra) {
+  for (const doc of docs) for (const fn of listeners[name] ?? []) await als.run({ user }, () => fn(doc, ...extra));
 }
 globalThis.Hooks = {
   once: (name, fn) => (listeners[name] ??= []).push(fn),
@@ -168,7 +175,7 @@ let api;
 let users;
 
 /** A fresh world and a freshly booted module. Returns the people and places the tests use. */
-async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM = true } = {}) {
+async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM = true, perClientDefinitions = false } = {}) {
   env.ops = 0; env.failAt = null; env.failLabel = null; env.chat = []; env.rng = []; env.relayContext = undefined; env.noGM = !withGM; env.handlerThrows = [];
   const gm = { id: "gm1", isGM: true, active: true, name: "GM", character: null };
   const annUser = { id: "u-ann", isGM: false, active: true, name: "Ann", character: null };
@@ -244,22 +251,21 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
 
   // A fake socketlib: executeAsGM runs the registered function in a GM context (or fails if no GM is connected).
   env.handlers = new Map();
-  globalThis.socketlib = {
-    registerModule: () => ({
-      register: (name, fn) => env.handlers.set(name, fn),
-      executeAsGM: async (name, payload) => {
-        if (env.noGM) { const error = new Error("There is no GM connected"); error.name = "SocketlibNoGMConnectedError"; throw error; }
-        // Like the REAL socketlib: if the handler throws, the caller never sees the message, only this generic text.
-        // (The real reason stays in the GM's console.) A guarded handler never throws, so this must never happen.
-        try {
-          return await als.run({ user: gm }, () => env.handlers.get(name).call(env.relayContext, payload));
-        } catch (error) {
-          env.handlerThrows.push({ name, message: error.message });
-          throw new Error(`An exception occured during remote execution of handler '${name}'. Please see Gamemaster's error console for details.`);
-        }
-      }
-    })
+  const relayAsGM = async (name, payload) => {
+    if (env.noGM) { const error = new Error("There is no GM connected"); error.name = "SocketlibNoGMConnectedError"; throw error; }
+    // Like the REAL socketlib: if the handler throws, the caller never sees the message, only this generic text.
+    // (The real reason stays in the GM's console.) A guarded handler never throws, so this must never happen.
+    try {
+      // Like the REAL socketlib, the handler's `this.socketdata.userId` is the user who SENT the message (Foundry's own sender), not the payload's id.
+      const sender = game.user.id;
+      return await als.run({ user: gm }, () => env.handlers.get(name).call(env.relayContext ?? { socketdata: { userId: sender } }, payload));
+    } catch (error) {
+      env.handlerThrows.push({ name, message: error.message });
+      throw new Error(`An exception occured during remote execution of handler '${name}'. Please see Gamemaster's error console for details.`);
+    }
   };
+  const registeredSocket = { register: (name, fn) => env.handlers.set(name, fn), executeAsGM: relayAsGM };
+  globalThis.socketlib = { registerModule: () => registeredSocket, modules: new Map([[M, registeredSocket]]) };
 
   const ann = makeActor("Ann", { copper, owners: [annUser.id] });
   const bob = makeActor("Bob", { copper, owners: [bobUser.id] });
@@ -290,7 +296,30 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
   env.ops = 0;
   const { setCraftReductions } = await import("../scripts/queue/work.js");
   setCraftReductions(null);
+  _resetDefsStateForTests();
+  if (perClientDefinitions) enablePerClientDefinitions(api, users);
   return { gm, annUser, bobUser, ann, bob, table, other };
+}
+
+// Per-client definitions (OFF unless a test asks) ------------------------------------------------------------------------
+/**
+ * In real Foundry every client has its own `api.definitions`. The fake has ONE api, so by default every "client" sees the GM's
+ * registry (which is what every older test relies on). With `world({ perClientDefinitions: true })` the registry, the resolved
+ * outputs and the rest are kept per user: the GM keeps what was loaded, and a player starts with nothing and gets
+ * what `api.definitions.refresh()` delivers over the (fake) socket.
+ */
+function enablePerClientDefinitions(api, people) {
+  const names = ["definitions", "resolvedOutputs", "uncraftable", "contexts", "errors"];
+  const stores = new Map();
+  stores.set(people.gm.id, Object.fromEntries(names.map(name => [name, api[name]])));
+  attachRefresh(stores.get(people.gm.id).definitions);                       // (api.reload() does this on a real GM client)
+  for (const user of [people.annUser, people.bobUser, people.testUser]) {
+    stores.set(user.id, { definitions: attachRefresh(emptyRegistry()), resolvedOutputs: new Map(), uncraftable: new Set(), contexts: new Map(), errors: [] });
+  }
+  const storeFor = () => stores.get(game.user.id) ?? stores.get(people.gm.id);
+  for (const name of names) {
+    Object.defineProperty(api, name, { configurable: true, enumerable: true, get: () => storeFor()[name], set: value => { storeFor()[name] = value; } });
+  }
 }
 
 // Helpers ---------------------------------------------------------------------------------------------------------------
@@ -358,6 +387,6 @@ async function everyFailureLeavesNothingHalfDone(label, build, op, minWrites = 4
 }
 
 
-export { env, as, collection, makeToken, makeScene, makeItem, makeActor, world, quietly, loudly, stashOf, pendingOf, measure, events, snapshot, addNode, nodeOf, craft, gatherCall, resolve, everyFailureLeavesNothingHalfDone, listeners, latency, fireHook, newId };
+export { env, as, collection, makeToken, makeScene, makeItem, makeActor, world, quietly, loudly, stashOf, pendingOf, measure, events, snapshot, addNode, nodeOf, craft, gatherCall, resolve, everyFailureLeavesNothingHalfDone, listeners, latency, fireHook, fireHookAs, newId };
 export const getApi = () => api;
 export const getUsers = () => users;

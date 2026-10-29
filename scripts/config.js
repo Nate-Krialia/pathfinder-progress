@@ -232,3 +232,11 @@ export const COMPENDIUM = {
   // Entries shared with the whole party are kept in this order.
   categories: ["materials", "creatures", "regions"]
 };
+
+/** Stage 16: what a player client loads, and when it asks the GM again (docs/10, docs/08). */
+export const DEFINITIONS_SYNC = {
+  // A world setting the GM bumps whenever the definitions are reloaded; every player client refreshes when it changes.
+  revisionSetting: "definitionsRevision",
+  debounceMs: 300,
+  socketHandler: "definitionsFor"
+};

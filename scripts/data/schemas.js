@@ -100,7 +100,8 @@ const recipe = obj({
   researchProject: obj({ tier: tier(TIER_RANGES.research) }, { extra: true })
 });
 
-const region = obj({
+// The fields of a region that a player's copy keeps (see PLAYER_SCHEMAS). The GM's copy adds the spawn table and the DC.
+const regionPlayerFields = {
   kind: kind("region"),
   id: idField(),
   name: str(),
@@ -114,6 +115,16 @@ const region = obj({
       });
     }
   }),
+  daysRequired: int({ min: 1 }),
+  // Kept in the player copy: api.queue.list() (not GM-gated) already shows it in an explore row's text, so removing it would change what
+  // players see (docs/10, Stage 16). Whether to gate that row is a Stage 11 question.
+  explorationDC: int({ min: 1 }),
+  // How dangerous the region is. Players see the label (later, in the Hub); the encounter chance behind it stays with the GM.
+  danger: optional(oneOf(["low", "moderate", "high"]))
+};
+
+const region = obj({
+  ...regionPlayerFields,
   // Each activated anchor rolls this table: a node type and tier, chosen by weight.
   // That the nodeType exists and has a ladder for the tier is checked against the loaded definitions.
   spawnTable: arr(obj({ nodeType: idField(), tier: tier(TIER_RANGES.node), weight: num({ min: 0 }) }), {
@@ -127,11 +138,7 @@ const region = obj({
         seen.add(key);
       });
     }
-  }),
-  explorationDC: int({ min: 1 }),
-  daysRequired: int({ min: 1 }),
-  // How dangerous the region is. Players see the label (later, in the Hub); the encounter chance behind it stays with the GM.
-  danger: optional(oneOf(["low", "moderate", "high"]))
+  })
 });
 
 // The spec names the override but not its shape; this is the minimal sensible one.
@@ -211,7 +218,7 @@ const ladderSpec = arr(ladderRung, {
 });
 
 // A kind of gathering node (herb, ore, corpse, ...): which skills may gather it and its default ladders by tier.
-const nodeType = obj({
+const nodeTypePlayerFields = {
   kind: kind("nodeType"),
   id: idField(),
   name: str(),
@@ -223,10 +230,14 @@ const nodeType = obj({
       });
     }
   }),
+  // Token image for nodes of this type (a Foundry path). Defaults to a core icon.
+  img: optional(str())
+};
+
+const nodeType = obj({
+  ...nodeTypePlayerFields,
   // Charges a new node of this type starts with.
   charges: int({ min: 1 }),
-  // Token image for nodes of this type (a Foundry path). Defaults to a core icon.
-  img: optional(str()),
   // Ladders by node tier: { "1": [rungs], "2": [rungs] }. A type may have none (a corpse brings its own).
   ladders: optional(record(ladderSpec, {
     refine(value, path, errors) {
@@ -240,6 +251,11 @@ const nodeType = obj({
 });
 
 export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef, nodeType, blueprint };
+
+// What a PLAYER client holds (Stage 16, docs/10): the same kinds, but a region without its spawn table, and a node type
+// without its ladders and charges. These are strict like the others, so a stripped copy that still carried a hidden field
+// would fail to load. Every other kind is delivered whole.
+export const PLAYER_SCHEMAS = { ...DEFINITION_SCHEMAS, region: obj(regionPlayerFields), nodeType: obj(nodeTypePlayerFields) };
 
 // Live records ----------------------------------------------------------------
 // A gathering node, stored in a token flag. The token is its identity.
