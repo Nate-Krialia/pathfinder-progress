@@ -22,14 +22,20 @@ const nodePath = `flags.${MODULE_ID}.${NODE_FLAG}`;
 /** Mark an anchor as occupied by the node token standing on it. */
 export const occupyUpdate = (anchorId, nodeTokenId) => ({ _id: anchorId, [`${nodePath}.occupiedBy`]: nodeTokenId });
 
-/** Free an anchor again (Foundry merges flag objects, so the key is deleted explicitly). */
-export const vacateUpdate = anchorId => ({ _id: anchorId, [`${nodePath}.-=occupiedBy`]: null });
+/**
+ * Free an anchor again. Foundry merges flag objects, so the key has to be deleted explicitly, with
+ * Foundry's ForcedDeletion operator (the old minus-equals key syntax is deprecated in v14, removed in v16).
+ */
+export const vacateUpdate = anchorId => ({ _id: anchorId, [`${nodePath}.occupiedBy`]: forcedDeletion() });
+
+function forcedDeletion() {
+  const Operator = globalThis.foundry?.data?.operators?.ForcedDeletion;
+  if (!Operator) throw new Error("foundry.data.operators.ForcedDeletion is missing (Foundry API changed?)");
+  return new Operator();
+}
 
 /** Show a hidden node and record that it was found. */
 export const revealUpdate = (tokenId, spotterName) => ({ _id: tokenId, hidden: false, [`${nodePath}.revealed`]: true, [`${nodePath}.revealedBy`]: spotterName });
-
-/** Hide a revealed node again (used to undo a reveal). */
-export const unrevealUpdate = tokenId => ({ _id: tokenId, hidden: true, [`${nodePath}.revealed`]: false, [`${nodePath}.-=revealedBy`]: null });
 
 /**
  * `n` random grid-snapped positions inside a scene's play area, not on top of each other or of

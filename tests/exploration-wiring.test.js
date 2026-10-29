@@ -1,6 +1,6 @@
 /**
  * Runs the REAL exploration store, queue and audit against fake Foundry objects: scenes with
- * tokens, a node actor, chat, settings. Update semantics (dotted paths, "-=" deletes, object
+ * tokens, a node actor, chat, settings. Update semantics (dotted paths, ForcedDeletion deletes, object
  * merging) follow Foundry's, so the revert logic is really exercised. Every write counts as an
  * "operation" so a failure can be injected at each one.
  */
@@ -28,13 +28,19 @@ function mulberry(seed) {
   return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 
-// Foundry-style update: dotted paths, "-=key" deletes, plain objects merge.
+/** Foundry v14's deletion operator. The fake counts how many were made, so a test can prove the new syntax was used. */
+class FakeForcedDeletion { constructor() { FakeForcedDeletion.made++; } }
+FakeForcedDeletion.made = 0;
+
+// Foundry-style update: dotted paths, a ForcedDeletion value deletes the key, plain objects merge.
+// The deprecated "-=key" syntax THROWS here, so nothing can quietly go back to it.
 function applyPath(target, path, value) {
   const parts = path.split(".");
+  if (parts.some(part => part.startsWith("-="))) throw new Error(`the "-=" update syntax is deprecated in Foundry v14 (removed in v16): use foundry.data.operators.ForcedDeletion (key "${path}")`);
   let o = target;
   for (const part of parts.slice(0, -1)) o = (o[part] ??= {});
   const last = parts.at(-1);
-  if (last.startsWith("-=")) { delete o[last.slice(2)]; return; }
+  if (value instanceof FakeForcedDeletion) { delete o[last]; return; }
   const isObj = v => v && typeof v === "object" && !Array.isArray(v);
   if (isObj(value) && isObj(o[last])) for (const [k, v] of Object.entries(value)) applyPath(o[last], k, v);
   else o[last] = clone(value);
@@ -121,7 +127,7 @@ function install({ isGM = true, actors = [], scenes = [], seed = 1 } = {}) {
     users: collection([{ id: "gm1", isGM: true, active: true, name: "GM" }, { id: "u-player", isGM: false, active: true, name: "Player" }, { id: "u-other", isGM: false, active: true, name: "Other" }]),
     settings: { get: (s, k) => (k === "downtime" ? openDowntime(actorList.map(a => a.id)) : clone(values[k])), set: async (s, k, v) => { tick(`settings.set ${k}`); values[k] = clone(v); } }
   };
-  globalThis.foundry = { utils: { randomID: () => newId("id") } };
+  globalThis.foundry = { utils: { randomID: () => newId("id") }, data: { operators: { ForcedDeletion: FakeForcedDeletion } } };
   globalThis.CONFIG = { Dice: { randomUniform: mulberry(seed) }, PF2E: { skills: { survival: { label: "Survival" }, nature: { label: "Nature" } } } };
   globalThis.CONST = undefined;
   globalThis.Actor = {
@@ -704,6 +710,31 @@ test("clearMap is safe to run again (idempotent) and reports zeros on a clean sc
   await assert.rejects(exploration.clearMap(scene), /GM only/);
 });
 
+test("clearMap frees every occupied anchor by DELETING the key with ForcedDeletion (absent, not null), and never uses the old '-=' syntax", async () => {
+  const { bb, scene } = await world({ anchors: 8, days: 8 });
+  await submitExplore(bb);
+  await queue.resolveAll(api, { degree: "success", chat: false });
+  const occupied = anchorsOf(scene).filter(t => t.getFlag(M, "node").occupiedBy);
+  assert.ok(occupied.length >= 4, "the expedition occupied some anchors");
+  assert.ok(occupied.every(t => "occupiedBy" in t.getFlag(M, "node")));
+  FakeForcedDeletion.made = 0;
+  await exploration.clearMap(scene);
+  assert.equal(FakeForcedDeletion.made, occupied.length, "one ForcedDeletion per occupied anchor");
+  for (const anchor of anchorsOf(scene)) {
+    const record = anchor.getFlag(M, "node");
+    assert.equal("occupiedBy" in record, false, "the key is gone, not set to null");
+    assert.deepEqual(Object.keys(record).sort(), ["discoveredBy", "source", "state"]);
+  }
+  assert.equal(anchorsOf(scene).length, 8);
+});
+
+test("the fake Foundry itself REFUSES the deprecated '-=' syntax, so the tests above prove the new operator is used", () => {
+  assert.throws(() => applyPath({ a: { b: 1 } }, "a.-=b", null), /deprecated in Foundry v14.*ForcedDeletion/);
+  const target = { a: { b: 1, c: 2 } };
+  applyPath(target, "a.b", new FakeForcedDeletion());
+  assert.deepEqual(target, { a: { c: 2 } });
+});
+
 test("after clearMap the same scene can be explored again from scratch", async () => {
   const { bb, scene } = await world({ anchors: 8, days: 8 });
   await submitExplore(bb);
@@ -735,6 +766,7 @@ test("ROLLBACK: if the actor commit fails, the new tokens, the occupied marks an
   assert.match(results[0].message, /actor update failed/);
   bb.failUpdate = false;
   assert.equal(worldSnapshot(scene, bb), before);
+  for (const anchor of anchorsOf(scene)) assert.equal("occupiedBy" in anchor.getFlag(M, "node"), false, "the rollback freed the anchors by deleting the key (no leftover null)");
   const retry = await queue.resolveAction(api, bb, pending(bb)[0].id, { degree: "success", chat: false });
   assert.equal(retry.status, "resolved");
 });

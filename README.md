@@ -10,6 +10,10 @@ Install from the manifest URL (`https://github.com/Nate-Krialia/pathfinder-progr
 
 **After installing a version whose changelog or `module.json` adds or changes a manifest-level setting, fully restart the Foundry SERVER** (stop and start the Foundry process or service). Returning to the setup screen, relaunching the world, or reloading the browser is NOT enough: Foundry reads `module.json` once when the server starts. This applies to the `"socket": true` flag that v0.13.2 added; until the server restarts, players cannot "Search the area" (`api.socketStatus()` shows `registered: false` and the console says socketlib could not register the module).
 
+## Known limit: secrecy is an honour-system rule
+
+Foundry cannot hide data from a player's browser. Hidden node tokens and their flags (including their Perception DCs), the GM-only world settings (the audit ledger, the downtime period, per-scene expedition state, the commission list), and the recipes pack are all technically readable from a player's browser console. The module keeps this information off every screen, chat message and sheet, and refuses its GM tools to players, but a player who goes looking in the console can find it. Treat it as a table rule, the same as for recipe visibility.
+
 ## Development
 
 ```

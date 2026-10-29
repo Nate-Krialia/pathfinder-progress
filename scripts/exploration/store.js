@@ -13,7 +13,7 @@ import { DEFINITION_KINDS } from "../data/schemas.js";
 import { makeAnchorRecord, makeNodeRecord } from "../gathering/node.js";
 import { pickSkill } from "../gathering/resolve.js";
 import { exploreOdds, planExpedition, rollEncounter, simulateExpeditions } from "./plan.js";
-import { anchorTokenData, nodeTokenData, occupyUpdate, randomPositions, revealUpdate, unrevealUpdate, vacateUpdate } from "./tokens.js";
+import { anchorTokenData, nodeTokenData, occupyUpdate, randomPositions, revealUpdate, vacateUpdate } from "./tokens.js";
 import { formatGmSummary } from "./summary.js";
 import { SEARCHED_ALREADY_TEXT, SEARCH_TEXT, searchMessage, spottedIds } from "./search.js";
 

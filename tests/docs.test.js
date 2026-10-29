@@ -34,3 +34,12 @@ test("the decision record states the verified finding and the decision", () => {
 test("the research docs say each result records the natural d20", () => {
   assert.match(read("docs/10-stage2-decisions.md"), /`natural` \(the natural d20\)/);
 });
+
+test("the 'Foundry cannot hide data from a client' limit is stated plainly in the README and docs/10", () => {
+  for (const file of ["README.md", "docs/10-stage2-decisions.md"]) {
+    const text = readFileSync(file, "utf8");
+    assert.match(text, /Foundry cannot hide data/i, file);
+    assert.match(text, /readable from a player's browser console|can read hidden node tokens/, `${file} must say the data is readable from the console`);
+    assert.match(text, /honou?r-system|honou?r system/i, file);
+  }
+});

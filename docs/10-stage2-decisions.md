@@ -248,6 +248,19 @@ Corpse yield derived from creature level/traits, auto-creating corpse nodes on d
 - Removed: `api.refillNode`, `refillRecord` and the refund hint that pointed at them. (There were no refill timers or "depleted until" states.) A depleted node stays depleted; the corpse `decayTimer` is unrelated and stays.
 - `api.clearMap(scene)` (GM): deletes every node token the module placed on the scene (explored nodes and nodes made from the shared Resource Node actor, found or hidden; each token's own synthetic actor goes with it), frees the anchors, removes this scene's entries from every character's `knownNodes`, and resets the scene's encounter, searches, revealed list and history. Returns `{ removed, found, hidden, skipped, knownNodesCleared }`. It never deletes the shared Resource Node actor, anchors, inventories, hand-made node tokens made from other actors, or corpse nodes (these are counted in `skipped`). Safe to run again. It replaces `resetScene`.
 
+# Known limit: Foundry cannot hide data from a client
+
+Everything the module calls "hidden" or "GM-only" is hidden from the interface, not from the browser. A player who opens the browser console can read hidden node tokens and their flags (including each node's Perception DC and whether it was found), the GM-written world settings (`auditLedger`, `downtime`, `explorationState`, `commissions`), actor and scene flags, and the recipes pack. This is the same honour-system rule as recipe visibility (verified on Foundry 14.369, also for a world Journal set to None). What the module does guarantee:
+- nothing is shown to a player on a screen, in chat, or on a sheet that they should not see (no odds, results, encounters or node counts);
+- every GM tool refuses a non-GM client, and rolls that matter (hidden rung rolls, loss rolls, exploration checks, searches) run on the GM client, so a player cannot influence them or send a better total;
+- the audit makes tampering with days, formulas and projects visible to the GM.
+It does not, and cannot, stop a determined player from reading data that Foundry delivers to their client. Never put anything in a flag, setting or hidden token that must stay secret from the players.
+
+# Maintenance notes
+
+## v0.13.3: ForcedDeletion
+Foundry v14 deprecates the old "minus-equals key" syntax for deleting a key in an update (removal in v16). The only production use was `vacateUpdate` in `exploration/tokens.js` (used by `clearMap` and by the expedition rollback), now `new foundry.data.operators.ForcedDeletion()`. `unrevealUpdate` used it too but had no caller (only an unused import and its own test), so it was deleted. A test scans `scripts/` and fails on the old syntax; the fake Foundry in the tests throws on it, so only the new operator can pass.
+
 # Notes for later stages
 
 ## Stage 7 (built, see above): a dedicated "Resource Node" actor

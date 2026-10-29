@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { loadDefinitions, validateRecord } from "../scripts/data/validate.js";
 import { EXPLORATION } from "../scripts/config.js";
 import { chooseScene, exploreOdds, perceptionDcFor, pickMany, pickSpawn, planExpedition, rollAnchorCount, rollEncounter, simulateExpeditions } from "../scripts/exploration/plan.js";
-import { anchorTokenData, nodeImage, nodeTokenData, occupyUpdate, randomPositions, revealUpdate, unrevealUpdate, vacateUpdate } from "../scripts/exploration/tokens.js";
+import { anchorTokenData, nodeImage, nodeTokenData, occupyUpdate, randomPositions, revealUpdate, vacateUpdate } from "../scripts/exploration/tokens.js";
 import { formatGmSummary } from "../scripts/exploration/summary.js";
 import * as summaryModule from "../scripts/exploration/summary.js";
 import { SEARCHED_ALREADY_TEXT, SEARCH_TEXT, searchMessage, spottedIds } from "../scripts/exploration/search.js";
 import { nodeActorData } from "../scripts/adapter/pf2e.js";
 import { HANDLERS } from "../scripts/queue/handlers.js";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { asPage, clone, seedRecords } from "./helpers.js";
 
 const seeds = seedRecords();
@@ -244,12 +246,35 @@ test("token data: anchors are hidden and default-looking; nodes use their nodeTy
   assert.equal(nodeTokenData({ x: 0, y: 0, record: {}, nodeType: herb, hidden: true }).hidden, true);
 });
 
-test("occupy / vacate / reveal / unreveal updates touch only the keys they mean to", () => {
+test("occupy / vacate / reveal updates touch only the keys they mean to; vacate uses Foundry's ForcedDeletion, not the deprecated '-=' key", () => {
+  class ForcedDeletion {}
+  globalThis.foundry = { data: { operators: { ForcedDeletion } } };
   const p = "flags.pathfinder-progress.node";
   assert.deepEqual(occupyUpdate("a1", "n1"), { _id: "a1", [`${p}.occupiedBy`]: "n1" });
-  assert.deepEqual(vacateUpdate("a1"), { _id: "a1", [`${p}.-=occupiedBy`]: null });
+  const vacate = vacateUpdate("a1");
+  assert.deepEqual(Object.keys(vacate), ["_id", `${p}.occupiedBy`], "the key is the plain path");
+  assert.ok(vacate[`${p}.occupiedBy`] instanceof ForcedDeletion);
+  assert.ok(!JSON.stringify(Object.keys(vacate)).includes("-="), "no '-=' key");
   assert.deepEqual(revealUpdate("n1", "Aelwyn"), { _id: "n1", hidden: false, [`${p}.revealed`]: true, [`${p}.revealedBy`]: "Aelwyn" });
-  assert.deepEqual(unrevealUpdate("n1"), { _id: "n1", hidden: true, [`${p}.revealed`]: false, [`${p}.-=revealedBy`]: null });
+  globalThis.foundry = undefined;
+  assert.throws(() => vacateUpdate("a1"), /foundry\.data\.operators\.ForcedDeletion is missing/);
+});
+
+test("GUARD: no source file uses the deprecated '-=key' update syntax (removed in Foundry v16)", () => {
+  const files = [];
+  const walk = dir => { for (const name of readdirSync(dir)) { const path = join(dir, name); statSync(path).isDirectory() ? walk(path) : name.endsWith(".js") && files.push(path); } };
+  walk("scripts");
+  assert.ok(files.length > 30, "the scan sees the source tree");
+  const offenders = [];
+  for (const file of files) {
+    readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+      if (/[`"'.]-=[A-Za-z_$]/.test(line)) offenders.push(`${file}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(offenders, [], "use new foundry.data.operators.ForcedDeletion() instead");
+  // The scanner itself works: it would catch the old syntax.
+  assert.ok(/[`"'.]-=[A-Za-z_$]/.test("[`${path}.-=occupiedBy`]: null"));
+  assert.ok(!/[`"'.]-=[A-Za-z_$]/.test("total -= units;"), "arithmetic '-=' is fine");
 });
 
 test("randomPositions: grid-snapped, inside the padding, distinct, avoiding occupied squares, fewer when full", () => {
