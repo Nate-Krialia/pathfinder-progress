@@ -15,6 +15,7 @@ import { pickSkill } from "../gathering/resolve.js";
 import { exploreOdds, planExpedition, rollEncounter, simulateExpeditions } from "./plan.js";
 import { anchorTokenData, nodeTokenData, occupyUpdate, randomPositions, revealUpdate, vacateUpdate } from "./tokens.js";
 import { formatGmSummary } from "./summary.js";
+import { unwrap } from "../queue/relay.js";
 import { SEARCHED_ALREADY_TEXT, SEARCH_TEXT, searchMessage, spottedIds } from "./search.js";
 
 /** A request that can never succeed as stated (the region no longer exists, the skill is not allowed). The queue refunds these. */
@@ -492,10 +493,12 @@ export async function searchArea(actor) {
   if (game.user.isGM) return runSearch({ actorId: actor.id, sceneId, userId: game.user.id });
   if (!actor.isOwner) throw new Error("You can only search with a character you own.");
   if (!socket) throw new Error("searchArea: the module's socket is not registered (api.socketStatus() shows what is missing; if the manifest was just updated, the Foundry server must be fully restarted)");
+  let result;
   try {
-    return await socket.executeAsGM("search", { actorId: actor.id, sceneId, userId: game.user.id });
+    result = await socket.executeAsGM("search", { actorId: actor.id, sceneId, userId: game.user.id });
   } catch (error) {
     console.error(`${MODULE_ID} | search relay failed`, error);
     throw new Error("The GM isn't available to run your search right now.");
   }
+  return unwrap(result);   // a refusal or an unexpected failure on the GM side arrives as data (queue/relay.js)
 }

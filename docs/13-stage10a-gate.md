@@ -8,18 +8,20 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. Do this before anything else. The version must be **0.14.0**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. Do this before anything else. The version must be **0.14.1**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.14.0"]` in the GM window and `["Test", false, "0.14.0"]` in the Player window.
+Expected: `["<your GM name>", true, "0.14.1"]` in the GM window and `["Test", false, "0.14.1"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 
+Safe to run again at any time: after a reload of the GM window the fake definitions and the `globalThis.__gate` helper are gone, and running SETUP again re-registers the definitions and REBUILDS the helper (with the ids and the baseline saved on Gate Scene) without touching anything else.
+
 ```js
-// [GM] SETUP: fake definitions (memory only), Gate Hero + Gate Absent, Gate Scene with nodes, 6 days of downtime, party at Gate Town.
+// [GM] SETUP: fake definitions (memory only), Gate Hero + Gate Absent, Gate Scene with nodes, 6 days of downtime, party at Gate Town. Run it again after a reload to rebuild the helper.
 await (async () => {
   const M = "pathfinder-progress", api = game.modules.get(M).api;
   const test = game.users.getName("Test");
@@ -46,7 +48,32 @@ await (async () => {
     api.definitions[kind].set(record.id, record);
   }
 
-  if (heroOld) return { already: "set up", note: "definitions re-registered; nothing else changed" };
+  // The helper the later [GM] steps use. Built here for a first run AND for a rerun after a reload.
+  const sumOre = a => a.items.filter(i => i.getFlag(M, "material")?.materialId === "gate-ore").reduce((n, i) => n + i.system.quantity, 0);
+  const isCoin = i => i.isCoinage === true || i.system?.stackGroup === "coins" || /^(Platinum|Gold|Silver|Copper) Pieces$/.test(i.name);   // PF2e keeps coins as an inventory item
+  const look = a => ({ gold: api.adapter.getCopper(a) / 100, ore: sumOre(a), free: a.getFlag(M, "downtimeDays") ?? 0, reserved: (a.getFlag(M, "pendingActions") ?? []).reduce((n, p) => n + p.daysReserved, 0), items: a.items.filter(i => !i.getFlag(M, "material") && !isCoin(i)).map(i => i.name) });
+  const rows = [];
+  const build = (ids, base) => {
+    const g = {
+      M, api, ids, look, base,
+      hero: () => game.actors.get(ids.hero), away: () => game.actors.get(ids.away), scene: () => game.scenes.get(ids.scene),
+      node: key => g.scene().tokens.get(ids[key]),
+      events: () => (game.settings.get(M, "auditLedger")._events?.history ?? []).map(h => h.text),
+      check: (label, ok, detail) => rows.push(`${ok ? "PASS" : "FAIL"}: ${label}${detail === undefined ? "" : ` (${detail})`}`),
+      done: () => { console.log(rows.join("\n")); const bad = rows.filter(r => r.startsWith("FAIL")).length; rows.length = 0; return bad ? `${bad} FAILED: scroll up for the lines` : "ALL PASS"; }
+    };
+    globalThis.__gate = g;
+    return g;
+  };
+
+  if (heroOld || awayOld || sceneOld) {
+    if (!(heroOld && awayOld && sceneOld)) throw new Error("part of the gate is missing (a character or the scene was deleted): run CLEANUP (step 25), then SETUP again");
+    const saved = sceneOld.getFlag(M, "gateIds") ?? {};
+    const byName = name => sceneOld.tokens.getName(name)?.id;
+    const ids = { hero: heroOld.id, away: awayOld.id, scene: sceneOld.id, A: saved.A ?? byName("Gate Patch A"), B: saved.B ?? byName("Gate Patch B"), H: saved.H ?? byName("Gate Patch H"), anchor: saved.anchor ?? byName("Gate Anchor") };
+    const g = build(ids, sceneOld.getFlag(M, "gateBaseline") ?? look(heroOld));
+    return { already: "set up", rebuilt: "the definitions and globalThis.__gate", baseline: g.base, ids };
+  }
 
   // Refuse to run against real data.
   if (api.downtime.isOpen()) throw new Error("downtime is already open; end it first");
@@ -76,24 +103,15 @@ await (async () => {
   await test.update({ character: hero.id });
   await api.downtime.start({ days: 6, actorIds: [hero.id, away.id] });
 
-  // Helpers the later [GM] steps use (lost if you reload; just run SETUP again).
-  const sumOre = a => a.items.filter(i => i.getFlag(M, "material")?.materialId === "gate-ore").reduce((n, i) => n + i.system.quantity, 0);
-  const look = a => ({ gold: api.adapter.getCopper(a) / 100, ore: sumOre(a), free: a.getFlag(M, "downtimeDays") ?? 0, reserved: (a.getFlag(M, "pendingActions") ?? []).reduce((n, p) => n + p.daysReserved, 0), items: a.items.filter(i => !i.getFlag(M, "material")).map(i => i.name) });
-  const rows = [];
-  const g = {
-    M, api, ids: { hero: hero.id, away: away.id, scene: scene.id, A: A.id, B: B.id, H: H.id, anchor: anchor.id }, look, base: look(hero),
-    hero: () => game.actors.get(g.ids.hero), away: () => game.actors.get(g.ids.away), scene: () => game.scenes.get(g.ids.scene),
-    node: key => g.scene().tokens.get(g.ids[key]),
-    events: () => (game.settings.get(M, "auditLedger")._events?.history ?? []).map(h => h.text),
-    check: (label, ok, detail) => rows.push(`${ok ? "PASS" : "FAIL"}: ${label}${detail === undefined ? "" : ` (${detail})`}`),
-    done: () => { console.log(rows.join("\n")); const bad = rows.filter(r => r.startsWith("FAIL")).length; rows.length = 0; return bad ? `${bad} FAILED: scroll up for the lines` : "ALL PASS"; }
-  };
-  globalThis.__gate = g;
+  const ids = { hero: hero.id, away: away.id, scene: scene.id, A: A.id, B: B.id, H: H.id, anchor: anchor.id };
+  const g = build(ids, look(hero));
+  await scene.setFlag(M, "gateIds", ids);          // saved so a rerun after a reload can rebuild the helper
+  await scene.setFlag(M, "gateBaseline", g.base);
   return { hero: hero.name, away: away.name, scene: scene.name, nodes: [A.name, B.name, H.name], baseline: g.base, testUsersCharacter: game.users.getName("Test").character?.name };
 })();
 ```
 
-Expected: an object with the baseline `{ gold: 20, ore: 8, free: 6, reserved: 0, items: [] }` and `testUsersCharacter: "Gate Hero"`.
+Expected: an object with the baseline `{ gold: 20, ore: 8, free: 6, reserved: 0, items: [] }` and `testUsersCharacter: "Gate Hero"`. (Coins are not counted as items.) On a rerun it says `already: "set up"` and shows the rebuilt baseline and ids.
 
 ## Step 3 [Player]: the Player helper
 
@@ -171,7 +189,7 @@ await (async () => {
   p.check("cancel refunded 2 days", result.refunded === 2, JSON.stringify(result));
   p.check("gold, ore and days are exactly as at the start", JSON.stringify(after) === JSON.stringify(p.base), JSON.stringify(after));
   const again = await p.refused(() => p.api.queue.cancel(p.hero, action.id));
-  p.check("a second cancel is refused (nothing is returned twice)", /has no queued action/.test(again ?? ""), again);
+  p.check("a second cancel is refused with the plain message (nothing is returned twice)", /^Gate Hero has no queued action "[^"]+"$/.test(again ?? ""), again);
   p.check("still exactly as at the start", JSON.stringify(p.look()) === JSON.stringify(p.base));
   return p.done();
 })();
@@ -184,11 +202,11 @@ await (async () => {
 await (async () => {
   const p = globalThis.__p ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
   const short = await p.refused(() => p.api.queue.submit(p.hero, "craft", { recipe: "gate-blade", selection: { body: "gate-gem" } }));
-  p.check("a material you do not have is refused with the Compendium pointer", /needs 2 Gate Gem but only 0 available/.test(short ?? "") && /Compendium/.test(short ?? ""), short);
+  p.check("a material you do not have is refused with the Compendium pointer", /^Cannot queue this craft: slot "body": needs 2 Gate Gem but only 0 available\. Nothing can be bought: check the Compendium for where to find what you are missing\.$/.test(short ?? ""), short);
   const empty = await p.refused(() => p.api.queue.submit(p.hero, "craft", { recipe: "gate-blade", selection: {} }));
-  p.check("an empty slot is refused", /slot "body": no material selected/.test(empty ?? ""), empty);
+  p.check("an empty slot is refused", /^Cannot queue this craft: slot "body": no material selected\. Nothing can be bought: check the Compendium/.test(empty ?? ""), empty);
   const days = await p.refused(() => p.api.queue.submit(p.hero, "craft", { recipe: "gate-blade", selection: { body: "gate-ore" } }, 5));
-  p.check("a made-up number of days is refused", /this craft takes 2 day\(s\) \(got 5\)/.test(days ?? ""), days);
+  p.check("a made-up number of days is refused", /^craft: this craft takes 2 day\(s\) \(got 5\); the time is set by the recipe and the station, leave days out$/.test(days ?? ""), days);
   p.check("nothing changed", JSON.stringify(p.look()) === JSON.stringify(p.base), JSON.stringify(p.look()));
   return p.done();
 })();
@@ -334,7 +352,7 @@ await (async () => {
   const p = globalThis.__p ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
   const before = p.look();
   const refusal = await p.refused(() => p.api.queue.submit(p.hero, "craft", { recipe: "gate-blade", selection: { body: "gate-ore" } }));
-  p.check("refused with the plain message", /Downtime isn't open right now/.test(refusal ?? ""), refusal);
+  p.check("refused with the plain message", refusal === "Downtime isn't open right now", refusal);
   p.check("nothing was taken", JSON.stringify(p.look()) === JSON.stringify(before), JSON.stringify(p.look()));
   return p.done();
 })();
@@ -404,11 +422,11 @@ await (async () => {
   const p = globalThis.__p ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
   const sceneId = p.scene().id;
   const taken = await p.refused(() => p.api.queue.submit(p.hero, "gather", { sceneId, tokenId: p.node("Gate Patch B").id }));
-  p.check("the last charge is already claimed", /Gate Patch B has no free charge left: every charge it has is already claimed by a queued gather/.test(taken ?? ""), taken);
+  p.check("the last charge is already claimed", taken === "Gate Patch B has no free charge left: every charge it has is already claimed by a queued gather", taken);
   const hiddenNode = p.node("Gate Patch H");
   if (hiddenNode) {
     const hidden = await p.refused(() => p.api.queue.submit(p.hero, "gather", { sceneId, tokenId: hiddenNode.id }));
-    p.check("a node nobody has found is refused", /Gate Patch H has not been found yet/.test(hidden ?? ""), hidden);
+    p.check("a node nobody has found is refused", hidden === "Gate Patch H has not been found yet", hidden);
   } else {
     p.check("a node nobody has found is not even visible to you", true);
   }
@@ -417,7 +435,7 @@ await (async () => {
   const theirs = (away.getFlag(p.M, "pendingActions") ?? [])[0];
   p.check("Gate Absent has a queued gather to try to cancel", theirs?.type === "gather");
   const cancel = await p.refused(() => p.api.queue.cancel(away, theirs.id));
-  p.check("cancelling someone else's item is refused", /does not own Gate Absent|you do not own/.test(cancel ?? ""), cancel);
+  p.check("cancelling someone else's item is refused", cancel === "cancel: Test does not own Gate Absent", cancel);
   p.check("their item is still queued", (away.getFlag(p.M, "pendingActions") ?? []).length === 1);
   return p.done();
 })();

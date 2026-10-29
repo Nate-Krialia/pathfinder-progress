@@ -32,6 +32,7 @@ import { daysFrom } from "../research/days.js";
 import { rawList } from "../research/store.js";
 import { describeEscrow, escrowFromPlan, escrowProblems, refusalText, unusedUnits, virtualStacks } from "./escrow.js";
 import { actorKey, nodeKey, withLocks } from "./lock.js";
+import { GENERIC_FAILURE, refusal, unwrap } from "./relay.js";
 import { planReject, planResolve, planSubmit } from "./reservation.js";
 
 export const WORK_TYPES = ["craft", "gather"];
@@ -73,26 +74,32 @@ export async function note(text) {
 export function callerOf(payload, context) {
   const id = context?.socketdata?.userId ?? payload?.userId;
   const user = game.users.get(id);
-  if (!user) throw new Error(`the GM client does not know the user "${id}"`);
+  if (!user) throw refusal(`the GM client does not know the user "${id}"`);
   return user;
 }
 
 /** The GM or an owner of the actor. Throws otherwise, before anything is read or written. */
 export function assertOwner(actor, user, what) {
   if (user.isGM) return;
-  if (!actor.testUserPermission(user, "OWNER")) throw new Error(`${what}: ${user.name} does not own ${actor.name}`);
+  if (!actor.testUserPermission(user, "OWNER")) throw refusal(`${what}: ${user.name} does not own ${actor.name}`);
 }
 
-/** Run `direct` here on a GM client, or ask the GM client over the socket. Refusals keep their plain-language text. */
+/**
+ * Run `direct` here on a GM client (a refusal throws a plain Error, as it always did), or ask the GM client over the
+ * socket. Over the socket the GM-side handler is guarded (relay.js): a refusal comes back as data and is rethrown here
+ * with its plain text; anything unexpected becomes one generic message.
+ */
 export async function asGM(name, payload, direct) {
   if (game.user.isGM) return direct({ ...payload, userId: game.user.id });
   if (!socket) throw new Error("This needs the GM's client, and the module's socket is not registered (api.socketStatus() shows what is missing; if the manifest was just updated, the Foundry server must be fully restarted).");
+  let result;
   try {
-    return await socket.executeAsGM(name, { ...payload, userId: game.user.id });
+    result = await socket.executeAsGM(name, { ...payload, userId: game.user.id });
   } catch (error) {
     if ([error?.constructor?.name, error?.name].some(n => /NoGM/i.test(n ?? ""))) throw new Error("The GM isn't connected right now, so this can't be done yet.");
-    throw error;
+    throw new Error(GENERIC_FAILURE, { cause: error });
   }
+  return unwrap(result);   // a refusal travelled as data: this throws it again, with its plain message
 }
 
 // Undo plumbing ---------------------------------------------------------------------------------------------------
@@ -205,7 +212,7 @@ export function submitWork(actor, type, params, days) {
 export async function runSubmit(payload, context) {
   const user = callerOf(payload, context);
   const actor = game.actors.get(payload.actorId);
-  if (!actor) throw new Error(`submit: no character with id "${payload.actorId}"`);
+  if (!actor) throw refusal(`submit: no character with id "${payload.actorId}"`);
   assertOwner(actor, user, "submit");
   if (!boundApi) throw new Error("submit: the queue is not bound to the module api yet");
   return payload.type === "craft"
@@ -227,25 +234,25 @@ export function submitCraft(api, actor, user, params, days) {
   return withLocks([actorKey(actor)], async () => {
     const gate = downtime.gateReason(actor);
     if (gate) {
-      if (!user.isGM) throw new Error(gate);
+      if (!user.isGM) throw refusal(gate);
       await downtime.noteOverride(actor, "queued a craft");
     }
     const recipe = api.definitions?.recipe.get(params?.recipe);
-    if (!recipe) throw new Error(`craft: unknown recipe "${params?.recipe}"`);
+    if (!recipe) throw refusal(`craft: unknown recipe "${params?.recipe}"`);
     const preview = previewCraft(actor, recipe.id, params.selection, api, params.stationId);
-    if (!preview.ok) throw new Error(refusalText(preview.errors));
+    if (!preview.ok) throw refusal(refusalText(preview.errors));
     const { plan } = preview;
-    if (plan.fee === null || plan.fee === undefined || !plan.station) throw new Error(refusalText(["no station can make this"]));
+    if (plan.fee === null || plan.fee === undefined || !plan.station) throw refusal(refusalText(["no station can make this"]));
 
     const needed = craftDays(recipe, reductionsFor(actor, plan.station)).days;
-    if (days !== undefined && days !== null && days !== 0 && days !== needed) throw new Error(`craft: this craft takes ${needed} day(s) (got ${days}); the time is set by the recipe and the station, leave days out`);
+    if (days !== undefined && days !== null && days !== 0 && days !== needed) throw refusal(`craft: this craft takes ${needed} day(s) (got ${days}); the time is set by the recipe and the station, leave days out`);
     const counter = actor.getFlag(MODULE_ID, K.daysFlag);
     const reserved = planSubmit(counter, needed);
-    if (!reserved.ok) throw new Error(`Not enough free downtime days: this craft takes ${needed} and ${actor.name} has ${daysFrom(counter)} free.`);
+    if (!reserved.ok) throw refusal(`Not enough free downtime days: this craft takes ${needed} and ${actor.name} has ${daysFrom(counter)} free.`);
 
     const { escrow, byStack } = escrowFromPlan({ plan, days: needed, tierOf: id => api.definitions.material.get(id)?.tier });
     if (adapter.getCopper(actor) < escrow.feeCopper) {
-      throw new Error(`${actor.name} cannot afford the ${gpText(escrow.feeCopper)} station fee (has ${gpText(adapter.getCopper(actor))}).`);
+      throw refusal(`${actor.name} cannot afford the ${gpText(escrow.feeCopper)} station fee (has ${gpText(adapter.getCopper(actor))}).`);
     }
 
     const action = {
@@ -266,19 +273,19 @@ export function submitCraft(api, actor, user, params, days) {
 /** Queue a gather: claim one charge on the node. No days, no downtime needed. */
 export function submitGather(api, actor, params, days) {
   const { sceneId, tokenId } = params ?? {};
-  if (days !== undefined && days !== null && days !== 0) return Promise.reject(new Error(`gather: gathering costs charges, not days (got ${days}); leave days out`));
-  if (!sceneId || !tokenId) return Promise.reject(new Error("gather: say which node (sceneId and tokenId, or node: the token)"));
+  if (days !== undefined && days !== null && days !== 0) return Promise.reject(refusal(`gather: gathering costs charges, not days (got ${days}); leave days out`));
+  if (!sceneId || !tokenId) return Promise.reject(refusal("gather: say which node (sceneId and tokenId, or node: the token)"));
   return withLocks([nodeKey(params), actorKey(actor)], async () => {
     const { scene, token } = nodeOf(params);
     const record = token ? readRecord(token) : undefined;
-    if (!token || !record) throw new Error("That node isn't there (any more).");
-    if (![...scene.tokens].some(t => t.actorId === actor.id)) throw new Error(`${actor.name} needs a token on the scene to gather there.`);
+    if (!token || !record) throw refusal("That node isn't there (any more).");
+    if (![...scene.tokens].some(t => t.actorId === actor.id)) throw refusal(`${actor.name} needs a token on the scene to gather there.`);
     const problem = reserveProblem(record, token.name);
-    if (problem) throw new Error(problem);
+    if (problem) throw refusal(problem);
     const described = normalizeNode({ record, token: { uuid: token.uuid, name: token.name }, registry: api.definitions });
     if (!described.ok) throw new Error(`gather: ${described.errors.join("; ")}`);
     const picked = pickSkill(described.node.skills, params.skill, described.node.nodeTypeName ?? described.node.nodeType);
-    if (!picked.ok) throw new Error(picked.error);
+    if (!picked.ok) throw refusal(picked.error);
 
     const action = {
       id: foundry.utils.randomID(), type: "gather", daysReserved: 0, submittedAt: Date.now(),

@@ -21,6 +21,7 @@ import { planEdit, planReject, planResolve, planSubmit } from "./reservation.js"
 import { runBatch } from "./queue.js";
 import { esc } from "./review.js";
 import * as work from "./work.js";
+import { refusal } from "./relay.js";
 
 let boundApi = null;
 /** Give the queue the module api (definitions). Needed by explore actions. */
@@ -39,7 +40,7 @@ const validActions = actor => pendingOf(actor).filter(a => check(LIVE_SCHEMAS.pe
 function findAction(actor, actionId) {
   const pending = pendingOf(actor);
   const action = pending.find(a => a?.id === actionId);
-  if (!action) throw new Error(`${actor.name} has no queued action "${actionId}"`);
+  if (!action) throw refusal(`${actor.name} has no queued action "${actionId}"`);
   const problems = check(LIVE_SCHEMAS.pendingAction, action);
   if (problems.length) throw new Error(`queued action "${actionId}" is invalid: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
   return { pending, action };
@@ -47,7 +48,7 @@ function findAction(actor, actionId) {
 
 const actorFor = actorId => {
   const actor = game.actors.get(actorId);
-  if (!actor) throw new Error(`no actor with id "${actorId}"`);
+  if (!actor) throw refusal(`no actor with id "${actorId}"`);
   return actor;
 };
 

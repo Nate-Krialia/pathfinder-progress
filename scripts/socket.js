@@ -12,6 +12,7 @@ import { MODULE_ID } from "./config.js";
 import * as exploration from "./exploration/store.js";
 import * as queueStore from "./queue/store.js";
 import * as work from "./queue/work.js";
+import { guard } from "./queue/relay.js";
 
 let socket = null;
 
@@ -31,10 +32,12 @@ export function ensureSocket() {
     console.error(`${MODULE_ID} | socketlib would not register this module (see its message above). The usual cause is a manifest without "socket": true; after installing a version that adds it, the Foundry SERVER must be fully restarted (reloading the browser or returning to setup is not enough).`);
     return null;
   }
-  registered.register("search", options => exploration.runSearch(options));
+  // EVERY handler is wrapped in guard(): real socketlib hides the message of anything a handler throws, so a refusal
+  // must travel as data (see queue/relay.js). A test walks every registered handler and fails if one can still throw.
+  registered.register("search", guard("search", options => exploration.runSearch(options)));
   // Craft and gather are queued and cancelled on the GM client (see queue/work.js). `this` carries socketlib's sender, if it gives one.
-  registered.register("queueSubmit", function queueSubmit(payload) { return queueStore.runSubmit(payload, this); });
-  registered.register("queueCancel", function queueCancel(payload) { return queueStore.runCancel(payload, this); });
+  registered.register("queueSubmit", guard("queueSubmit", function queueSubmit(payload) { return queueStore.runSubmit(payload, this); }));
+  registered.register("queueCancel", guard("queueCancel", function queueCancel(payload) { return queueStore.runCancel(payload, this); }));
   socket = registered;
   exploration.setSocket(socket);
   work.setSocket(socket);

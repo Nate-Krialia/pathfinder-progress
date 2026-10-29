@@ -13,6 +13,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { loadDefinitions } from "../scripts/data/validate.js";
 import { asPage, seedRecords, UUID, UUID_2 } from "./helpers.js";
+import { GENERIC_FAILURE, Refusal, guard, refusal, unwrap } from "../scripts/queue/relay.js";
 
 const M = "pathfinder-progress";
 const makeRegistry = () => loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -36,7 +37,7 @@ function applyPath(target, path, value) {
 }
 const applyFlat = (target, data) => { for (const [k, v] of Object.entries(data)) if (k !== "_id") applyPath(target, k, v); };
 
-const env = { ops: 0, failAt: null, failLabel: null, chat: [], values: {}, rng: [], handlers: new Map(), relayContext: undefined, noGM: false };
+const env = { ops: 0, failAt: null, failLabel: null, chat: [], values: {}, rng: [], handlers: new Map(), relayContext: undefined, noGM: false, handlerThrows: [] };
 function tick(label) {
   env.ops++;
   if (env.failAt === env.ops) throw new Error(`injected failure at operation ${env.ops} (${label})`);
@@ -118,7 +119,12 @@ function makeActor(name, { copper = 0, owners = [] } = {}) {
     },
     inventory: {
       coins: { get copperValue() { return actor.copper; } },
-      async addCoins(c) { tick("addCoins"); actor.copper += c.gp * 100 + c.sp * 10 + c.cp; },
+      async addCoins(c) {
+        tick("addCoins");
+        actor.copper += c.gp * 100 + c.sp * 10 + c.cp;
+        // Real PF2e keeps coins as an inventory item. Only the actors a test creates "like PF2e" (Actor.create) have one.
+        if (actor.coinItem && !items.some(i => i.system.stackGroup === "coins")) items.push(makeItem(actor, { name: "Gold Pieces", type: "treasure", system: { stackGroup: "coins", quantity: 1 } }));
+      },
       async removeCoins(c) {
         tick("removeCoins");
         const cost = c.gp * 100 + c.sp * 10 + c.cp;
@@ -127,7 +133,8 @@ function makeActor(name, { copper = 0, owners = [] } = {}) {
         return true;
       }
     },
-    rollArgs: [],
+    rollArgs: [], perceptionRolls: [],
+    perception: { check: { roll: async () => actor.perceptionRolls.shift() } },
     skills: Object.fromEntries(["crafting", "survival", "nature", "athletics"].map(slug => [slug, { mod: 5, check: { roll: async args => { actor.rollArgs.push(args); return actor.rolls.shift(); } } }])),
     async createEmbeddedDocuments(type, datas) { tick("actor.createEmbeddedDocuments"); return datas.map(d => { const item = makeItem(actor, d); items.push(item); return item; }); },
     async delete() { const i = game.actors.indexOf(actor); if (i >= 0) game.actors.splice(i, 1); }
@@ -158,7 +165,7 @@ let users;
 
 /** A fresh world and a freshly booted module. Returns the people and places the tests use. */
 async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM = true } = {}) {
-  env.ops = 0; env.failAt = null; env.failLabel = null; env.chat = []; env.rng = []; env.relayContext = undefined; env.noGM = !withGM;
+  env.ops = 0; env.failAt = null; env.failLabel = null; env.chat = []; env.rng = []; env.relayContext = undefined; env.noGM = !withGM; env.handlerThrows = [];
   const gm = { id: "gm1", isGM: true, active: true, name: "GM", character: null };
   const annUser = { id: "u-ann", isGM: false, active: true, name: "Ann", character: null };
   const bobUser = { id: "u-bob", isGM: false, active: true, name: "Bob", character: null };
@@ -198,7 +205,7 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
     create: async data => {
       const owners = Object.entries(data.ownership ?? {}).filter(([k, v]) => k !== "default" && v === 3).map(([k]) => k);
       const actor = makeActor(data.name, { owners });
-      Object.assign(actor, { type: data.type, ownership: clone(data.ownership), prototypeToken: clone(data.prototypeToken) });
+      Object.assign(actor, { type: data.type, ownership: clone(data.ownership), prototypeToken: clone(data.prototypeToken), coinItem: true });
       Object.assign(actor.flags, clone(data.flags?.[M] ?? {}));
       actor.getTokenDocument = async td => ({ toObject: () => ({ actorId: actor.id, name: actor.name, ...clone(actor.prototypeToken ?? {}), ...clone(td) }) });
       game.actors.push(actor);
@@ -221,7 +228,14 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
       register: (name, fn) => env.handlers.set(name, fn),
       executeAsGM: async (name, payload) => {
         if (env.noGM) { const error = new Error("There is no GM connected"); error.name = "SocketlibNoGMConnectedError"; throw error; }
-        return als.run({ user: gm }, () => env.handlers.get(name).call(env.relayContext, payload));
+        // Like the REAL socketlib: if the handler throws, the caller never sees the message, only this generic text.
+        // (The real reason stays in the GM's console.) A guarded handler never throws, so this must never happen.
+        try {
+          return await als.run({ user: gm }, () => env.handlers.get(name).call(env.relayContext, payload));
+        } catch (error) {
+          env.handlerThrows.push({ name, message: error.message });
+          throw new Error(`An exception occured during remote execution of handler '${name}'. Please see Gamemaster's error console for details.`);
+        }
       }
     })
   };
@@ -645,13 +659,17 @@ test("another player cannot cancel someone else's queued item, or queue for thei
   env.relayContext = { socketdata: { userId: "u-bob" } };
   await assert.rejects(as(w.annUser, () => api.queue.cancel(w.ann, action.id)), /cancel: Bob does not own Ann/, "the sender socketlib reports wins over the id in the payload");
   env.relayContext = undefined;
-  await assert.rejects(env.handlers.get("queueCancel")({ actorId: w.ann.id, actionId: action.id, userId: "u-nobody" }), /does not know the user "u-nobody"/);
+  assert.deepEqual(await env.handlers.get("queueCancel")({ actorId: w.ann.id, actionId: action.id, userId: "u-nobody" }),
+    { __relay: "refused", message: 'the GM client does not know the user "u-nobody"' }, "a guarded handler returns the refusal as data");
   assert.equal(snapshot(w), before);
 
   // The owner can; the handler itself only ever runs on a GM client.
   await as(w.annUser, () => api.queue.cancel(w.ann, action.id));
   assert.equal(pendingOf(w.ann).length, 1);
-  await assert.rejects(as(w.annUser, () => env.handlers.get("queueCancel")({ actorId: w.ann.id, actionId: g.id, userId: "u-ann" })), /cancel: GM only/);
+  // The handler only ever runs on a GM client. Run on a player's client it is a bug, not a refusal: logged, and no message leaks.
+  const wrongClient = await loudly(seen => as(w.annUser, () => env.handlers.get("queueCancel")({ actorId: w.ann.id, actionId: g.id, userId: "u-ann" })).then(result => [result, seen]));
+  assert.deepEqual(wrongClient[0], { __relay: "failed" });
+  assert.match(wrongClient[1].join("\n"), /"queueCancel" socket handler hit an unexpected error/);
 });
 
 test("when no GM is connected, or the socket is missing, a player gets a plain message and nothing changes", async () => {
@@ -1009,7 +1027,7 @@ test("the gate checklist has exactly one code block per step, and every step say
   for (const step of [8, 10, 12]) assert.equal(GATE.get(step).code, GATE.get(4).code, `step ${step} repeats step 4's block exactly`);
   assert.match(gateDoc, /game\.user\.name, game\.user\.isGM/);
   assert.match(gateDoc, /Force-reload BOTH windows first/);
-  assert.match(gateDoc, /version must be \*\*0\.14\.0\*\*/);
+  assert.match(gateDoc, /version must be \*\*0\.14\.1\*\*/);
 });
 
 test("GATE: every step runs, in order, as the right client, and reports ALL PASS", async () => {
@@ -1017,8 +1035,8 @@ test("GATE: every step runs, in order, as the right client, and reports ALL PASS
   const { gm, testUser } = users;
   const annBefore = snapshot(w);
   await quietly(async () => {
-    assert.deepEqual(await runBlock(1, gm), ["GM", true, "0.14.0"]);
-    assert.deepEqual(await runBlock(1, testUser), ["Test", false, "0.14.0"]);
+    assert.deepEqual(await runBlock(1, gm), ["GM", true, "0.14.1"]);
+    assert.deepEqual(await runBlock(1, testUser), ["Test", false, "0.14.1"]);
 
     const setup = await runBlock(2, gm);
     assert.deepEqual(setup.baseline, { gold: 20, ore: 8, free: 6, reserved: 0, items: [] });
@@ -1026,8 +1044,16 @@ test("GATE: every step runs, in order, as the right client, and reports ALL PASS
     assert.deepEqual(await runBlock(3, testUser), { gold: 20, ore: 8, free: 6, reserved: 0, queued: [] });
 
     const run = async (step, user) => assert.equal(await runBlock(step, user), "ALL PASS", `step ${step} did not report ALL PASS`);
+    const reloadGMWindow = async () => {        // a reload wipes the memory-only definitions and the helper
+      api.definitions = makeRegistry(); delete globalThis.__gate;
+      const again = await runBlock(2, gm);
+      assert.match(again.already, /set up/);
+      assert.deepEqual(again.baseline, { gold: 20, ore: 8, free: 6, reserved: 0, items: [] }, "the saved baseline, not today's numbers");
+      assert.ok(api.definitions.recipe.has("gate-blade") && globalThis.__gate, "the definitions and the helper are back");
+    };
     for (const [step, user] of [[4, testUser], [5, gm], [6, testUser], [7, testUser], [8, testUser], [9, gm], [10, testUser], [11, gm], [12, testUser], [13, gm],
       [14, testUser], [15, testUser], [16, gm], [17, gm], [18, testUser], [19, gm], [20, gm]]) {
+      if (step === 9 || step === 20) await reloadGMWindow();    // before the first GM resolve, and after a node was deleted
       await run(step, user);
     }
     await run(21, testUser);
@@ -1100,4 +1126,189 @@ test("GATE: CLEANUP leaves a REAL open downtime period alone", async () => {
   });
   assert.equal(api.downtime.isOpen(), true);
   assert.equal(api.downtime.state().participants[w.ann.id].granted, 3);
+});
+
+// The relay: refusals travel as data (real socketlib hides the message of anything a handler throws) -------------------------
+const GENERIC_SOCKETLIB = /An exception occured during remote execution of handler/;
+
+test("RELAY: guard() and unwrap() turn only Refusals into plain messages and everything else into one generic line", async () => {
+  const quiet = await loudly(async seen => {
+    const refuses = guard("t", async () => { throw refusal("Downtime isn't open right now"); });
+    const breaks = guard("t", async () => { throw new Error("secret detail"); });
+    const fine = guard("t", async () => ({ ok: 1 }));
+    assert.deepEqual(await refuses(), { __relay: "refused", message: "Downtime isn't open right now" });
+    assert.deepEqual(await breaks(), { __relay: "failed" });
+    assert.deepEqual(await fine(), { ok: 1 });
+    assert.throws(() => unwrap({ __relay: "refused", message: "Downtime isn't open right now" }), /^Error: Downtime isn't open right now$/);
+    assert.throws(() => unwrap({ __relay: "failed" }), new RegExp(`^Error: ${GENERIC_FAILURE}$`));
+    assert.deepEqual(unwrap({ ok: 1 }), { ok: 1 });
+    assert.equal(unwrap(undefined), undefined);
+    return seen;
+  });
+  assert.equal(quiet.length, 1, "only the unexpected error was logged");
+  assert.match(quiet[0], /"t" socket handler hit an unexpected error/);
+  assert.equal(refusal("x") instanceof Refusal && refusal("x") instanceof Error, true);
+  assert.equal(GENERIC_FAILURE, "Something went wrong; tell the GM.");
+});
+
+test("RELAY: the module registers exactly the handlers we know about, and every one is guarded", async () => {
+  await world();
+  assert.deepEqual([...env.handlers.keys()].sort(), ["queueCancel", "queueSubmit", "search"]);
+  const source = readFileSync("scripts/socket.js", "utf8");
+  const registers = source.split("\n").filter(line => /\.register\("/.test(line));
+  assert.equal(registers.length, 3);
+  for (const line of registers) assert.match(line, /register\("\w+", guard\("\w+",/, `an unguarded handler: ${line.trim()}`);
+  // every file that relays through the socket unwraps what comes back
+  for (const file of ["scripts/queue/work.js", "scripts/exploration/store.js"]) {
+    const text = readFileSync(file, "utf8");
+    assert.ok(/executeAsGM\(/.test(text) && /unwrap\(/.test(text), `${file} relays and must unwrap`);
+  }
+});
+
+test("RELAY: walking every registered handler with refusals, nonsense and bugs: none of them ever throws", async () => {
+  const w = await world();
+  const payloads = [undefined, null, 7, "text", {}, { userId: "gm1" }, { userId: "nobody", actorId: w.ann.id, actionId: "x" },
+    { userId: "u-bob", actorId: w.ann.id, actionId: "x", type: "craft", params: { recipe: "nope" } },
+    { userId: "u-ann", actorId: "no-such-actor", actionId: "x", type: "gather", params: {} },
+    { userId: "u-ann", actorId: w.ann.id, sceneId: "no-scene", type: "craft", params: null }];
+  let results = 0;
+  await loudly(async () => {
+    for (const name of [...env.handlers.keys()]) {
+      for (const payload of payloads) for (const user of [users.gm, w.annUser]) {
+        const result = await als.run({ user }, () => env.handlers.get(name).call(undefined, payload));   // must not throw
+        results++;
+        assert.ok(result === undefined || typeof result === "object" || typeof result === "string", `${name} returned something odd`);
+        if (result?.__relay) assert.ok(["refused", "failed"].includes(result.__relay));
+      }
+    }
+  });
+  assert.equal(results, 3 * payloads.length * 2);
+  assert.deepEqual(env.handlerThrows, []);
+});
+
+test("RELAY: a refusal reaches a NON-GM client as the real plain message; the same call by a GM (no relay) throws that same message", async () => {
+  const w = await world();                                   // downtime open
+  const notGeneric = error => error instanceof Error && !GENERIC_SOCKETLIB.test(error.message) && error.message !== GENERIC_FAILURE;
+  // Each case: [how a player's client asks (relayed), how a GM asks directly (no relay), the message both must get].
+  const cases = [
+    [() => craft(w, w.annUser, w.ann, { recipe: "nope" }), () => craft(w, w.gm, w.ann, { recipe: "nope" }), 'craft: unknown recipe "nope"'],
+    [() => as(w.annUser, () => api.queue.cancel(w.ann, "no-id")), () => as(w.gm, () => api.queue.cancel(w.ann, "no-id")), 'Ann has no queued action "no-id"'],
+    [() => as(w.bobUser, () => api.queue.cancel(w.ann, "no-id")), () => as(w.bobUser, () => api.queue.cancel(w.ann, "no-id")), "cancel: Bob does not own Ann"],
+    [() => craft(w, w.annUser, w.ann, {}, 5), () => craft(w, w.gm, w.ann, {}, 5), "craft: this craft takes 2 day(s) (got 5); the time is set by the recipe and the station, leave days out"]
+  ];
+  for (const [viaRelay, direct, message] of cases) {
+    await assert.rejects(viaRelay(), error => error.message === message && notGeneric(error), `relayed: ${message}`);
+    await assert.rejects(direct(), error => error.message === message && error instanceof Error, `direct: ${message}`);
+  }
+  assert.deepEqual(env.handlerThrows, [], "no refusal was thrown out of a handler (the real socketlib would have hidden it)");
+
+  // Downtime closed: the player is refused with the plain message; a GM going around the gate is not refused, and no handler ran for the direct calls.
+  const closed = await world({ downtime: 0 });
+  await api.grantDays(closed.ann, 3);
+  await assert.rejects(craft(closed), error => error.message === "Downtime isn't open right now" && notGeneric(error));
+  const queuedByGM = await craft(closed, closed.gm);
+  assert.equal(queuedByGM.type, "craft", "a GM is not refused, exactly as before");
+  assert.deepEqual(env.handlerThrows, []);
+});
+
+test("RELAY: an unexpected exception is logged on the GM, the player sees ONE generic line, and a GM calling directly still gets the real error", async () => {
+  const w = await world();
+  const realGet = api.definitions.recipe.get.bind(api.definitions.recipe);
+  api.definitions.recipe.get = () => { throw new TypeError("kaboom in a pure helper"); };
+  try {
+    const [error, logged] = await loudly(seen => assert.rejects(craft(w), e => e).catch(e => e).then(() => craft(w).catch(e => e)).then(e => [e, seen]));
+    assert.equal(error.message, GENERIC_FAILURE);
+    assert.doesNotMatch(error.message, /kaboom/);
+    assert.ok(logged.some(l => /"queueSubmit" socket handler hit an unexpected error/.test(l)), "logged on the GM");
+    assert.deepEqual(env.handlerThrows, [], "the handler did not throw through socketlib: the player got our line, not socketlib's");
+    const direct = await craft(w, w.gm).catch(e => e);
+    assert.match(direct.message, /kaboom in a pure helper/, "no relay: the GM gets the original error, exactly as before");
+  } finally { api.definitions.recipe.get = realGet; }
+  assert.equal(measure(w.ann).reservedDays, 0);
+});
+
+test("RELAY: a plain Error from a pure helper is NOT shown to players, even when its text looks friendly", async () => {
+  const w = await world();
+  const original = w.ann.items.get;
+  w.ann.items.get = () => undefined;       // the stack vanishes between the check and the take: "<name> no longer has that stack of materials"
+  let error;
+  try { error = await loudly(() => craft(w).catch(e => e)); } finally { w.ann.items.get = original; }
+  assert.equal(error.message, GENERIC_FAILURE);
+  assert.equal(measure(w.ann).copper, 2000);
+});
+
+test("RELAY: fault injection through the relay: whatever write fails, the player gets the generic line and the world is unchanged", async () => {
+  const messages = [];
+  const writes = await everyFailureLeavesNothingHalfDone("queue craft via the relay", () => world(), async w => {
+    try { await craft(w); } catch (error) { messages.push(error.message); throw error; }
+  });
+  assert.ok(writes >= 5);
+  assert.ok(messages.length >= 4);
+  assert.deepEqual([...new Set(messages)], [GENERIC_FAILURE], "an unexpected failure is never shown as anything but the generic line");
+  assert.deepEqual(env.handlerThrows, []);
+});
+
+test("RELAY: the search handler: its messages arrive as data, and a bug in it gives the generic line (not socketlib's)", async () => {
+  const w = await world({ downtime: 0 });
+  canvas.scene = w.table;
+  w.ann.perceptionRolls.push({ total: 12, dice: [{ faces: 20, results: [{ result: 7, active: true }] }], options: {} });
+  const found = await as(w.annUser, () => api.searchArea(w.ann));
+  assert.match(found.message, /^You search the area\./);
+  const again = await as(w.annUser, () => api.searchArea(w.ann));
+  assert.equal(again.message, "You have already searched this area.");
+  await assert.rejects(as(w.bobUser, () => api.searchArea(w.ann)), /^Error: You can only search with a character you own\.$/);
+  const w2 = await world({ downtime: 0 });
+  canvas.scene = w2.table;
+  w2.ann.perception = undefined;          // a bug: no Perception check to roll
+  const [error] = await loudly(seen => as(w2.annUser, () => api.searchArea(w2.ann)).catch(e => [e, seen]));
+  assert.equal(error.message, GENERIC_FAILURE);
+  assert.deepEqual(env.handlerThrows, []);
+});
+
+// Every refusal message the gate checks, driven through the realistic fake socketlib as the NON-GM user "Test" ------------------
+test("GATE refusals: the player receives each real plain message (steps 6, 7, 14, 18), never socketlib's generic text", async () => {
+  await gateWorld();
+  const { gm, testUser } = users;
+  await quietly(async () => {
+    await runBlock(2, gm);
+    const hero = game.actors.getName("Gate Hero"), away = game.actors.getName("Gate Absent"), scene = game.scenes.getName("Gate Scene");
+    const asTest = fn => as(testUser, fn);
+    const refused = async (fn, expected) => {
+      const error = await asTest(fn).then(() => null, e => e);
+      assert.ok(error, `expected a refusal: ${expected}`);
+      assert.ok(typeof expected === "string" ? error.message === expected : expected.test(error.message), `got "${error.message}"`);
+      assert.doesNotMatch(error.message, GENERIC_SOCKETLIB);
+      assert.notEqual(error.message, GENERIC_FAILURE);
+    };
+    const queue = (type, params, days) => api.queue.submit(hero, type, params, days);
+    const SHORT = "Nothing can be bought: check the Compendium for where to find what you are missing.";
+
+    // step 6: the second cancel
+    const action = await asTest(() => queue("craft", { recipe: "gate-blade", selection: { body: "gate-ore" } }));
+    await asTest(() => api.queue.cancel(hero, action.id));
+    await refused(() => api.queue.cancel(hero, action.id), `Gate Hero has no queued action "${action.id}"`);
+    // step 7
+    await refused(() => queue("craft", { recipe: "gate-blade", selection: { body: "gate-gem" } }), `Cannot queue this craft: slot "body": needs 2 Gate Gem but only 0 available. ${SHORT}`);
+    await refused(() => queue("craft", { recipe: "gate-blade", selection: {} }), `Cannot queue this craft: slot "body": no material selected. ${SHORT}`);
+    await refused(() => queue("craft", { recipe: "gate-blade", selection: { body: "gate-ore" } }, 5), "craft: this craft takes 2 day(s) (got 5); the time is set by the recipe and the station, leave days out");
+    // step 14: outside downtime
+    await api.downtime.end();
+    await refused(() => queue("craft", { recipe: "gate-blade", selection: { body: "gate-ore" } }), "Downtime isn't open right now");
+    // step 18
+    const B = scene.tokens.getName("Gate Patch B"), H = scene.tokens.getName("Gate Patch H");
+    await as(gm, () => api.queue.submit(away, "gather", { sceneId: scene.id, tokenId: B.id }));
+    await refused(() => queue("gather", { sceneId: scene.id, tokenId: B.id }), "Gate Patch B has no free charge left: every charge it has is already claimed by a queued gather");
+    await refused(() => queue("gather", { sceneId: scene.id, tokenId: H.id }), "Gate Patch H has not been found yet");
+    await refused(() => api.queue.cancel(away, away.getFlag(M, "pendingActions")[0].id), "cancel: Test does not own Gate Absent");
+    assert.deepEqual(env.handlerThrows, [], "no refusal was thrown out of a handler");
+    await runBlock(25, gm);
+  });
+});
+
+test("GATE: the message-matching checks in the gate doc expect the real plain messages, anchored", () => {
+  for (const text of [
+    'Gate Hero has no queued action "[^"]+"', 'Cannot queue this craft: slot "body": needs 2 Gate Gem but only 0 available', 'craft: this craft takes 2 day\\(s\\) \\(got 5\\)',
+    'refusal === "Downtime isn\'t open right now"', 'taken === "Gate Patch B has no free charge left: every charge it has is already claimed by a queued gather"',
+    'hidden === "Gate Patch H has not been found yet"', 'cancel === "cancel: Test does not own Gate Absent"'
+  ]) assert.ok(gateDoc.includes(text), `the gate doc should check: ${text}`);
 });
