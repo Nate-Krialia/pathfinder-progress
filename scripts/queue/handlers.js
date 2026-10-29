@@ -1,10 +1,12 @@
 /**
  * What each queued action type needs. Pure. A type is "wired" once it has an entry here AND a
- * resolver in queue/store.js. Research and explore are wired (commissions and upgrades arrive
- * in later stages).
+ * resolver in queue/store.js. Research, explore, commission, craft and gather are wired (workshop
+ * upgrades arrive in a later stage).
  *
  * validateSubmit uses only data a player's client can see (the actor's projects, public region
- * definitions; scenes only on a GM client), never the recipes, so a player can submit.
+ * definitions; scenes only on a GM client), never the recipes, so a player can submit. Craft and gather
+ * are the exception: they need the recipes and the node tokens, so they are relayed to the GM client
+ * (queue/work.js) and only described here.
  */
 
 import { EXPLORATION } from "../config.js";
@@ -123,5 +125,34 @@ const commission = {
   }
 };
 
-export const HANDLERS = { research, explore, commission };
+import { describeEscrow, escrowProblems } from "./escrow.js";
+
+/** Craft and gather are queued on the GM client (queue/work.js), so there is no player-side validation here, only a description. */
+const relayedOnly = type => () => ({ ok: false, errors: [`${type} actions are queued through the GM client (queue.submit relays them)`] });
+
+const craft = {
+  validateSubmit: relayedOnly("craft"),
+  /** Plain description for the review window. No odds: the roll is the GM's. */
+  describe({ action }) {
+    const p = action.params ?? {};
+    const problems = escrowProblems(action);
+    return {
+      label: `Craft: ${p.recipeName ?? p.recipe ?? "?"}`,
+      detail: `${action.daysReserved} day(s) reserved; station ${p.stationName ?? "?"}; ${p.escrow ? `escrow: ${describeEscrow(p.escrow)}` : "no escrow record"}`,
+      problem: problems[0] ?? null
+    };
+  }
+};
+
+const gather = {
+  /** A gather costs charges, not days. */
+  freeOfDays: true,
+  validateSubmit: relayedOnly("gather"),
+  describe({ action }) {
+    const p = action.params ?? {};
+    return { label: `Gather: ${p.nodeName ?? p.tokenId ?? "?"}`, detail: `${p.nodeTypeName ?? "node"}, ${p.skill ?? "?"}; 1 charge claimed, no days`, problem: null };
+  }
+};
+
+export const HANDLERS = { research, explore, commission, craft, gather };
 export const wiredTypes = () => Object.keys(HANDLERS);

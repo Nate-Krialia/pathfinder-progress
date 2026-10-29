@@ -193,7 +193,7 @@ export const DOWNTIME = {
   }
 };
 
-/** Craft time (placeholders; workshop tiers and upgrades arrive in Stage 10). */
+/** Craft time (placeholders; workshop upgrades will supply the reductions later). */
 export const CRAFT_DAYS = {
   // A craft takes 1 day, plus 1 more for every `levelsPerExtraDay` levels of the recipe.
   baseDays: 1,

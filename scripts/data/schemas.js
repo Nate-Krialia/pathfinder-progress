@@ -243,6 +243,8 @@ const node = obj({
   anchorId: optional(str()),
   revealed: optional(bool()),
   revealedBy: optional(str()),
+  // Charges claimed by queued gathers (see gathering/reserve.js). Never more than the charges the node has.
+  reservedCharges: optional(int({ min: 1 })),
   // On an anchor: the node token standing on it right now (cleared by clearMap).
   occupiedBy: optional(str())
 }, {
@@ -252,7 +254,7 @@ const node = obj({
 
     if (value.state === "anchor") {
       if (isCorpse) problem("source", 'a corpse cannot be an anchor');
-      for (const field of ["nodeType", "tier", "charges", "ladder", "decayTimer", "perceptionDC", "anchorId", "revealed", "revealedBy"]) {
+      for (const field of ["nodeType", "tier", "charges", "ladder", "decayTimer", "perceptionDC", "anchorId", "revealed", "revealedBy", "reservedCharges"]) {
         if (value[field] !== undefined) problem(field, "must not be set on an anchor (activate it first)");
       }
     } else {
@@ -263,6 +265,7 @@ const node = obj({
       if (value.charges !== undefined) {
         if (value.state === "depleted" && value.charges !== 0) problem("charges", `must be 0 when the node is depleted (got ${value.charges})`);
         if (value.state === "active" && value.charges < 1) problem("charges", 'must be at least 1 when the node is active (a node with 0 charges is "depleted")');
+        if (value.reservedCharges !== undefined && value.reservedCharges > value.charges) problem("reservedCharges", `cannot be more than the node's charges (${value.reservedCharges} reserved, ${value.charges} charge(s))`);
       }
     }
 
@@ -382,8 +385,8 @@ const commission = obj({
 // `daysReserved` is the days it uses, already taken out of the actor's unreserved counter.
 const pendingAction = obj({
   id: str(),
-  // The spec leaves this list open ("..."); only "research" has a handler so far.
-  type: oneOf(["research", "explore", "upgrade", "commission"]),
+  // "upgrade" is reserved for workshop upgrades. Craft and gather are queued through the GM client (queue/work.js).
+  type: oneOf(["research", "explore", "upgrade", "commission", "craft", "gather"]),
   params: any(),
   // Research and explore need at least a day (their handlers say so); commission steps cost none.
   daysReserved: int({ min: 0 }),

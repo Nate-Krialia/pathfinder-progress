@@ -21,8 +21,9 @@ function stacksFor(actor) {
 /**
  * Dry run: check materials, station and fee, and show what would be made.
  * Changes nothing. Returns { ok, errors, plan, stations: { verdicts, chosen } }.
+ * `stacks` replaces the character's own stash (a queued craft resolves against what it put in escrow).
  */
-export function previewCraft(actor, recipeId, selection, api, stationId) {
+export function previewCraft(actor, recipeId, selection, api, stationId, { stacks } = {}) {
   const recipe = api.definitions?.recipe.get(recipeId);
   if (!recipe) {
     const orphaned = readFormulaList(actor).some(entry => entry.recipeId === recipeId);
@@ -37,7 +38,7 @@ export function previewCraft(actor, recipeId, selection, api, stationId) {
     recipe,
     registry: api.definitions,
     selection,
-    stacks: stacksFor(actor),
+    stacks: stacks ?? stacksFor(actor),
     outputs: api.resolvedOutputs?.get(recipeId),
     stations,
     crafterId: actor.id,

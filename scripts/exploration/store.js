@@ -6,7 +6,7 @@
  *
  * Preparing a scene NEVER launches or activates it.
  */
-import { EXPLORATION, MODULE_ID, NODE_ACTOR, NODE_FLAG } from "../config.js";
+import { EXPLORATION, MODULE_ID, NODE_ACTOR, NODE_FLAG, QUEUE_KEYS } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { loadDefinitions } from "../data/validate.js";
 import { DEFINITION_KINDS } from "../data/schemas.js";
@@ -52,10 +52,10 @@ export async function untagScene(scene, tag) {
 }
 
 // GM-only per-scene state ---------------------------------------------------------------------------------
-// One world setting keyed by scene id: { encounter, prepared[], searches{}, revealed[] }. Nothing about an
+// One world setting keyed by scene id: { encounter, prepared[], searches{}, revealed[], depleted[] }. Nothing about an
 // expedition is kept in a scene flag or shown in chat. (Foundry cannot enforce read access to settings or
 // flags: this keeps the information out of every screen, which is an honor system, like recipe visibility.)
-const emptySceneState = () => ({ encounter: null, prepared: [], searches: {}, revealed: [] });
+const emptySceneState = () => ({ encounter: null, prepared: [], searches: {}, revealed: [], depleted: [] });
 const readAllState = () => {
   const raw = game.settings.get(MODULE_ID, EXPLORATION.stateSetting);
   return raw && typeof raw === "object" && !Array.isArray(raw) ? structuredClone(raw) : {};
@@ -66,6 +66,35 @@ async function writeSceneState(sceneId, state) {
   if (state === null) delete all[sceneId];
   else all[sceneId] = state;
   await game.settings.set(MODULE_ID, EXPLORATION.stateSetting, all);
+}
+
+/** Did the module put this node token here? (An explored node, or any token made from the shared Resource Node actor.) */
+export function isModuleNode(token, record = readRecord(token)) {
+  const nodeActorId = game.settings.get(MODULE_ID, NODE_ACTOR.setting) || null;
+  return Boolean(record) && (record.source === "explored" || Boolean(nodeActorId && token.actorId === nodeActorId));
+}
+
+/**
+ * A node ran out of charges: delete its token (its actor is the token's own, so it goes with it) and keep only a
+ * small depleted record in the scene's GM-only state, for the audit and the Clear map counts. The anchor it stood on
+ * stays occupied until Clear map, so nothing respawns there. If the token cannot be deleted, the record is taken back
+ * and the node stays as a depleted token. Returns true when the token is gone. GM only.
+ */
+export async function retireNode(scene, token, { by = null } = {}) {
+  requireGM("retireNode");
+  const record = readRecord(token) ?? {};
+  const entry = { tokenId: token.id, name: token.name, nodeType: record.nodeType ?? null, tier: record.tier ?? null, anchorId: record.anchorId ?? null, by, at: Date.now() };
+  const before = sceneState(scene.id);
+  const hadState = scene.id in readAllState();
+  await writeSceneState(scene.id, { ...before, depleted: [...before.depleted, entry] });
+  try {
+    await scene.deleteEmbeddedDocuments("Token", [token.id]);
+  } catch (error) {
+    await writeSceneState(scene.id, hadState ? before : null).catch(() => {});
+    console.error(`${MODULE_ID} | ${token.name} ran out of charges but its token could not be deleted; it stays as a depleted node`, error);
+    return false;
+  }
+  return true;
 }
 
 /** The free anchors on a scene (not occupied by a node): [{ id, name, x, y, record, doc }]. */
@@ -204,7 +233,9 @@ export async function resetSearches(scene) {
  * actor goes with it), free the anchors they stood on, take the nodes out of every character's known-node
  * list, and reset the scene's encounter, searches and expedition history. Never touches the shared
  * Resource Node actor, anchors, hand-made node tokens, corpse nodes or anything already in inventories.
- * Safe to run again if it stopped part-way. Returns { removed, found, hidden, skipped, knownNodesCleared }.
+ * Nodes that ran out of charges were already deleted; their small records (kept for the audit) are cleared here and
+ * counted. Gathers still queued for a deleted node are counted too: they resolve as "invalid" later.
+ * Safe to run again if it stopped part-way. Returns { removed, found, hidden, skipped, knownNodesCleared, depletedCleared, orphanedGathers }.
  */
 export async function clearMap(scene) {
   requireGM("clearMap");
@@ -215,6 +246,13 @@ export async function clearMap(scene) {
   const found = mine.filter(({ record }) => record.revealed !== false).length;
   const hidden = mine.length - found;
 
+  const depletedCleared = sceneState(doc.id).depleted.length;
+  const goneIds = new Set(mine.map(({ t }) => t.id));
+  let orphanedGathers = 0;
+  for (const actor of game.actors) {
+    orphanedGathers += listOf(actor.getFlag(MODULE_ID, QUEUE_KEYS.pendingFlag))
+      .filter(a => a?.type === "gather" && a.params?.sceneId === doc.id && goneIds.has(a.params?.tokenId)).length;
+  }
   if (mine.length) await doc.deleteEmbeddedDocuments("Token", mine.map(({ t }) => t.id));
   const occupied = [...doc.tokens].filter(t => readRecord(t)?.state === "anchor" && readRecord(t).occupiedBy);
   if (occupied.length) await doc.updateEmbeddedDocuments("Token", occupied.map(t => vacateUpdate(t.id)));
@@ -229,7 +267,7 @@ export async function clearMap(scene) {
     }
   }
   await writeSceneState(doc.id, null);
-  return { removed: mine.length, found, hidden, skipped: tokens.length - mine.length, knownNodesCleared };
+  return { removed: mine.length, found, hidden, skipped: tokens.length - mine.length, knownNodesCleared, depletedCleared, orphanedGathers };
 }
 
 // Odds and simulation (GM only: players are never shown odds or results) ------------------------------------------

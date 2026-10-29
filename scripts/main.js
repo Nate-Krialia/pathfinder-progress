@@ -155,10 +155,16 @@ Hooks.once("ready", async () => {
     clearNode: node => gathering.clearNode(node),
     // Queue and review (see scripts/queue/store.js). Any owner can submit; the rest is GM only.
     queue: {
-      /** Queue an action and reserve its days: submit(actor, "research", { projectId, skill? }, days). Players can call this. */
+      /**
+       * Queue an action and reserve its days: submit(actor, "research", { projectId, skill? }, days). Players can call this.
+       * "craft": submit(actor, "craft", { recipe, selection, stationId? }) takes the materials and station fee now and reserves the craft days.
+       * "gather": submit(actor, "gather", { sceneId, tokenId, skill? }) claims one charge on the node (no days, no downtime needed).
+       */
       submit: (actor, type, params, days) => queueStore.submit(actor, type, params, days),
       /** Every queued action across all actors, in submission order. */
       list: actors => queueStore.list(actors),
+      /** Cancel your own queued action and get everything back (days, a craft's materials and fee, a gather's charge). Players can call this. */
+      cancel: (actor, actionId) => queueStore.cancel(actor, actionId),
       reject: (actor, actionId, options) => queueStore.reject(actor, actionId, options),
       editDays: (actor, actionId, days) => queueStore.editDays(actor, actionId, days),
       resolve: (actor, actionId, options) => queueStore.resolveAction(api, actor, actionId, options),
@@ -236,8 +242,8 @@ Hooks.once("ready", async () => {
     downtime: {
       /** GM: open a period. { days, actorIds? } (default: connected players' characters). */
       start: options => downtime.start(options),
-      /** GM: close it. Returns { blocked: n } (changing nothing) while anything is queued, unless { force: true }. */
-      end: options => downtime.end(options, { queueCount: () => queueStore.list().length, rejectAll: () => queueStore.rejectAll() }),
+      /** GM: close it. Returns { blocked: n } (changing nothing) while anything but a gather is queued, unless { force: true } (which returns those items, escrow included). */
+      end: options => downtime.end(options, { queueCount: () => queueStore.blockingCount(), rejectAll: () => queueStore.rejectAll({ keepGathers: true }) }),
       /** GM: add a late joiner with the most free days any participant still has. */
       addLate: actor => downtime.addLate(actor),
       state: () => downtime.state(),

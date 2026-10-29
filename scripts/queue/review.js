@@ -50,7 +50,7 @@ function renderResults(results) {
 function renderAudit(audit) {
   if (!audit.length) return `<section><h3>Audit</h3><p class="pfp-ok">Every actor matches the module's log.</p></section>`;
   const items = audit.map(a => `<li class="pfp-audit-row">
-  <strong>${esc(a.name)}</strong> ${button("accept", "Accept current state", { actor: a.actorId })}
+  <strong>${esc(a.name)}</strong> ${a.node ? "" : button("accept", "Accept current state", { actor: a.actorId })}
   <ul>${a.mismatches.map(m => `<li>${esc(m.message)}</li>`).join("")}</ul>
   ${a.history.length ? `<div class="pfp-history">Recent module changes: ${a.history.slice(-3).map(h => esc(h.text)).join("; ")}</div>` : ""}
 </li>`).join("");

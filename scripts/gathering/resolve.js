@@ -11,6 +11,7 @@ export function checkGatherable(node) {
   if (node.state === "anchor") return `${node.name} is an anchor ("a node could spawn here") and cannot be gathered until it is activated`;
   if (node.revealed === false) return `${node.name} has not been found yet (a hidden node must be spotted before it can be gathered)`;
   if (node.state === "depleted" || node.charges < 1) return `${node.name} is depleted`;
+  if (node.charges - (node.reservedCharges ?? 0) < 1) return `${node.name} has no free charge: every charge it has is claimed by a queued gather`;
   return null;
 }
 

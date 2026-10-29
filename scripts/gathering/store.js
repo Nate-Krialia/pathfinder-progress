@@ -4,6 +4,7 @@
  * this file reads and writes token flags and calls the PF2e adapter.
  */
 import { MODULE_ID, NODE_FLAG } from "../config.js";
+import { forcedDeletion } from "../exploration/tokens.js";
 import * as adapter from "../adapter/pf2e.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
@@ -28,8 +29,9 @@ export const isNodeToken = doc => readRecord(doc) !== undefined;
 /**
  * Save a node record. Refuses a record that breaks the node rules (for example
  * 0 charges while still "active"), so an inconsistent node can never be stored.
- * setFlag MERGES objects, so when the new record has dropped keys the old one had
- * (e.g. replacing a node with an anchor) the old flag is cleared first.
+ * Foundry MERGES objects, so keys the old record had and the new one dropped (a released reservedCharges, an anchor
+ * becoming a node) are deleted explicitly with ForcedDeletion, in the SAME update: never "clear the flag, then write
+ * it", because a failure between the two would leave the node with no record at all.
  */
 export async function saveNodeRecord(doc, record) {
   const problems = check(LIVE_SCHEMAS.node, record);
@@ -37,8 +39,14 @@ export async function saveNodeRecord(doc, record) {
     throw new Error(`refusing to save an inconsistent node record for ${doc.name}: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
   }
   const old = readRecord(doc);
-  if (old !== undefined && Object.keys(old).some(key => !(key in record))) await doc.unsetFlag(MODULE_ID, NODE_FLAG);
-  await doc.setFlag(MODULE_ID, NODE_FLAG, record);
+  if (old === undefined) {
+    await doc.setFlag(MODULE_ID, NODE_FLAG, record);
+    return;
+  }
+  const base = `flags.${MODULE_ID}.${NODE_FLAG}`;
+  const update = Object.fromEntries(Object.entries(record).map(([key, value]) => [`${base}.${key}`, value]));
+  for (const key of Object.keys(old)) if (!(key in record)) update[`${base}.${key}`] = forcedDeletion();
+  await doc.update(update);
 }
 const writeRecord = saveNodeRecord;
 
@@ -115,6 +123,7 @@ export async function clearNode(token) {
 
 /** The resolved node: type, tier, charges, and the ladder with absolute DCs. */
 export function nodeInfo(api, token) {
+  requireGM("nodeInfo");
   return describe(resolveToken(token), api);
 }
 
@@ -123,7 +132,7 @@ export function nodeInfo(api, token) {
  * Give the actor every gain, or none: if one fails, the ones already given are taken
  * back (a new stack is deleted; a topped-up stack goes back to its old quantity).
  */
-async function grantAll(actor, gains, definitions) {
+export async function grantAll(actor, gains, definitions) {
   const done = [];
   try {
     for (const gain of gains) {
@@ -145,10 +154,18 @@ async function grantAll(actor, gains, definitions) {
     error.undoFailures = undoFailures;
     throw error;
   }
+  // The caller can still take everything back if a later step fails.
+  return async () => {
+    for (const { item, before } of [...done].reverse()) {
+      if (before === 0) await item.delete();
+      else await item.update({ "system.quantity": before });
+    }
+  };
 }
 
 /** A dry run: shows DCs, your modifier and the odds, and any reason the gather would be refused. Spends nothing. */
 export function previewGather(api, actor, token, skill) {
+  requireGM("previewGather");
   const doc = resolveToken(token);
   const described = describe(doc, api);
   if (!described.ok) return { ok: false, errors: described.errors };

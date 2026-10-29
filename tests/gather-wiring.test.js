@@ -18,6 +18,9 @@ const registry = loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: 
 const api = { definitions: registry };
 
 // Fake Foundry --------------------------------------------------------------------------------
+/** Foundry v14's deletion operator: a dotted-path update with this value deletes the key. */
+class FakeForcedDeletion {}
+
 /** A token document whose flags merge like Foundry's setFlag (shallow here), with write counting. */
 function fakeToken(name = "Iron Vein") {
   const flags = {};
@@ -32,7 +35,22 @@ function fakeToken(name = "Iron Vein") {
       flags[k] = { ...(flags[k] ?? {}), ...structuredClone(value) };
     },
     async unsetFlag(scope, key) { delete flags[`${scope}.${key}`]; },
-    async update(data) { Object.assign(doc, data); }
+    // A dotted flag path ("flags.<scope>.<key>.<field>") updates one field; a ForcedDeletion value removes it. One call = one write.
+    async update(data) {
+      const flagPaths = Object.keys(data).filter(path => /^flags\.[^.]+\.[^.]+\.[^.]+$/.test(path));
+      if (flagPaths.length) {
+        if (doc.failNextFlagWrite) { doc.failNextFlagWrite = false; throw new Error("flag write failed"); }
+        doc.flagWrites++;
+      }
+      for (const [path, value] of Object.entries(data)) {
+        if (!flagPaths.includes(path)) { Object.assign(doc, { [path]: value }); continue; }
+        const [, scope, key, field] = path.split(".");
+        const k = `${scope}.${key}`;
+        flags[k] ??= {};
+        if (value instanceof FakeForcedDeletion) delete flags[k][field];
+        else flags[k][field] = structuredClone(value);
+      }
+    }
   };
   return doc;
 }
@@ -69,6 +87,7 @@ function install(uniforms = []) {
   const chat = [];
   const queue = [...uniforms];
   globalThis.game = { user: { isGM: true }, i18n: { localize: text => text } };
+  globalThis.foundry = { data: { operators: { ForcedDeletion: FakeForcedDeletion } } };
   globalThis.CONFIG = {
     Dice: { randomUniform: () => { if (!queue.length) throw new Error("test ran out of scripted dice"); return queue.shift(); } },
     PF2E: { skills: { athletics: { label: "Athletics" }, crafting: { label: "Crafting" }, medicine: { label: "Medicine" } } }
@@ -234,9 +253,9 @@ test("if the refund itself fails, the error says so and the node is still consis
   const actor = fakeActor();
   actor.failCreateOnCall = 1;
   const token = await oreNode(3);
-  const realSetFlag = token.setFlag.bind(token);
+  const realUpdate = token.update.bind(token);
   let writes = 0;
-  token.setFlag = async (...args) => { writes++; if (writes === 2) throw new Error("flag write failed"); return realSetFlag(...args); }; // 1st = burn, 2nd = refund
+  token.update = async (...args) => { writes++; if (writes === 2) throw new Error("flag write failed"); return realUpdate(...args); }; // 1st = burn, 2nd = refund
   await assert.rejects(
     store.gather({ actor, node: token, skill: "athletics", degree: "success", chat: false }, api),
     err => /charge could NOT be refunded/.test(err.message) && /set flags\.pathfinder-progress\.node\.charges back to 3/.test(err.message) && /now has 2 charge/.test(err.message)

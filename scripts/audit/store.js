@@ -11,6 +11,10 @@
 import { AUDIT, MODULE_ID, QUEUE_KEYS, RESEARCH_KEYS as K } from "../config.js";
 import { applyChange, baselineEntry, compare, compareLoans, emptyEntry, hasModuleData } from "./audit.js";
 import { readCommissions } from "../commissions/list.js";
+import { check } from "../data/schema.js";
+import { LIVE_SCHEMAS } from "../data/schemas.js";
+import { reservedOf } from "../gathering/reserve.js";
+import { escrowProblems } from "../queue/escrow.js";
 
 const requireGM = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
 
@@ -58,7 +62,47 @@ export async function commit(actor, update, changes = [], now = Date.now()) {
   }
 }
 
-/** Actors whose data does not match the ledger. Each row: { actorId, name, mismatches, history }. */
+const validActions = state => state.pending.filter(a => check(LIVE_SCHEMAS.pendingAction, a).length === 0);
+
+/** A queued craft must carry a sound escrow record (what it took, and the days it reserved). */
+function escrowMismatches(state) {
+  return validActions(state).filter(a => a.type === "craft")
+    .flatMap(a => escrowProblems(a).map(problem => ({ kind: "escrow", message: `the queued craft "${a.params?.recipeName ?? a.id}": ${problem}` })));
+}
+
+/**
+ * Every node's claimed charges must equal the queued gathers aimed at it. A leftover claim (a gather that vanished
+ * without giving it back) would lock a charge for good; a gather with no claim could take a charge twice. A queued
+ * gather whose node has gone (Clear map) is fine: it resolves as invalid. Rows have `node: true` and no actor id.
+ */
+export function reservationRows(actors = [...game.actors]) {
+  const claimed = new Map();
+  for (const actor of actors) {
+    for (const action of validActions({ pending: asList(actor.getFlag(MODULE_ID, QUEUE_KEYS.pendingFlag)) })) {
+      if (action.type !== "gather") continue;
+      const key = `${action.params?.sceneId}/${action.params?.tokenId}`;
+      claimed.set(key, (claimed.get(key) ?? 0) + 1);
+    }
+  }
+  const rows = [];
+  for (const scene of game.scenes ?? []) {
+    for (const token of scene.tokens ?? []) {
+      const record = token.getFlag(MODULE_ID, "node");
+      if (!record) continue;
+      const held = reservedOf(record);
+      const queued = claimed.get(`${scene.id}/${token.id}`) ?? 0;
+      if (held !== queued) {
+        rows.push({
+          actorId: null, node: true, name: `${token.name} on ${scene.name}`, history: [],
+          mismatches: [{ kind: "nodeReservation", message: `has ${held} charge(s) claimed, but ${queued} gather(s) are queued for it` }]
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+/** Actors whose data does not match the ledger, then nodes whose claimed charges do not match the queue. Each row: { actorId, name, mismatches, history }. */
 export function scan(actors = [...game.actors]) {
   const ledger = readLedger();
   const commissions = readCommissions();
@@ -67,9 +111,10 @@ export function scan(actors = [...game.actors]) {
     const state = readState(actor);
     const entry = ledger[actor.id];
     if (!entry && !hasModuleData(state)) continue;
-    const mismatches = [...compare(state, entry ?? emptyEntry(actor.name)), ...compareLoans({ actorId: actor.id, formulas: state.formulas, commissions })];
+    const mismatches = [...compare(state, entry ?? emptyEntry(actor.name)), ...compareLoans({ actorId: actor.id, formulas: state.formulas, commissions }), ...escrowMismatches(state)];
     if (mismatches.length) rows.push({ actorId: actor.id, name: actor.name, mismatches, history: entry?.history ?? [] });
   }
+  rows.push(...reservationRows());
   return rows;
 }
 

@@ -371,9 +371,9 @@ export async function rollPerception(actor, { createMessage } = {}) {
   return { total: result.total, natural: readNaturalD20(result) };
 }
 
-/** Roll the Crafting skill against a DC. Returns { degree, total, dc }. */
-export async function rollCraftCheck(actor, dc) {
-  const { degree, total } = await rollSkillCheck(actor, "crafting", dc);
+/** Roll the Crafting skill against a DC. Returns { degree, total, dc }. Pass { createMessage: false } to keep PF2e's own chat card off the table. */
+export async function rollCraftCheck(actor, dc, options) {
+  const { degree, total } = await rollSkillCheck(actor, "crafting", dc, options);
   return { degree, total, dc };
 }
 

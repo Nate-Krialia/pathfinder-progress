@@ -26,7 +26,7 @@ export function normalizeNode({ record, token, registry, config = GATHERING }) {
 
   const base = {
     uuid: token.uuid, name: token.name, source: record.source, state: record.state,
-    region: record.region ?? null, revealed: record.revealed !== false, discoveredBy: [...record.discoveredBy], decayTimer: record.decayTimer ?? null
+    region: record.region ?? null, reservedCharges: record.reservedCharges ?? 0, revealed: record.revealed !== false, discoveredBy: [...record.discoveredBy], decayTimer: record.decayTimer ?? null
   };
   if (record.state === "anchor") return { ok: true, node: { ...base, nodeType: null, tier: null, charges: 0, skills: [], ladder: null } };
 

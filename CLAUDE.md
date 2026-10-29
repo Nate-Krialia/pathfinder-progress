@@ -37,7 +37,7 @@ Read this file first on every task. Then load only the system file(s) the task t
 - **Hidden rolls run on the GM client only.** Players must never see or influence them.
 - **Players cannot write world settings, scenes, or compendiums.** Any such write is relayed to the GM client (see `docs/08-foundry-integration.md`).
 - **Recipe visibility is an honor system, not secrecy.** The recipes pack is hidden from players' interface and the module's loader skips it for players, but Foundry does not enforce read access: a player using the browser console can read it (verified in Foundry 14.369, also for a world Journal set to None). Never describe it as secret, and never rely on it for anything that must stay hidden. See `docs/10-stage2-decisions.md`.
-- Each downtime day goes to exactly one activity (research, exploring, workshop upgrade).
+- Each downtime day goes to exactly one activity (research, exploring, crafting, workshop upgrade). Gathering costs node charges, not days, and needs no downtime.
 - Prefer Foundry-native building blocks: Items, compendium packs, flags, tokens, ApplicationV2, socketlib.
 - Keep tunable numbers in one config object/file, never hardcoded in logic.
 - Every resolved action produces a human-readable result record (chat card and/or summary) for the players.

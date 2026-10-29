@@ -2,8 +2,8 @@
  * How many downtime days a craft takes. Pure; no Foundry globals.
  *
  * THE one place craft time is worked out: every reduction (station upgrades, tools) is applied first,
- * then the result is clamped so a craft never takes less than `minDays`. Nothing is wired to it yet:
- * craft becomes a day-spending queue action in Stage 10 together with workshop tiers.
+ * then the result is clamped so a craft never takes less than `minDays`. The queued craft (queue/work.js) calls it;
+ * nothing else works craft time out.
  */
 import { CRAFT_DAYS } from "../config.js";
 

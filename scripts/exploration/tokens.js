@@ -28,7 +28,7 @@ export const occupyUpdate = (anchorId, nodeTokenId) => ({ _id: anchorId, [`${nod
  */
 export const vacateUpdate = anchorId => ({ _id: anchorId, [`${nodePath}.occupiedBy`]: forcedDeletion() });
 
-function forcedDeletion() {
+export function forcedDeletion() {
   const Operator = globalThis.foundry?.data?.operators?.ForcedDeletion;
   if (!Operator) throw new Error("foundry.data.operators.ForcedDeletion is missing (Foundry API changed?)");
   return new Operator();

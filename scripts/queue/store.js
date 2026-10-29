@@ -20,10 +20,11 @@ import { HANDLERS, wiredTypes } from "./handlers.js";
 import { planEdit, planReject, planResolve, planSubmit } from "./reservation.js";
 import { runBatch } from "./queue.js";
 import { esc } from "./review.js";
+import * as work from "./work.js";
 
 let boundApi = null;
 /** Give the queue the module api (definitions). Needed by explore actions. */
-export function bind(api) { boundApi = api; }
+export function bind(api) { boundApi = api; work.bind(api); }
 const needApi = what => {
   if (!boundApi) throw new Error(`${what}: the queue is not bound to the module api yet`);
   return boundApi;
@@ -65,7 +66,7 @@ export function describeAction(actor, action) {
   return handler.describe({ action, projects: rawList(actor, K.projectsFlag), info });
 }
 
-/** Does this action take downtime? Days reserved, or a commission craft (which will spend craft days from Stage 10). */
+/** Does this action take downtime? Days reserved (research, explore, craft), or a commission craft step (which still costs no days). */
 const spendsTime = (type, params, days) => days > 0 || (type === "commission" && params?.step === "craft");
 
 // Submitting (any owner) -------------------------------------------------------------------
@@ -80,6 +81,8 @@ export async function submit(actor, type, params, days) {
   if (!game.user.isGM && !actor.isOwner) throw new Error(`submit: you do not own ${actor.name}`);
   const handler = HANDLERS[type];
   if (!handler) throw new Error(`submit: "${type}" actions cannot be queued yet (wired: ${wiredTypes().join(", ")})`);
+  // Craft and gather run on the GM client (players cannot read recipes or write node tokens); the call is relayed there.
+  if (work.isWorkType(type)) return work.submitWork(actor, type, params, days);
   // The downtime gate. Players never bypass it; a GM submitting on someone's behalf does, and the ledger says so.
   if (spendsTime(type, params, days)) {
     const reason = downtime.gateReason(actor);
@@ -122,23 +125,65 @@ export function list(actors = [...game.actors]) {
   return rows.sort((a, b) => a.action.submittedAt - b.action.submittedAt || String(a.action.id).localeCompare(String(b.action.id)));
 }
 
-// GM: reject and edit ------------------------------------------------------------------------
+// GM: reject and edit; owner: cancel ---------------------------------------------------------------------
+/**
+ * Take a queued action back: its days return to the counter, a craft's materials and fee return to the character,
+ * a gather's claimed charge returns to the node. Everything is returned or nothing is (the returns are undone if
+ * the queue write fails). `verb` is for the log: "returned by the GM", "cancelled by the player".
+ */
+async function returnQueued(actor, actionId, { chat, verb }) {
+  const first = findAction(actor, actionId).action;
+  return work.withActionLocks(actor, first, async () => {
+    const { pending, action } = findAction(actor, actionId); // read again inside the lock
+    const described = describeAction(actor, action);
+    const { undos, text } = await work.takeBack(actor, action);
+    const { counter } = planReject(actor.getFlag(MODULE_ID, K.daysFlag), action);
+    try {
+      await commit(actor, {
+        [flagKey(QUEUE_KEYS.pendingFlag)]: pending.filter(a => a.id !== actionId),
+        [flagKey(K.daysFlag)]: counter
+      });
+    } catch (error) {
+      await work.undoAll(undos).catch(undoError => { throw new Error(`${error.message}. ${undoError.message}`); });
+      throw error;
+    }
+    if (work.isWorkType(action.type)) {
+      await work.note(`${action.type} ${verb}: ${described.label} for ${actor.name}; ${text}${action.daysReserved ? `; ${action.daysReserved} day(s) refunded` : ""}`);
+    }
+    if (chat) await postNote(actor, `<p><strong>${esc(actor.name)}</strong>: the GM returned "${esc(described.label)}". ${action.daysReserved} day(s) refunded.${text ? ` ${esc(text)}.` : ""}</p>`);
+    return { refunded: action.daysReserved, ...(text ? { returned: text } : {}) };
+  });
+}
+
 export async function reject(actor, actionId, { chat = true } = {}) {
   requireGM("reject");
-  const { pending, action } = findAction(actor, actionId);
-  const described = describeAction(actor, action);
-  const { counter } = planReject(actor.getFlag(MODULE_ID, K.daysFlag), action);
-  await commit(actor, {
-    [flagKey(QUEUE_KEYS.pendingFlag)]: pending.filter(a => a.id !== actionId),
-    [flagKey(K.daysFlag)]: counter
-  });
-  if (chat) await postNote(actor, `<p><strong>${esc(actor.name)}</strong>: the GM returned "${esc(described.label)}". ${action.daysReserved} day(s) refunded.</p>`);
-  return { refunded: action.daysReserved };
+  return returnQueued(actor, actionId, { chat, verb: "returned by the GM" });
 }
+
+/**
+ * Cancel your own queued action and get everything back. Players can call this: it is relayed to the GM client,
+ * which checks the caller owns the character before touching anything.
+ */
+export function cancel(actor, actionId) {
+  return work.asGM("queueCancel", { actorId: actor.id, actionId }, payload => runCancel(payload));
+}
+
+/** On the GM client (also the socket handler): check who is asking, then cancel. */
+export async function runCancel(payload, context) {
+  requireGM("cancel");
+  const user = work.callerOf(payload, context);
+  const actor = actorFor(payload.actorId);
+  work.assertOwner(actor, user, "cancel");
+  return returnQueued(actor, payload.actionId, { chat: false, verb: `cancelled by ${user.name}` });
+}
+
+/** The socket handler for a relayed craft or gather submit. */
+export const runSubmit = (payload, context) => work.runSubmit(payload, context);
 
 export async function editDays(actor, actionId, newDays) {
   requireGM("editDays");
   const { pending, action } = findAction(actor, actionId);
+  if (action.type === "craft") throw new Error("editDays: a craft's time is set by the recipe and the station; reject the craft to get everything back");
   if (action.daysReserved === 0) throw new Error("editDays: this action costs no days");
   const plan = planEdit(actor.getFlag(MODULE_ID, K.daysFlag), action, newDays);
   if (!plan.ok) throw new Error(`editDays: ${plan.error}`);
@@ -178,6 +223,8 @@ const RESOLVERS = {
 };
 
 RESOLVERS.commission = (api, actor, action, pending, { chat, degree }) => commissions.resolveStep(api, actor, action, pending, { chat, degree });
+RESOLVERS.craft = (api, actor, action, pending, options) => work.resolveCraft(api, actor, action, pending, options);
+RESOLVERS.gather = (api, actor, action, pending, options) => work.resolveGatherAction(api, actor, action, pending, options);
 
 RESOLVERS.explore = async function explore(api, actor, action, pending, { chat, degree }) {
   const others = pending.filter(a => a.id !== action.id);
@@ -220,32 +267,44 @@ RESOLVERS.explore = async function explore(api, actor, action, pending, { chat, 
 /** Resolve one queued action. GM only. Throws on an unexpected failure (the action stays queued). */
 export async function resolveAction(api, actor, actionId, { chat = true, degree } = {}) {
   requireGM("resolve");
-  const pending = pendingOf(actor);
-  const action = pending.find(a => a?.id === actionId);
-  if (!action) return { status: "skipped", message: "already handled" };
-  const valid = findAction(actor, actionId).action;
-  const resolver = RESOLVERS[valid.type];
-  if (!resolver) throw new Error(`no resolver is wired for "${valid.type}" actions yet; reject it to refund its days`);
+  if (!pendingOf(actor).some(a => a?.id === actionId)) return { status: "skipped", message: "already handled" };
+  const first = findAction(actor, actionId).action;
+  if (!RESOLVERS[first.type]) throw new Error(`no resolver is wired for "${first.type}" actions yet; reject it to refund its days`);
 
-  // The gate is checked again here: an action that survived a closed period is refunded, not run.
-  if (spendsTime(valid.type, valid.params, valid.daysReserved)) {
-    const reason = downtime.gateReason(actor);
-    if (reason) {
-      const { counter } = planReject(actor.getFlag(MODULE_ID, K.daysFlag), valid);
-      await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: pending.filter(a => a.id !== valid.id), [flagKey(K.daysFlag)]: counter });
-      return { status: "invalid", message: `${reason}. ${valid.daysReserved} day(s) refunded.` };
+  // One resolve at a time per actor (and per node for a gather); the action is read again once the lock is ours.
+  return work.withActionLocks(actor, first, async () => {
+    const pending = pendingOf(actor);
+    if (!pending.some(a => a?.id === actionId)) return { status: "skipped", message: "already handled" };
+    const valid = findAction(actor, actionId).action;
+
+    // The gate is checked again here: an action that survived a closed period is refunded, not run.
+    if (spendsTime(valid.type, valid.params, valid.daysReserved)) {
+      const reason = downtime.gateReason(actor);
+      if (reason) {
+        if (valid.type === "craft") return work.dropAction(actor, valid, pending, reason);
+        const { counter } = planReject(actor.getFlag(MODULE_ID, K.daysFlag), valid);
+        await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: pending.filter(a => a.id !== valid.id), [flagKey(K.daysFlag)]: counter });
+        return { status: "invalid", message: `${reason}. ${valid.daysReserved} day(s) refunded.` };
+      }
     }
-  }
-  const outcome = await resolver(api, actor, valid, pending, { chat, degree });
-  if (outcome.status === "resolved" && outcome.daysSpent) await downtime.recordSpent(actor, outcome.daysSpent);
-  return outcome;
+    const outcome = await RESOLVERS[valid.type](api, actor, valid, pending, { chat, degree });
+    if (outcome.status === "resolved" && outcome.daysSpent) await downtime.recordSpent(actor, outcome.daysSpent);
+    return outcome;
+  });
 }
 
-/** Return every queued action to its owner (days refunded). Used by a forced end of downtime. Returns how many. */
-export async function rejectAll({ chat = false } = {}) {
+/** How many queued actions block "End downtime": everything except gathers (they cost charges, not days). */
+export const blockingCount = () => list().filter(row => row.action.type !== "gather").length;
+
+/**
+ * Return queued actions to their owners (days refunded, escrow handed back). Used by a forced end of downtime, which
+ * leaves gathers alone: they need no downtime and stay queued. Returns how many were returned.
+ */
+export async function rejectAll({ chat = false, keepGathers = false } = {}) {
   requireGM("rejectAll");
   let count = 0;
   for (const row of list()) {
+    if (keepGathers && row.action.type === "gather") continue;
     await reject(actorFor(row.actorId), row.action.id, { chat });
     count++;
   }

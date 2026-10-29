@@ -10,6 +10,8 @@
  */
 import { MODULE_ID } from "./config.js";
 import * as exploration from "./exploration/store.js";
+import * as queueStore from "./queue/store.js";
+import * as work from "./queue/work.js";
 
 let socket = null;
 
@@ -30,8 +32,12 @@ export function ensureSocket() {
     return null;
   }
   registered.register("search", options => exploration.runSearch(options));
+  // Craft and gather are queued and cancelled on the GM client (see queue/work.js). `this` carries socketlib's sender, if it gives one.
+  registered.register("queueSubmit", function queueSubmit(payload) { return queueStore.runSubmit(payload, this); });
+  registered.register("queueCancel", function queueCancel(payload) { return queueStore.runCancel(payload, this); });
   socket = registered;
   exploration.setSocket(socket);
+  work.setSocket(socket);
   console.log(`${MODULE_ID} | socket registered (${globalThis.game?.user?.isGM ? "GM" : "player"} client)`);
   return socket;
 }
@@ -63,4 +69,5 @@ export function installSocketHooks(hooks = globalThis.Hooks) {
 export function _resetSocketForTests() {
   socket = null;
   exploration.setSocket(null);
+  work.setSocket(null);
 }

@@ -7,10 +7,10 @@ This is the agreed design for everything the player and GM see. It supersedes ol
 - **Downtime is a GM-started period.** GM presses Start downtime, sets a number of days, and ticks which player characters take part (connected players ticked by default, GM can tick anyone). Only ticked characters get the day pool.
 - **Presence is the reward.** No bonus-day grants. Unspent days EXPIRE when the GM ends downtime. No catch-up for absent players.
 - **Late joiners:** GM can "Add with N days" mid-period. N = the most free days any participant still has.
-- **End downtime:** warn if the queue is not empty (offer Resolve all first), then expire everyone's days.
-- **Outside downtime:** the Hub still opens and everything is browsable. Anything that spends days is disabled with the reason "Downtime isn't open right now". Non-participants see "Downtime is open, but you weren't here for it".
-- **Craft time floor:** every reduction to craft days (station upgrades etc.) is clamped so a craft never takes less than 1 day. Enforce in ONE place (the craft-days calculation), applied after all reductions.
-- **Gold:** only the station fee leaves the purse. Materials come from the character's stash. NO buying missing materials, anywhere. When short, tell the player what is missing and point at the Compendium for where it can be found.
+- **End downtime:** warn if anything but a gather is queued (offer Resolve all first), then expire everyone's days. Gathers cost charges, not days, so they never block it and stay queued (and resolvable) afterwards.
+- **Outside downtime:** the Hub still opens and everything is browsable. Anything that spends days (research, exploring, crafting) is disabled with the reason "Downtime isn't open right now". Non-participants see "Downtime is open, but you weren't here for it". **Gathering is not affected:** it needs no downtime.
+- **Craft time floor:** every reduction to craft days (station upgrades etc.) is clamped so a craft never takes less than 1 day. Enforced in ONE place (`craftDays`, `scripts/crafting/days.js`), applied after all reductions, and used by the queue.
+- **Gold:** only the station fee leaves the purse. Materials come from the character's stash. NO buying missing materials, anywhere. When short, tell the player what is missing and point at the Compendium for where it can be found. **Escrow:** queueing a craft takes the materials and the fee and reserves the days immediately; cancelling returns all of it; resolving only spends the fee and days and returns the unused materials (on a failure the fee and days are still spent).
 - **Costs are shown honestly:** per-material gold value, "materials are worth X", station fee paid now, "buying this in a shop would be about Y", "you save about Z". (Shop price formula is a placeholder.)
 - **Results are plain language** ("Success: +1 step. Wardstone Pike is now 4 of 5."), never raw rolls in the player UI.
 - **Live updates:** the Hub re-renders by itself when relevant data changes (queue resolved, commission updated, days changed). Only re-render for the viewed actor and the shared queue/downtime state. No flicker, no full re-render on unrelated actor updates.
@@ -43,7 +43,7 @@ This is the agreed design for everything the player and GM see. It supersedes ol
 - Right (known formula): slots, each with a one-line role ("Metal sets the weapon's power"). Each slot offers material option cards: name, effect in plain words, stock line ("Uses 3 of 5" or "Need 1, you have 0" in red).
 - Only offer options for materials the character has DISCOVERED (see Compendium). Assumption, flag if wrong.
 - "What you will get" box updates live: result text, odds in words and percent ("succeed on 8 or higher, about 65%"), failure explanation (roll decides if it works; on failure you may lose some materials, rolled per unit), and the "What it costs" breakdown.
-- Buttons: Queue the craft (disabled with reason if short on materials), Ask a crafter instead (jumps to Commissions).
+- Buttons: Queue the craft (disabled with reason if short on materials; queueing takes the materials, fee and days at once), Ask a crafter instead (jumps to Commissions).
 - Unknown formula: shows research progress bar and "Open in Research".
 
 ### Research
@@ -64,7 +64,7 @@ This is the agreed design for everything the player and GM see. It supersedes ol
 - **Flow:** (1) player queues days and optionally ticks Force combat. (2) GM client rolls in secret; the player is NOT shown odds or results. (3) GM opens the region's tagged scene; there may or may not be an encounter. (4) Players use Perception on the map to spot nodes and materials; nodes are hidden tokens with a Perception DC. (5) Only when spotted does a node appear on the sheet (and in the Compendium).
 - **Force combat** = a guaranteed encounter. It is how players go hunting monster materials; some materials exist only on creature corpses.
 - **Nodes are temporary and never respawn.** REMOVE all refill timers, "refilling" state and refill APIs. When the GM presses Clear map the scene's nodes are deleted completely, including from character sheets. Gathered materials already in inventories stay. Compendium knowledge (types, places, ladder rungs) stays.
-- Gather button per revealed node (uses days like everything else).
+- Gather button per revealed node on the scene the character is in. **Gathering uses charges, not days:** queueing claims one charge on the node (so two players cannot queue the last one), it needs no downtime, and it never blocks End downtime. When the last charge is spent the node's token is deleted (only a small depleted record stays until Clear map); the anchor stays occupied.
 
 ### Workshop
 - Left: stations with status (Here now / Travels with you / Away), Build your own workshop.
@@ -82,11 +82,11 @@ This is the agreed design for everything the player and GM see. It supersedes ol
 
 ## Queue panel (View queue)
 - Lists the player's queued actions with title, days, status pill (Waiting for GM / Resolved).
-- Waiting items: "No result yet. The GM rolls it in secret." with "Cancel and get the days back".
+- Waiting items: "No result yet. The GM rolls it in secret." with "Cancel and get everything back" (the days, a craft's materials and fee, a gather's charge). Cancelling is `api.queue.cancel(actor, actionId)`.
 - Resolved items show the plain-language result and stay until dismissed, so an absent player doesn't miss them.
 - Updates live when the GM resolves.
 
 ## GM "Downtime Control" window
 - Start downtime (day stepper, presence checklist), or when open: granted days, queue count with Resolve all, End downtime.
 - Who is taking part: per-character free and reserved days, "Add with N days" for anyone who missed the start.
-- Region map card: tagged scene, nodes placed (found / hidden), encounter state, **Clear map** button (disabled when already clean) with a note that it removes every node from the scene and from sheets and nothing respawns.
+- Region map card: tagged scene, nodes placed (found / hidden), encounter state, **Clear map** button (disabled when already clean) with a note that it removes every node from the scene and from sheets and nothing respawns. It also reports how many gathers were still waiting on those nodes (they resolve as invalid).

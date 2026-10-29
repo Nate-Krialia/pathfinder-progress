@@ -694,7 +694,7 @@ test("clearMap deletes every module-placed node (found or hidden), frees the anc
   assert.equal(anchorsOf(scene).filter(t => t.getFlag(M, "node").occupiedBy).length, 0, "and free again");
   assert.deepEqual(bb.getFlag(M, "knownNodes"), [{ sceneId: "other-scene", tokenId: "keep", name: "Keep me" }], "only this scene's known nodes are removed");
   assert.equal(counts.knownNodesCleared, 3, "the two found nodes in the list plus the one the search added");
-  assert.deepEqual(state(scene), { encounter: null, prepared: [], searches: {}, revealed: [] }, "encounter, searches and history reset");
+  assert.deepEqual(state(scene), { encounter: null, prepared: [], searches: {}, revealed: [], depleted: [] }, "encounter, searches and history reset");
   assert.equal(exploration.sceneState(scene.id).encounter, null);
   assert.ok(globalThis.game.actors.get(sharedActorId), "the shared Resource Node actor is never deleted");
   assert.deepEqual(items, [{ name: "Moonpetal", qty: 3 }], "inventories are untouched");
@@ -705,7 +705,7 @@ test("clearMap is safe to run again (idempotent) and reports zeros on a clean sc
   const { scene } = await world({ anchors: 3 });
   await hiddenNode(scene);
   assert.equal((await exploration.clearMap(scene)).removed, 1);
-  assert.deepEqual(await exploration.clearMap(scene), { removed: 0, found: 0, hidden: 0, skipped: 0, knownNodesCleared: 0 });
+  assert.deepEqual(await exploration.clearMap(scene), { removed: 0, found: 0, hidden: 0, skipped: 0, knownNodesCleared: 0, depletedCleared: 0, orphanedGathers: 0 });
   globalThis.game.user.isGM = false;
   await assert.rejects(exploration.clearMap(scene), /GM only/);
 });
