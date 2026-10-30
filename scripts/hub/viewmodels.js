@@ -18,20 +18,15 @@
 import { HUB } from "../config.js";
 import { S } from "./strings.js";
 import { normalizeDisplay } from "./display.js";
-import { parseTier, slotRoles } from "../data/roles.js";
+import { slotRoles } from "../data/roles.js";
+import { researchTab } from "./viewmodels-research.js";
+import { CATEGORIES, compendiumTab } from "./viewmodels-compendium.js";
 
-const cap = text => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+import { cap, downtimeGate, effectLines, plural, roleText, safeText } from "./common.js";
+export { downtimeGate, effectLines, roleText };
 export const learnedKey = (recipeId, slot, materialId) => `${recipeId}|${slot}|${materialId}`;
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // Gate and status ------------------------------------------------------------------------------------------------
-/** Whether anything that spends days may be used: { open, reason, note }. */
-export function downtimeGate(downtime) {
-  if (!downtime?.open) return { open: false, reason: S.closed, note: S.closedNote };
-  if (!downtime.participant) return { open: false, reason: S.notHere, note: S.closedNote };
-  return { open: true, reason: null, note: null };
-}
-
 export function statusStrip(facts) {
   const count = facts.queue.length;
   return {
@@ -90,7 +85,7 @@ export function formulaList(facts, state) {
   const heldIds = new Set(facts.formulas.map(f => f.recipeId));
   const researching = facts.researching.filter(p => !(p.recipeId && heldIds.has(p.recipeId))).map(p => ({
     key: `project:${p.id}`, recipeId: p.recipeId, projectId: p.id, name: p.goalName, category: categoryOf(facts, p.recipeId), status: "researching", pill: S.pillResearching,
-    progress: { value: p.progress, max: p.threshold, text: S.progressText(p.progress, p.threshold) }, openInResearch: { text: S.openInResearch, disabled: true, why: S.openInResearchWhy },
+    progress: { value: p.progress, max: p.threshold, text: S.progressText(p.progress, p.threshold) }, openInResearch: { text: S.openInResearch, disabled: false, why: null, projectId: p.id },
     selected: state.recipeId === p.recipeId && p.recipeId !== null
   }));
   const all = [...known, ...researching];
@@ -109,26 +104,6 @@ export function slotRoleLine(recipe, slot) {
   const noun = S.categoryNoun[recipe.category] ?? S.genericNoun;
   const parts = slotRoles(slot).map(role => (S.slotRole[role] ? S.slotRole[role](noun) : S.slotRoleCustom(role)));
   return S.slotRoleLine(slot.name, parts);
-}
-
-/** One learned role effect in plain words ("adds +1d8 spirit damage"). */
-export function roleText(role, value, recipe) {
-  const noun = S.categoryNoun[recipe?.category] ?? S.genericNoun;
-  switch (role) {
-    case "basePower": return `${S.slotRole.basePower(noun)} (tier ${parseTier(value)})`;
-    case "spellPower": return `${S.slotRole.spellPower(noun)} (tier ${parseTier(value)})`;
-    case "bonusDamage": return `adds +${value.dice} ${value.persistent ? "persistent " : ""}${value.type} damage${value.versus ? ` against ${value.versus}` : ""}`;
-    case "specialAbility": return `gives ${value.title}: ${value.text}${value.on ? ` (on a ${value.on === "criticalHit" ? "critical hit" : "hit"})` : ""}`;
-    case "resistance": return `gives resistance ${value.value} to ${value.type}`;
-    case "spellSlots": return `adds ${plural(value, "spell slot")}`;
-    default: return `${role}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`;
-  }
-}
-
-/** The learned effect lines for a material, or null when the character has not learned it here. Only known facts ever produce text. */
-export function effectLines(materialName, fact, recipe) {
-  if (!fact?.known) return null;
-  return Object.entries(fact.effects ?? {}).map(([role, value]) => S.outcomeEffectLine(materialName, roleText(role, value, recipe)));
 }
 
 /** Units of `materialId` all the chosen slots together need (a material used in two slots must cover both). */
@@ -285,12 +260,15 @@ export function hubModel(facts, state) {
     layout: state.layout === "narrow" ? "narrow" : "wide",
     tabs: tabRow(state.tab), activeTab: state.tab,
     status: statusStrip(facts), queue: queuePanel(facts.queue, Boolean(state.showQueue)),
-    body: state.tab === "formulae" ? { kind: "formulae", ...formulaeTab(facts, state) } : { kind: "placeholder", text: S.comingLater, tab: HUB.tabs.find(t => t.id === state.tab)?.label ?? "" },
+    body: state.tab === "formulae" ? { kind: "formulae", ...formulaeTab(facts, state) }
+      : state.tab === "research" ? { kind: "research", ...researchTab(facts, state) }
+      : state.tab === "compendium" ? { kind: "compendium", ...compendiumTab(facts, state) }
+      : { kind: "placeholder", text: S.comingLater, tab: HUB.tabs.find(t => t.id === state.tab)?.label ?? "" },
     liveLabel: S.liveRegionLabel
   };
 }
 
-export const emptyState = () => ({ tab: "formulae", filter: "all", recipeId: null, picks: {}, stationId: null, showQueue: false, showDisplay: false, showSwitch: false, layout: "wide", display: normalizeDisplay(null) });
+export const emptyState = () => ({ tab: "formulae", filter: "all", recipeId: null, picks: {}, stationId: null, projectId: null, skill: null, checkDays: 1, confirmAside: false, category: "materials", entryKey: null, showQueue: false, showDisplay: false, showSwitch: false, layout: "wide", display: normalizeDisplay(null) });
 
 /** When the viewed formula changes, its picks start EMPTY again (nothing is ever filled in for the player). */
 export function selectRecipe(state, recipeId) {
@@ -303,3 +281,14 @@ export function pickMaterial(state, slot, materialId) {
   if (!materialId || picks[slot] === materialId) delete picks[slot]; else picks[slot] = materialId;
   return { ...state, picks };
 }
+
+// Research and Compendium state (Stage 11b round) -------------------------------------------------------------------------------------------------
+/** Jump to a project in the Research tab ("Open in Research"). */
+export const openProject = (state, projectId) => ({ ...state, tab: "research", projectId, skill: null, checkDays: 1, confirmAside: false });
+/** Choose a project on the Research tab; a different project starts with its own skill, days and no pending confirm. */
+export const selectProject = (state, projectId) => (state.projectId === projectId ? state : { ...state, projectId, skill: null, checkDays: 1, confirmAside: false });
+export const setSkill = (state, skill) => ({ ...state, skill });
+/** One day more or fewer, never below 1 and never above the free days (a character with none free stays at 1, and Queue says why it is off). */
+export const stepDays = (state, delta, freeDays) => ({ ...state, checkDays: Math.min(Math.max((state.checkDays ?? 1) + delta, 1), Math.max(1, freeDays)) });
+export const setCategory = (state, category) => (CATEGORIES.includes(category) && category !== state.category ? { ...state, category, entryKey: null } : state);
+export const selectEntry = (state, entryKey) => ({ ...state, entryKey });

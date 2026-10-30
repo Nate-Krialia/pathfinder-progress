@@ -13,6 +13,7 @@ import * as exploration from "./exploration/store.js";
 import * as queueStore from "./queue/store.js";
 import * as work from "./queue/work.js";
 import { runWorkshopAside, runWorkshopStart } from "./workshop/store.js";
+import { runFollowLead } from "./research/leads.js";
 import { guard } from "./queue/relay.js";
 import { runDefinitionsFor } from "./data/playerDefs.js";
 
@@ -43,6 +44,8 @@ export function ensureSocket() {
   // Upgrade / design projects: starting one takes materials into escrow, putting one aside gives them back (workshop/store.js).
   registered.register("workshopStart", guard("workshopStart", function workshopStart(payload) { return runWorkshopStart(payload, this); }));
   registered.register("workshopAside", guard("workshopAside", function workshopAside(payload) { return runWorkshopAside(payload, this); }));
+  // Following a lead starts a research project (research/leads.js); the sender must be the real socket sender and own the character.
+  registered.register("researchFollow", guard("researchFollow", function researchFollow(payload) { return runFollowLead(payload, this); }));
   // A player client asks for the definitions its characters need (data/playerDefs.js). The recipes and the rest are not readable to players.
   registered.register("definitionsFor", guard("definitionsFor", function definitionsFor(payload) { return runDefinitionsFor(payload, this); }));
   socket = registered;

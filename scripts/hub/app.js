@@ -8,7 +8,9 @@ import { S } from "./strings.js";
 import { normalizeDisplay, withDisplay } from "./display.js";
 import { defaultCharacter, ownedCharacters, readFacts } from "./facts.js";
 import { renderHubMain, rootAttributes } from "./render.js";
-import { craftRequest, emptyState, hubModel, pickMaterial, selectRecipe } from "./viewmodels.js";
+import { craftRequest, emptyState, hubModel, openProject, pickMaterial, selectEntry, selectProject, selectRecipe, setCategory, setSkill, stepDays } from "./viewmodels.js";
+import { researchRequest } from "./viewmodels-research.js";
+import { shareRequest } from "./viewmodels-compendium.js";
 import { installHubHooks } from "./live.js";
 
 export const HUB_ID = `${MODULE_ID}-hub`;
@@ -40,7 +42,7 @@ export function build() {
       position: { ...HUB.defaultSize },
       actions: {
         // Keys must match the buttons' data-action values EXACTLY (kebab-case).
-        "switch-tab"(event, target) { return this.#set({ tab: target.dataset.tab }); },
+        "switch-tab"(event, target) { return this.#set({ tab: target.dataset.tab, confirmAside: false }); },
         "set-filter"(event, target) { return this.#set({ filter: target.dataset.filter }); },
         "select-recipe"(event, target) { return this.#replace(selectRecipe(this.hubState, target.dataset.recipe || null)); },
         "pick-material"(event, target) { return this.#replace(pickMaterial(this.hubState, target.dataset.slot, target.dataset.material)); },
@@ -56,9 +58,23 @@ export function build() {
         "reset-display"() { return this.#display(HUB.defaultDisplay); },
         "queue-craft"(event, target) { return this.#queueCraft(target); },
         "cancel-queued"(event, target) { return this.#cancel(target.dataset.actionId); },
-        // Placeholders: the button is aria-disabled and says why; nothing happens.
-        "ask-crafter"() {},
-        "open-research"() {}
+        // Research
+        "open-in-research"(event, target) { this.#wantFocus = `project:${target.dataset.project}`; return this.#replace(openProject(this.hubState, target.dataset.project)); },
+        "select-project"(event, target) { return this.#replace(selectProject(this.hubState, target.dataset.project)); },
+        "set-skill"(event, target) { return this.#replace(setSkill(this.hubState, target.dataset.skill)); },
+        "days-down"() { return this.#replace(stepDays(this.hubState, -1, this.#compose().facts.days.free)); },
+        "days-up"() { return this.#replace(stepDays(this.hubState, 1, this.#compose().facts.days.free)); },
+        "queue-research"() { return this.#queueResearch(); },
+        "put-aside"() { this.#wantFocus = "keep-aside"; return this.#set({ confirmAside: true }); },
+        "keep-aside"() { this.#wantFocus = "put-aside"; return this.#set({ confirmAside: false }); },
+        "confirm-aside"() { return this.#putAside(); },
+        "follow-lead"(event, target) { return this.#followLead(target.dataset.lead); },
+        // Compendium
+        "set-category"(event, target) { return this.#replace(setCategory(this.hubState, target.dataset.category)); },
+        "select-entry"(event, target) { return this.#replace(selectEntry(this.hubState, target.dataset.entry)); },
+        "share-entry"() { return this.#shareEntry(); },
+        // Placeholder: the button is aria-disabled and says why; nothing happens.
+        "ask-crafter"() {}
       }
     };
 
@@ -134,6 +150,7 @@ export function build() {
       this.#keyHandler = null;
     }
 
+    #wantFocus = null;      // a control key to focus after the next draw (set by an action whose own button is about to go away)
     #root = null;
     #keyHandler = null;
     #focused = false;
@@ -212,6 +229,11 @@ export function build() {
         // Focus that was NOT in the Hub is never taken.
         if (hadFocus) ([...main.querySelectorAll("[data-focus-key]")].find(el => focusKey && el.dataset.focusKey === focusKey) ?? root).focus({ preventScroll: true });
       }
+      if (this.#wantFocus) {
+        const wanted = [...main.querySelectorAll("[data-focus-key]")].find(el => el.dataset.focusKey === this.#wantFocus);
+        this.#wantFocus = null;
+        wanted?.focus({ preventScroll: false });
+      }
       const live = root.querySelector(".pfp-live");
       const text = this.announcements.map(a => `<p>${a.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c])}</p>`).join("");
       if (live.dataset.html !== text) { live.innerHTML = text; live.dataset.html = text; }
@@ -254,12 +276,63 @@ export function build() {
       }
     }
 
+    async #queueResearch() {
+      const { facts } = this.#compose();
+      const request = researchRequest(facts, this.hubState);
+      if (!request) return;                                      // an aria-disabled button never gets here; this is the belt to that brace
+      try {
+        const action = await this.api.queue.submit(this.actor, "research", { projectId: request.projectId, skill: request.skill }, request.days);
+        this.#announce({ text: S.researchQueued(request.days, request.name, action?.daysReserved ?? request.days), kind: "queued", actionId: action?.id ?? null, seen: false });
+      } catch (error) {
+        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+      }
+    }
+
+    async #putAside() {
+      const { facts } = this.#compose();
+      const project = facts.projects.find(p => p.id === this.hubState.projectId) ?? (facts.projects.length === 1 ? facts.projects[0] : null);
+      this.hubState = { ...this.hubState, confirmAside: false };
+      if (!project) { this.redraw(); return; }
+      try {
+        await this.api.research.putAside(this.actor, project.id);
+        this.hubState = { ...this.hubState, projectId: null };
+        this.#announce({ text: S.asideDone(project.goalName), kind: "aside" });
+      } catch (error) {
+        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+      }
+    }
+
+    async #followLead(leadId) {
+      try {
+        const project = await this.api.research.follow(this.actor, leadId);
+        this.hubState = { ...this.hubState, projectId: project.id, skill: null, checkDays: 1, confirmAside: false };
+        this.#wantFocus = `project:${project.id}`;
+        this.#announce({ text: S.leadStarted(project.goalName), kind: "started" });
+      } catch (error) {
+        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+      }
+    }
+
+    async #shareEntry() {
+      const { facts } = this.#compose();
+      const request = shareRequest(facts, this.hubState);
+      if (!request) return;
+      try {
+        const action = await this.api.queue.submit(this.actor, "share", { kind: request.kind, key: request.key });
+        this.#announce({ text: S.shareQueued(request.name), kind: "queued", actionId: action?.id ?? null, seen: false });
+      } catch (error) {
+        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+      }
+    }
+
     async #cancel(actionId) {
+      if (!actionId) return;
       try {
         const rows = this.api.queue.list([this.actor]);
-        const label = rows.find(r => r.action.id === actionId)?.label ?? "";
+        const row = rows.find(r => r.action.id === actionId);
+        const label = row?.label ?? "";
         await this.api.queue.cancel(this.actor, actionId);
-        this.#announce({ text: S.queueCancelled(label), kind: "cancelled" });
+        this.#announce({ text: row?.action.type === "share" ? S.shareCancelled(row.action.params?.name ?? label) : S.queueCancelled(label), kind: "cancelled" });
       } catch (error) {
         this.#announce({ text: S.queueFailed(error.message), kind: "error" });
       }

@@ -14,7 +14,7 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.18.3**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.19.0**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
@@ -171,11 +171,11 @@ In the Hub, click **Switch character**.
 - **Downtime days:** `12 free, 0 reserved`.
 - **Party location:** `Gate Town`, with `Workshops here: Gate Bench, Gate Forge`.
 - **Waiting on the GM:** `Nothing queued`, and a **View queue** button.
-- A row of six tabs: **Formulae**, then **Research (coming later)**, **Commissions (coming later)**, **Explore (coming later)**, **Workshop (coming later)**, **Compendium (coming later)**. Click **Research**: the body says **Coming in a later stage**. Click **Formulae** to go back.
+- A row of six tabs: **Formulae**, then **Research** and **Compendium** (both working from 0.19.0; `docs/18` covers them), and **Commissions (coming later)**, **Explore (coming later)**, **Workshop (coming later)**. Click **Explore**: the body says **Coming in a later stage**. Click **Formulae** to go back.
 
 ## Step 8 [Player]: the list and the filter chips
 
-**What you should see:** three cards in the left pane: **Gate Blade** (Known), **Gate Vest** (Known) and **Gate Draught** (Researching, with a progress bar and "Progress 1 of ..."), and under Gate Draught a dashed **Open in Research** button that does nothing and says why. The chips read **All 3**, **Weapon 1**, **Armor 1**, **Consumable 0**. Click **Weapon**: only Gate Blade. **Armor**: only Gate Vest. **Consumable**: "No formulae in this group." **All**: all three. (A formula you are still researching shows under **All** only: you have not learned what kind of thing it is yet, so no group claims it.)
+**What you should see:** three cards in the left pane: **Gate Blade** (Known), **Gate Vest** (Known) and **Gate Draught** (Researching, with a progress bar and "Progress 1 of ..."), and under Gate Draught an **Open in Research** button (from 0.19.0 it jumps to that project in the Research tab; `docs/18` checks it). The chips read **All 3**, **Weapon 1**, **Armor 1**, **Consumable 0**. Click **Weapon**: only Gate Blade. **Armor**: only Gate Vest. **Consumable**: "No formulae in this group." **All**: all three. (A formula you are still researching shows under **All** only: you have not learned what kind of thing it is yet, so no group claims it.)
 
 ## Step 9 [Player]: every slot starts empty
 

@@ -106,7 +106,8 @@ export const RESEARCH = {
 export const RESEARCH_KEYS = {
   projectsFlag: "projects",
   formulasFlag: "formulas",
-  daysFlag: "downtimeDays"
+  daysFlag: "downtimeDays",
+  leadsFlag: "leads"
 };
 
 /** The queue (docs/08-foundry-integration.md). */
@@ -257,11 +258,11 @@ export const GM_LOG = {
 export const HUB = {
   tabs: [
     { id: "formulae", label: "Formulae", working: true },
-    { id: "research", label: "Research", working: false },
+    { id: "research", label: "Research", working: true },
     { id: "commissions", label: "Commissions", working: false },
     { id: "explore", label: "Explore", working: false },
     { id: "workshop", label: "Workshop", working: false },
-    { id: "compendium", label: "Compendium", working: false }
+    { id: "compendium", label: "Compendium", working: true }
   ],
   // Filter chips on the Formulae list. A recipe whose category is in none of them shows under All only.
   filters: [
@@ -284,5 +285,7 @@ export const HUB = {
   fonts: ["standard", "hyperlegible"],
   defaultDisplay: { textSize: 100, theme: "parchment", font: "standard" },
   basePx: 14,                        // the window's text size at 100%; every size in the stylesheet is in em of this
+  // The Research and Compendium tabs (Stage 11b round).
+  research: { maxStepBoxes: 20, recentChecks: 5, leadNoteMax: 300 },
   minTarget: 44                      // px: the smallest a clickable control may be (the stylesheet and the layout checks both use it)
 };

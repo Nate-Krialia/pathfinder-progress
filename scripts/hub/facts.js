@@ -32,7 +32,7 @@ const attempt = (what, fn, fallback) => {
 
 export function readFacts(api, actor, state) {
   const characters = ownedCharacters().map(a => ({ id: a.id, name: a.name }));
-  if (!actor) return { actor: null, characters, queue: [], formulas: [], researching: [], recipes: {}, materials: {}, inventory: {}, met: [], learned: {}, stations: [], preview: null, days: { free: 0, reserved: 0 }, gp: 0, downtime: { open: false, participant: false }, location: { name: null, stations: [] }, definitions: "ready" };
+  if (!actor) return { actor: null, characters, projects: [], leads: [], queuedResearch: [], shares: [], compendium: null, queue: [], formulas: [], researching: [], recipes: {}, materials: {}, inventory: {}, met: [], learned: {}, stations: [], preview: null, days: { free: 0, reserved: 0 }, gp: 0, downtime: { open: false, participant: false }, location: { name: null, stations: [] }, definitions: "ready" };
 
   const defs = api.definitions;
   const period = attempt("the downtime period", () => api.downtime.state(), { open: false, participants: {} });
@@ -80,7 +80,25 @@ export function readFacts(api, actor, state) {
     }
   }
 
+  // Research and Compendium (read only for the tab that is open). Projects only through projectInfo (the player copy: no DC, odds or pace); a check's free-text note is dropped here.
+  const projects = state.tab !== "research" ? [] : attempt("the research", () => api.projectInfo(actor), []).filter(p => p.status === "active").map(p => {
+    const info = attempt("a project", () => api.projectInfo(actor, p.id), null);
+    const pr = info?.project;
+    if (!pr) return null;
+    return {
+      id: pr.id, goalName: pr.goalName, kind: pr.outcome?.type ?? "unlockFormula", recipeId: pr.outcome?.recipeId ?? null, progress: pr.progress, threshold: pr.threshold,
+      skills: (info.perSkill ?? []).map(s => ({ skill: s.skill, label: adapter.skillLabel(s.skill), modifier: s.modifier ?? null })),
+      log: (pr.log ?? []).map(({ source, degree, delta, skill }) => ({ source, degree, delta, skill })),
+      hint: info.hints?.[0] ?? null
+    };
+  }).filter(Boolean);
+  const leads = state.tab !== "research" ? [] : attempt("the leads", () => api.research.leads(actor), []).map(({ id, recipeId, name, note }) => ({ id, recipeId, name, note }));
+  const queuedResearch = rows.filter(r => r.action.type === "research").map(r => ({ actionId: r.action.id, projectId: r.action.params?.projectId, days: r.action.daysReserved ?? 0, skill: r.action.params?.skill ?? null }));
+  const shares = rows.filter(r => r.action.type === "share").map(r => ({ actionId: r.action.id, kind: r.action.params?.kind, key: r.action.params?.key, name: r.action.params?.name }));
+  const compendium = state.tab !== "compendium" ? null : attempt("the Compendium", () => api.compendium.view(actor), null);
+
   return {
+    projects, leads, queuedResearch, shares, compendium,
     actor: { id: actor.id, name: actor.name }, characters,
     downtime: { open: Boolean(period.open), participant: Boolean(period.participants?.[actor.id]) },
     days: { free: attempt("the days", () => api.days(actor), 0), reserved },

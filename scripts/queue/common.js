@@ -37,6 +37,21 @@ export function callerOf(payload, context) {
   return user;
 }
 
+/**
+ * Who is REALLY asking, for requests that must not trust a client-supplied id. The sender is socketlib's own (from Foundry's socket event, `this.socketdata.userId`).
+ * Without it, only a call made directly on THIS GM client is accepted (asGM adds the GM's own id there); a userId in the payload of anything else is ignored.
+ */
+export function senderOf(payload, context) {
+  const real = context?.socketdata?.userId;
+  if (real) {
+    const user = game.users.get(real);
+    if (!user) throw refusal(`the GM client does not know the user "${real}"`);
+    return user;
+  }
+  if (game.user.isGM && payload?.userId === game.user.id) return game.user;
+  throw refusal("This request did not say who is asking, so it was not done.");
+}
+
 /** The GM or an owner of the actor. Throws otherwise, before anything is read or written. */
 export function assertOwner(actor, user, what) {
   if (user.isGM) return;

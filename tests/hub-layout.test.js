@@ -46,6 +46,12 @@ test("LAYOUT MUTATION: the checks fail when a card gets a fixed height back, a b
       // the 0.18.3 checks: a badge that wraps letter by letter (SELECTE/D), and ordinary words broken mid-word ("Da/rk")
       "a badge that wraps letters": { scene: "partial", width: 280, textSize: 175, css: ".pfp-hub .pfp-badge { white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-all !important; min-width: 0 !important; max-width: 3.5em !important; }" },
       "words broken mid-word": { scene: "panels", width: 280, textSize: 175, css: ".pfp-hub button.pfp-btn { overflow-wrap: anywhere !important; word-break: break-all !important; max-width: 5em !important; }" },
+      // the 0.19.0 tabs: step boxes that overlap or are positioned absolutely, a lead card or confirm box with a fixed height, long names that cannot wrap
+      "step boxes that overlap": { scene: "researchMany", width: 320, textSize: 100, css: ".pfp-hub .pfp-step { margin-left: -0.6em !important; }" },
+      "absolute step boxes": { scene: "researchOne", width: 600, textSize: 100, css: ".pfp-hub .pfp-step { position: absolute !important; }" },
+      "a lead card with a fixed height": { scene: "researchMany", width: 320, textSize: 175, css: ".pfp-hub .pfp-lead { height: 3em !important; overflow: hidden !important; }" },
+      "a confirm box with a fixed height": { scene: "researchConfirm", width: 320, textSize: 175, css: ".pfp-hub .pfp-confirm { height: 2em !important; overflow: hidden !important; }" },
+      "compendium text that cannot wrap": { scene: "compendiumExperiment", width: 320, textSize: 175, css: ".pfp-hub .pfp-facts li, .pfp-hub .pfp-effects li { white-space: nowrap !important; overflow-wrap: normal !important; }" },
       "a badge that wraps letters at 220": { scene: "partial", width: 220, textSize: 175, css: ".pfp-hub .pfp-badge { white-space: normal !important; word-break: break-all !important; min-width: 0 !important; max-width: 3.5em !important; }" }
     };
     for (const [label, spec] of Object.entries(mutations)) {

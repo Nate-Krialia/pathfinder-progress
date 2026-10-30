@@ -511,6 +511,9 @@ const auditEntry = obj({
   history: arr(obj({ at: int(), text: str() }))
 });
 
-export const LIVE_SCHEMAS = { node, project, formula, stationRecord, stationState, partyStation, commission, pendingAction, auditEntry, compendium, blueprintHold };
+/** A lead the GM handed a character: a formula it could start researching. `name` is the recipe's name at the time (the player copy does not hold the recipe). */
+const lead = obj({ id: str(), recipeId: idField(), name: str(), note: str(), at: int({ min: 0 }) });
+
+export const LIVE_SCHEMAS = { lead, node, project, formula, stationRecord, stationState, partyStation, commission, pendingAction, auditEntry, compendium, blueprintHold };
 
 export const DEFINITION_KINDS = Object.keys(DEFINITION_SCHEMAS);

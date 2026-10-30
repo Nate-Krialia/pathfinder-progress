@@ -24,6 +24,8 @@ import { openHub } from "./hub/app.js";
 import { defsState } from "./data/playerState.js";
 import * as compendium from "./compendium/store.js";
 import * as workshop from "./workshop/store.js";
+import * as leads from "./research/leads.js";
+import { asGM } from "./queue/work.js";
 import { UPGRADE_KINDS } from "./workshop/rules.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
 
@@ -336,7 +338,16 @@ Hooks.once("ready", async () => {
     /** Start researching a recipe: { actor, recipe, dc?, threshold? } (dc and threshold tune one project). */
     startProject: options => researchStore.startProject(api, options),
     /** One check per day, up to `days` days; stops when the project completes. { actor, project, days, skill?, degree?, chat? } */
-    research: options => researchStore.research(options, api),
+    research: Object.assign(options => researchStore.research(options, api), {
+      /** GM: hand a character a lead (a formula it could start researching): giveLead(actor, recipeId, note?). */
+      giveLead: (actor, recipeId, note) => leads.giveLead(api, actor, recipeId, note),
+      /** The leads a character holds (the owner or a GM). */
+      leads: actor => { if (!game.user.isGM && !actor.isOwner) throw new Error("You can only read the leads of a character you own."); return leads.readLeads(actor); },
+      /** Player: start researching a lead (relayed to the GM client, which checks who is asking). Returns the project (without its DC for a player). */
+      follow: (actor, leadId) => asGM("researchFollow", { actorId: actor.id, leadId }, payload => leads.runFollowLead(payload)),
+      /** Player: put a project aside (progress is NOT kept; research must not be queued). Relayed like the workshop's. */
+      putAside: (actor, projectId) => workshop.relayPutAside(actor, projectId)
+    }),
     /** Progress, DC, your modifiers and the per-day odds. Without a project id, lists the actor's projects. */
     projectInfo: (actor, projectId) => researchStore.projectInfo(api, actor, projectId),
     /** The hook for other progress sources. A reason is required and is logged. */
@@ -383,6 +394,7 @@ Hooks.once("ready", async () => {
   game.modules.get(MODULE_ID).api = api;
   queueStore.bind(api);
   workshop.bind(api);
+  leads.bind(api);
   playerDefs.bind(api);
   // A character gained an owned formula: reveal its baseline (the Compendium's Experiments). Only a GM client writes.
   events.on("formulaOwned", ({ actor, recipeId }) => (game.user.isGM ? compendium.noteFormulaOwned(api.definitions, actor, recipeId) : undefined));

@@ -150,6 +150,20 @@
 .pfp-hub .pfp-live:empty { border: 0; padding: 0; }
 .pfp-hub .pfp-live p { font-weight: 700; margin-bottom: 0.2em; }
 
+/* ---- Research and Compendium (Stage 11b round) -------------------------------------------------------------------------------------------------- */
+.pfp-hub .pfp-steps-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3em 0.6em; }
+.pfp-hub .pfp-steps { display: flex; flex-wrap: wrap; gap: 0.2em; }
+.pfp-hub .pfp-step { display: inline-block; width: 0.9em; height: 0.9em; border: 2px solid var(--pfp-border); border-radius: 0.15em; }
+.pfp-hub .pfp-step.is-done { background: var(--pfp-accent); }   /* filled vs hollow: a shape, and the words "Progress n of m" are always beside it */
+.pfp-hub .pfp-steps-text { display: inline; }
+.pfp-hub .pfp-lead { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3em; padding: 0.5em 0.6em; border: 1px solid var(--pfp-border); border-radius: 0.4em; background: var(--pfp-card); }
+.pfp-hub .pfp-lead-note { display: block; color: var(--pfp-muted); }
+.pfp-hub .pfp-confirm { display: flex; flex-direction: column; gap: 0.4em; padding: 0.5em 0.7em; border: 2px solid var(--pfp-warn); border-radius: 0.4em; }
+.pfp-hub .pfp-pill-private { border-style: dashed; }
+.pfp-hub .pfp-pill-queued { border-style: dotted; }
+.pfp-hub .pfp-pill-shared { border-style: solid; }
+.pfp-hub h3 { margin-top: 0.3em; }
+
 /* ---- A narrow window: tighter padding, so the nested boxes leave room for an unsplittable badge at large text sizes -------------------------------------- */
 .pfp-hub[data-layout="narrow"] { padding: 0.4em; gap: 0.4em; }
 .pfp-hub[data-layout="narrow"] .pfp-pane { padding: 0.4em; }

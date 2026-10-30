@@ -10,6 +10,10 @@
  */
 export const HIDDEN_FIELDS = ["dc", "chances", "chance", "odds", "expectedProgressPerDay", "expectedDaysToFinish", "approximate", "slotLossChance", "materialLossChance", "lossChance", "craftLevel", "explorationDC", "perceptionDC", "encounterChance"];
 
+/** Wording that talks about a DC, odds, a percentage or difficulty. The Hub refuses to show free text that matches (hints, a GM's note); the tests scan with the same pattern. */
+export const DIFFICULTY_WORDS = /\bDC\b|\bodds\b|\d\s?%|\bchances?\b|\bdifficult|\bexpected\b|\bexpect ~|\bpercent\b/i;
+export const isDifficultyText = text => DIFFICULTY_WORDS.test(String(text ?? ""));
+
 /** A deep copy without any hidden field, at any depth. */
 export function withoutDifficulty(value) {
   if (Array.isArray(value)) return value.map(withoutDifficulty);

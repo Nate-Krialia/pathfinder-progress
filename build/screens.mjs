@@ -22,6 +22,13 @@ for (const width of [300, 280, 220]) jobs.push({ scene: "panels", theme: "dark",
 jobs.push({ scene: "partial", theme: "parchment", textSize: 175, width: 300, hostile: HOSTILE, tag: "minimum-width" });
 jobs.push({ scene: "partial", theme: "dark", textSize: 125, width: 600, hostile: HOSTILE }, { scene: "longNames", theme: "contrast", textSize: 150, width: 320, hostile: HOSTILE, font: "hyperlegible", announce: "Craft queued: Gate Blade. 2 days reserved." });
 
+// 0.19.0: the Research and Compendium tabs
+for (const scene of ["researchOne", "researchMany", "researchQueued", "researchConfirm", "researchClosed", "researchWorkshop", "researchEmpty", "compendiumMaterial", "compendiumShareable", "compendiumExperiment", "compendiumCreature", "compendiumEmpty"]) {
+  jobs.push({ scene, theme: "parchment", textSize: 100, width: 900, hostile: HOSTILE });
+  jobs.push({ scene, theme: "dark", textSize: 175, width: 300, hostile: HOSTILE, tag: "minimum-width" });
+}
+jobs.push({ scene: "researchMany", theme: "contrast", textSize: 125, width: 600, hostile: HOSTILE }, { scene: "compendiumNarrowList", theme: "dark", textSize: 175, width: 280, hostile: HOSTILE });
+
 const browser = await launchChromium();
 const page = await openHarness(browser);
 let bad = 0;

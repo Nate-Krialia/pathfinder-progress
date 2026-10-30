@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.19.0
+
+The Stage 11b round: the Research and Compendium tabs of the Downtime Hub, and leads.
+
+- **Research tab.** Your active projects as step boxes ("Progress 3 of 8", a bar beyond 20 steps), the skills you can roll with and your own sheet modifier (never odds), a days stepper (one check per day), Queue N checks, Cancel, the GM resolving in secret, recent checks in degree words and the progress change only. No DC, no odds, no percentage, no pace line (any expected figure would need the DC).
+- **Put the project aside** now has a confirm step ("Put aside? Progress is not kept." with Confirm and Keep; Keep takes the focus, keyboard works). It is off while checks are queued. Station-upgrade and design projects are listed and queueable but have no Put aside here. A character with exactly one project has it selected for them, without moving focus.
+- **Open in Research** on the Formulae tab is live: it jumps to the project and puts the focus on its card.
+- **Leads.** New actor flag `leads` (live schema `lead`, watched by the Hub). `api.research.giveLead(actor, recipeId, note)` is GM only; a player presses **Start researching**, which calls `api.research.follow`, relayed to the GM client by a new guarded `researchFollow` handler. It checks the sender owns the actor (the real socket sender; `senderOf` in `scripts/queue/common.js`, a payload id is accepted only when it is the local GM's own), that the lead exists, has not been started, and that the recipe still exists, and refuses with a plain reason otherwise.
+- **Compendium tab.** Materials, Creatures, Regions, Experiments: only what the character has experienced (no "???"), with Share with the party (Only you / Queued / Shared), Cancel while queued, and the GM approving as before. Experiments show the baseline and what you have learned through the same resolver as the Formulae tab.
+- **Not added, on purpose:** a "Not shared" line when the GM rejects a share. The Hub cannot tell a rejection from a cancel from another client or a force-end of the period (all just remove the queue row), and guessing would be wrong, so a rejected share simply goes back to "Only you". No Finished list, no pause/resume.
+- **Leak audit.** The Hub reads project data only through `api.projectInfo` (never the raw project flag, which still holds the DC under the honor system). `projectInfo` hint strings and lead notes pass `safeText` (`DIFFICULTY_WORDS`, one list in `scripts/difficulty.js`); a GM's free-text log note is dropped in `facts.js` and never reaches a view-model. All new strings are scanned.
+- Tests: 981 in all (43 new: `leads`, `hub-research`, `hub-compendium`, window click-throughs on the strict fake, the layout harness gained 16 scenes, `gate18`). The harness now renders 24 scenes (3720 layouts, 0 problems; skipped on CI without Chromium unless `REQUIRE_CHROMIUM=1`). Mutation checks (all caught): pace line, log note shown (view-model and facts), Put aside enabled while queued, Put aside without confirm, Share offered when fully shared, "???" placeholder, hint and lead-note filters removed, sender trusted from payload, no ownership check, lead not used up, already-started not checked, `leads` unwatched, no auto-select, auto-select moving focus, no focus after Open in Research, confirm focus not on Keep, research status not reconciled, Put aside on a workshop project, queue allowed with no skill, downtime gate ignored, a guessed "Not shared" line, and layout breakers for step boxes, lead cards, the confirm and nowrap.
+- Docs: `docs/18-stage11b-gate.md` (one gate, 22 steps, `g6-` ids); `docs/08` (Research and Compendium tabs, leads, the sender rule); `CLAUDE.md`; `docs/17` Steps 7 and 8 (tabs are live now) and the version.
+- No manifest change except the version: no server restart; force-reload both windows (Ctrl+Shift+R). The new socket handler registers at load.
+
 ## 0.18.3
 
 Three findings from gate 17 in real Foundry (Steps 22, 37, 38).

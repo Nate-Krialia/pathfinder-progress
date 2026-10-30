@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { HUB } from "../scripts/config.js";
 import { hubModel, learnedKey } from "../scripts/hub/viewmodels.js";
 import { renderHubPage } from "../scripts/hub/render.js";
-import { BENCH, FORGE, STAR_EFFECT, STEEL_EFFECT, makeFacts, makeState } from "../tests/hub-fixtures.js";
+import { BENCH, BIG_PROJECT, BOOK_ENTRIES, FORGE, LEAD, PROJECT, STAR_EFFECT, STEEL_EFFECT, UPGRADE, compendiumFacts, compendiumState, makeBook, makeFacts, makeState, researchFacts, researchState } from "../tests/hub-fixtures.js";
 
 const cssUrl = pathToFileURL(new URL("../styles/hub.css", import.meta.url).pathname).href;
 
@@ -67,7 +67,31 @@ const longFacts = makeFacts({
   inventory: { "gate-iron": 5, "gate-steel": 1, "gate-star": 1 },
   learned: { [learnedKey("gate-blade", "edge", "gate-star")]: { known: true, effects: { specialAbility: { title: "Unbelievably Long Special Ability Title", text: "Does a thing that takes a great many words to describe properly, wrapping across several lines.", on: "criticalHit" } } } }
 });
+// Research and Compendium (Stage 11b round) ------------------------------------------------------------------------------------------------------------
+const LONG_PROJECT = { ...PROJECT, id: "unlock-long", goalName: "The Exceedingly Long Named Gate Draught of Wandering Heroes and Their Faithful Companions", progress: 19, threshold: 20, skills: [{ skill: "crafting", label: "Crafting", modifier: 7 }, { skill: "arcana", label: "Arcana of the Seven Hidden Orders", modifier: -2 }, { skill: "occultism", label: "Occultism", modifier: 12 }, { skill: "religion", label: "Religion", modifier: null }], log: Array.from({ length: 7 }, (_, i) => ({ source: i === 3 ? "commission" : "research", degree: ["success", "criticalSuccess", "failure", "criticalFailure"][i % 4], delta: [1, 2, 0, 0][i % 4], skill: "crafting" })), hint: "Gate Bench is already at tier level 2, but this project began at 1; put it aside to get your materials back" };
+const LONG_LEAD = { ...LEAD, id: "lead-long", name: "The Gate Lantern of the Seven Northern Marches and Beyond", note: "A glassblower in Gate Town of the Seven Northern Marches mentioned it over a very long and winding conversation that went on and on." };
+const manyMaterials = Array.from({ length: 40 }, (_, i) => ({ id: `gate-m${i}`, name: i % 7 === 0 ? `Gate Moonglass of the Unbroken Horizon Wanderers ${i}` : `Gate Material ${i}`, tier: 1 + (i % 5), firstAt: i, places: [{ key: `p${i}`, label: i % 3 === 0 ? "Gate Town of the Seven Northern Marches and Beyond" : "Gate Field" }], rungs: [{ nodeType: "gate-bush", tier: 1, rung: "base" }, { nodeType: "gate-bush", tier: 1, rung: "higher" }], shared: false, usedIn: [{ recipeId: "r1", name: "The Exceedingly Long Named Gate Blade of Wandering Heroes" }, { recipeId: "r2", name: "Gate Vest" }] }));
+const longExperiment = { recipeId: "gate-blade", name: "The Exceedingly Long Named Gate Blade of Wandering Heroes", source: "both", baseline: BOOK_ENTRIES.experiments[0].baseline, known: Array.from({ length: 9 }, (_, i) => ({ slot: i % 2 ? "edge" : "blade", materialId: `m${i}`, material: `Gate Supercalifragilisticexpialidocious-${i}`, tier: 2, effects: i % 2 ? { specialAbility: { title: "Unbelievably Long Special Ability Title", text: "Does a thing that takes a great many words to describe properly, wrapping across several lines.", on: "criticalHit" } } : STEEL_EFFECT, source: i % 3 ? "crafted" : "shared" })) };
+const bookWith = (entries, own = entries) => makeBook({ entries: { ...BOOK_ENTRIES, ...entries }, own: { ...makeBook().own, ...own } });
+const R = { ...Object.fromEntries([["researchEmpty", { facts: researchFacts({ projects: [], leads: [] }), state: researchState() }]]) };
+
 export const SCENES = {
+  ...R,
+  researchOne: { facts: researchFacts({ projects: [PROJECT], leads: [LEAD] }), state: researchState({ skill: "crafting", checkDays: 2 }) },
+  researchMany: { facts: researchFacts({ projects: [LONG_PROJECT, BIG_PROJECT, PROJECT, UPGRADE], leads: [LONG_LEAD, LEAD], days: { free: 9, reserved: 0 } }), state: researchState({ projectId: "unlock-long", skill: "arcana", checkDays: 3 }) },
+  researchQueued: { facts: researchFacts({ projects: [PROJECT, UPGRADE], queuedResearch: [{ actionId: "a1", projectId: PROJECT.id, days: 2, skill: "crafting" }], days: { free: 4, reserved: 2 }, queue: [{ id: "a1", label: "Research: Gate Draught", days: 2 }] }), state: researchState({ projectId: PROJECT.id, showQueue: true }) },
+  researchConfirm: { facts: researchFacts({ projects: [PROJECT], leads: [] }), state: researchState({ confirmAside: true }) },
+  researchClosed: { facts: researchFacts({ downtime: { open: true, participant: false } }), state: researchState({ projectId: PROJECT.id, skill: "crafting" }) },
+  researchWorkshop: { facts: researchFacts({ projects: [{ ...UPGRADE, hint: "Gate Bench is already at tier level 2, but this project began at 1; put it aside to get your materials back" }, PROJECT] }), state: researchState({ projectId: UPGRADE.id }) },
+  compendiumMaterials: { facts: compendiumFacts({ compendium: bookWith({ materials: manyMaterials }) }), state: compendiumState() },
+  compendiumMaterial: { facts: compendiumFacts({ compendium: bookWith({ materials: manyMaterials }), shares: [{ actionId: "s1", kind: "material", key: "gate-m0" }] }), state: compendiumState({ entryKey: "gate-m0" }) },
+  compendiumShareable: { facts: compendiumFacts(), state: compendiumState({ entryKey: "gate-iron" }) },
+  compendiumCreature: { facts: compendiumFacts(), state: compendiumState({ category: "creatures", entryKey: "gate-wolf" }) },
+  compendiumRegion: { facts: compendiumFacts(), state: compendiumState({ category: "regions", entryKey: "gate-field" }) },
+  compendiumExperiment: { facts: compendiumFacts({ compendium: bookWith({ experiments: [longExperiment] }) }), state: compendiumState({ category: "experiments", entryKey: "gate-blade" }) },
+  compendiumEmpty: { facts: compendiumFacts({ compendium: makeBook({ entries: { materials: [], creatures: [], regions: [], experiments: [] }, own: { materials: [], creatures: [], regions: [], experiments: [] } }) }), state: compendiumState({ category: "creatures" }) },
+  compendiumUnreadable: { facts: compendiumFacts({ compendium: null }), state: compendiumState() },
+  compendiumNarrowList: { facts: compendiumFacts({ shares: [{ actionId: "s1", kind: "material", key: "gate-star" }] }), state: compendiumState({ category: "experiments", entryKey: "gate-blade", showDisplay: true }) },
   partial: { facts: makeFacts(base), state: makeState({ picks: { blade: "gate-steel" } }) },
   complete: { facts: makeFacts({ ...base, inventory: { "gate-iron": 5, "gate-steel": 2, "gate-star": 1 }, preview: okPlan }), state: makeState({ picks: { blade: "gate-steel", edge: "gate-star" } }) },
   closed: { facts: makeFacts({ ...base, downtime: { open: false, participant: false } }), state: makeState({ picks: { blade: "gate-steel", edge: "gate-star" } }) },

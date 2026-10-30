@@ -9,7 +9,7 @@ import { COMPENDIUM, HUB, MODULE_ID, QUEUE_KEYS, RESEARCH_KEYS, STATION_KEYS, WO
 import * as events from "../events.js";
 
 /** Actor flags that change what the viewed character's Formulae tab shows. */
-export const WATCHED_ACTOR_FLAGS = [RESEARCH_KEYS.formulasFlag, RESEARCH_KEYS.projectsFlag, RESEARCH_KEYS.daysFlag, QUEUE_KEYS.pendingFlag, COMPENDIUM.flag, STATION_KEYS.actorStationsFlag, STATION_KEYS.actorLocationFlag];
+export const WATCHED_ACTOR_FLAGS = [RESEARCH_KEYS.leadsFlag, RESEARCH_KEYS.formulasFlag, RESEARCH_KEYS.projectsFlag, RESEARCH_KEYS.daysFlag, QUEUE_KEYS.pendingFlag, COMPENDIUM.flag, STATION_KEYS.actorStationsFlag, STATION_KEYS.actorLocationFlag];
 /** Shared world settings that change it (downtime, party location, workshops, the shared Compendium, the definitions revision). */
 export const WATCHED_SETTINGS = [DOWNTIME.stateSetting, STATION_KEYS.partyLocationSetting, STATION_KEYS.stationStateSetting, WORKSHOP.partyStationsSetting, COMPENDIUM.sharedSetting, DEFINITIONS_SYNC.revisionSetting].map(key => `${MODULE_ID}.${key}`);
 

@@ -39,7 +39,7 @@ test("the stage 11a gate doc: steps are labelled, click-through steps say what y
   }
   const screenshots = [...GATE].filter(([, e]) => /screenshot/i.test(e.text)).map(([n]) => n);
   assert.deepEqual(screenshots, [4, 5, 11, 33, 34, 37], "screenshots are asked for at the open, the sheet button, the form, 175%, high contrast, and narrow");
-  assert.match(gateDoc, /version must be \*\*0\.18\.3\*\*/);
+  assert.match(gateDoc, /version must be \*\*\d+\.\d+\.\d+\*\*/);
   assert.match(gateDoc, /restart of the Foundry server/i);
   assert.match(gateDoc, /game\.user\.name, game\.user\.isGM/);
   assert.match(gateDoc, /Force-reload BOTH windows first/);
@@ -83,13 +83,13 @@ test("GATE 17: every code step runs, in order, and the click-through steps show 
     // Step 7: the status strip and the tabs
     const model7 = hubModel(await read(), emptyState());
     assert.deepEqual([model7.status.days.value, model7.status.location.value, model7.status.location.stations, model7.status.waiting.value], ["12 free, 0 reserved", "Gate Town", "Workshops here: Gate Bench, Gate Forge", "Nothing queued"]);
-    assert.deepEqual(model7.tabs.map(t => t.text), ["Formulae", "Research (coming later)", "Commissions (coming later)", "Explore (coming later)", "Workshop (coming later)", "Compendium (coming later)"]);
-    assert.equal(hubModel(await read(), { ...emptyState(), tab: "research" }).body.text, "Coming in a later stage");
+    assert.deepEqual(model7.tabs.map(t => t.text), ["Formulae", "Research", "Commissions (coming later)", "Explore (coming later)", "Workshop (coming later)", "Compendium"]);
+    assert.equal(hubModel(await read(), { ...emptyState(), tab: "explore" }).body.text, "Coming in a later stage");
     // Step 8: the list and the chips
     const list8 = (await tabOf({})).list;
     assert.deepEqual(list8.cards.map(c => [c.name, c.pill]), [["Gate Blade", "Known"], ["Gate Vest", "Known"], ["Gate Draught", "Researching"]]);
     assert.match(list8.cards[2].progress.text, /^Progress 1 of \d+$/);
-    assert.deepEqual(list8.cards[2].openInResearch, { text: "Open in Research", disabled: true, why: "The Research tab arrives in a later stage." });
+    assert.equal(list8.cards[2].openInResearch.text, "Open in Research");
     assert.deepEqual(list8.chips.map(c => `${c.label} ${c.count}`), ["All 3", "Weapon 1", "Armor 1", "Consumable 0"]);
     for (const [filter, names] of [["weapon", ["Gate Blade"]], ["armor", ["Gate Vest"]], ["all", ["Gate Blade", "Gate Vest", "Gate Draught"]]]) assert.deepEqual((await tabOf({ filter })).list.cards.map(c => c.name), names, filter);
     assert.equal((await tabOf({ filter: "consumable" })).list.empty, "No formulae in this group.");

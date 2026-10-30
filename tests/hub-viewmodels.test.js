@@ -44,12 +44,12 @@ test("the character switcher shows only when there is more than one character", 
   assert.deepEqual(two.options.map(o => [o.id, o.current]), [["a", false], ["b", true]]);
 });
 
-test("ALL tabs are listed, but only Formulae works; the others say they are coming later", () => {
+test("ALL tabs are listed; Formulae, Research and Compendium work, the others say they are coming later", () => {
   const tabs = tabRow("formulae");
   assert.deepEqual(tabs.map(t => t.id), ["formulae", "research", "commissions", "explore", "workshop", "compendium"]);
-  assert.deepEqual(tabs.filter(t => t.working).map(t => t.id), ["formulae"]);
+  assert.deepEqual(tabs.filter(t => t.working).map(t => t.id), ["formulae", "research", "compendium"]);
   assert.ok(tabs.filter(t => !t.working).every(t => /coming later/.test(t.text)));
-  const model = hubModel(makeFacts(), makeState({ tab: "research" }));
+  const model = hubModel(makeFacts(), makeState({ tab: "explore" }));
   assert.deepEqual([model.body.kind, model.body.text], ["placeholder", "Coming in a later stage"]);
 });
 
@@ -69,7 +69,7 @@ test("a formula still being researched shows a Researching pill with progress an
   const list = formulaList(facts, makeState({ filter: "all" }));
   const card = list.cards.find(c => c.status === "researching");
   assert.deepEqual([card.name, card.pill, card.progress.value, card.progress.max, card.progress.text], ["Gate Draught", "Researching", 3, 8, "Progress 3 of 8"]);
-  assert.deepEqual([card.openInResearch.disabled, card.openInResearch.text], [true, "Open in Research"]);
+  assert.deepEqual([card.openInResearch.disabled, card.openInResearch.text, card.openInResearch.projectId], [false, "Open in Research", "p1"]);
   assert.deepEqual(formulaList(facts, makeState({ filter: "consumable" })).cards.map(c => c.name), ["Gate Draught"]);
   // research for something the character now holds is not shown twice
   const held = makeFacts({ researching: [{ id: "p1", goalName: "Gate Blade", recipeId: "gate-blade", progress: 8, threshold: 8 }] });
@@ -354,7 +354,7 @@ test("every data-action the page uses is one the window handles", () => {
   const facts = makeFacts({ characters: [{ id: "a", name: "A" }, { id: "b", name: "B" }], queue: [{ id: "q", label: "Craft", days: 1 }], preview: okPlan(), researching: [{ id: "p", goalName: "Gate Draught", recipeId: "gate-draught", progress: 1, threshold: 4 }] });
   const html = renderHubMain(hubModel(facts, makeState({ picks: FULL, showQueue: true, showDisplay: true, showSwitch: true })));
   const used = new Set([...html.matchAll(/data-action="([a-z-]+)"/g)].map(m => m[1]));
-  const handled = new Set(["switch-tab", "set-filter", "select-recipe", "pick-material", "clear-slot", "pick-station", "queue-craft", "ask-crafter", "toggle-queue", "cancel-queued", "toggle-display", "toggle-switch", "switch-character", "set-text-size", "set-theme", "set-font", "reset-display", "open-research"]);
+  const handled = new Set(["switch-tab", "set-filter", "select-recipe", "pick-material", "clear-slot", "pick-station", "queue-craft", "ask-crafter", "toggle-queue", "cancel-queued", "toggle-display", "toggle-switch", "switch-character", "set-text-size", "set-theme", "set-font", "reset-display", "open-in-research"]);
   assert.deepEqual([...used].filter(a => !handled.has(a)), []);
   assert.ok(used.size >= 15, `covered ${used.size}`);
 });
