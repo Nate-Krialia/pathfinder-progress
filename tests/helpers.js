@@ -49,3 +49,10 @@ export const FANG_RECIPE = {
 
 /** A downtime period that is open for these characters (test fakes use it so queue actions are allowed). */
 export const openDowntime = ids => ({ open: true, days: 99, startedAt: 1, participants: Object.fromEntries(ids.map(id => [id, { granted: 99, spent: 0 }])), log: [] });
+
+/**
+ * The leak scanner for CHAT (docs/11b, Stage 11a). Real Foundry hands EVERY message to EVERY client, a whisper included, so a message
+ * with a DC or a roll in it leaks whoever it is whispered to. Pass env.chat (all messages, visible or not). Returns the offenders.
+ */
+export const CHAT_LEAK = /vs DC|\bDC\b|GM only|\bnatural\b|d100|d20=|Perception total|total \d|\d\s?%|\bodds\b|\bchance\b/i;
+export const chatLeaks = messages => messages.filter(m => CHAT_LEAK.test(m.content ?? "")).map(m => m.content);

@@ -231,8 +231,8 @@ await (async () => {
   g.check("a research item is queued", Boolean(action));
   const out = await g.api.queue.resolve(smith, action.id, { chat: true });
   g.check("it resolved", out.status === "resolved", out.message);
-  const gmCard = game.messages.contents.filter(m => /GM only/.test(m.content ?? "") && /vs DC/.test(m.content ?? ""));
-  g.check("the GM got a separate whisper with the total and the DC", gmCard.length >= 1);
+  const gmLog = g.api.gm.log({ kind: "research" });
+  g.check("the GM log has the total and the DC (no chat message does: Stage 11a)", gmLog.length >= 1 && /vs DC/.test(gmLog[0].text), JSON.stringify(gmLog[0]?.text));
   return g.done();
 })();
 ```
@@ -243,13 +243,16 @@ await (async () => {
 // [Player] every message this window can see about the research: degree words and progress, no DC, no total.
 await (async () => {
   const p = globalThis.__p4 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
-  const mine = game.messages.contents.filter(m => /researches/.test(m.content ?? ""));
+  const mine = game.messages.contents.filter(m => m.visible && /researches/.test(m.content ?? ""));
   p.check("you were told about the research", mine.length >= 1, mine.length);
   p.check("it was a whisper, not a public message", mine.every(m => (m.whisper ?? []).length > 0), JSON.stringify(mine.map(m => m.whisper)));
   p.check("it has the degree words and the progress", mine.some(m => /Day 1: (Critical )?(Success|Failure)/.test(m.content) && /Progress: \d+\/\d+|has learned/.test(m.content)));
   p.check("it has no DC, no roll total, no percentage", mine.every(m => !/\bDC\b|vs |\d+%/.test(m.content)), mine.map(m => m.content).join(" | "));
-  const gmOnly = game.messages.contents.filter(m => /GM only/.test(m.content ?? ""));
-  p.check("and none of the GM-only whispers reached this window", gmOnly.length === 0, gmOnly.length);
+  // Foundry hands EVERY message to EVERY client, a whisper included (it is only hidden from the chat log). So look at all of them.
+  const all = game.messages.contents;
+  const leaks = all.filter(m => /vs DC|\bDC\b|GM only|natural \d|d100|d20=|Perception total/.test(m.content ?? ""));
+  p.check("no message at all, visible or not, carries a DC or a roll total", leaks.length === 0, leaks.map(m => m.content).join(" | "));
+  p.check("and none of the GM-only whispers exists", all.filter(m => /GM only/.test(m.content ?? "")).length === 0);
   return p.done();
 })();
 ```

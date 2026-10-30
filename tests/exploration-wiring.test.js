@@ -12,10 +12,11 @@ import * as gathering from "../scripts/gathering/store.js";
 import * as queue from "../scripts/queue/store.js";
 import * as audit from "../scripts/audit/store.js";
 import * as research from "../scripts/research/store.js";
+import * as gmLog from "../scripts/gm-log.js";
 import { _resetSocketForTests, ensureSocket, installSocketHooks, socketStatus } from "../scripts/socket.js";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { asPage, openDowntime, seedRecords } from "./helpers.js";
+import { asPage, chatLeaks, openDowntime, seedRecords } from "./helpers.js";
 
 const M = "pathfinder-progress";
 const registry = loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -417,10 +418,12 @@ test("resolving PREPARES the scene: HIDDEN nodes appear on new tokens at anchor 
 
 test("NOTHING LEAKS to players: no public chat, no scene flag, no result on the player's sheet", async () => {
   const { bb, scene, env } = await world({ anchors: 10 });
+  gmLog.clear();
   await submitExplore(bb, 2, { forceCombat: true });
   await queue.resolveAll(api, { degree: "criticalSuccess" });
-  assert.ok(env.chat.length >= 1);
-  for (const message of env.chat) assert.deepEqual(message.whisper, ["gm1"], "every expedition message is whispered to the GM only");
+  assert.deepEqual(env.chat, [], "an expedition posts NO chat message at all (docs/11b: a whisper still reaches every client)");
+  assert.equal(gmLog.list({ kind: "explore" }).length, 1, "the GM gets it in the GM log");
+  assert.deepEqual(chatLeaks(env.chat), []);
   assert.deepEqual(Object.keys(scene.flags[M]), ["sceneTags"], "the scene's flags hold only its tag");
   // The Compendium may now hold the region the character explored (a fact they know), and nothing else: no node, no encounter, no odds.
   assert.deepEqual(Object.keys(bb.flags).sort(), ["compendium", "downtimeDays", "pendingActions"], "the player's sheet holds no results");
@@ -456,14 +459,15 @@ test("the encounter is rolled ONCE per expedition: forced is certain; otherwise 
   assert.equal(state(scene).encounter.active, false, "one roll for the whole trip");
 });
 
-test("each day is its own hidden roll: three days, three checks, and the GM whisper lists them", async () => {
-  const { bb, env } = await world({ anchors: 20 });
+test("each day is its own hidden roll: three days, three checks, and the GM log lists them", async () => {
+  const { bb } = await world({ anchors: 20 });
+  gmLog.clear();
   await submitExplore(bb, 3);
   bb.rolls.push(roll(2, 22, 14), roll(1, 10, 2), roll(3, 30, 20));
   const { results } = await queue.resolveAll(api);
   assert.equal(results[0].status, "resolved");
   assert.equal(bb.rolls.length, 0, "all three rolls were used");
-  const gm = env.chat.at(-1).content;
+  const gm = gmLog.list({ kind: "explore" })[0].text;
   assert.match(gm, /day 1: natural 14, total 22 vs DC 18 = success; day 2: natural 2, total 10 vs DC 18 = failure; day 3: natural 20, total 30 vs DC 18 = critical success/);
   assert.match(gm, /GM only/);
   assert.match(gm, /Scene prepared, not launched/);
@@ -498,17 +502,19 @@ test("a tagged scene with no anchors AT ALL is an error row that names the scene
 });
 
 test("FEWER free anchors than nodes: only what fits is placed, the days are still spent, and the GM log says so", async () => {
-  const { bb, scene, env } = await world({ anchors: 1 });
+  const { bb, scene } = await world({ anchors: 1 });
+  gmLog.clear();
   await submitExplore(bb, 2);
   const { results } = await queue.resolveAll(api, { degree: "criticalSuccess" });
   assert.match(results[0].message, /1 hidden node\(s\) placed \(\d+ found, only 1 free anchor\(s\): \d+ not placed\)/);
   assert.equal(explored(scene).length, 1);
   assert.equal(bb.getFlag(M, "downtimeDays"), 4);
-  assert.match(env.chat.at(-1).content, /were found but only 1 free anchor\(s\) were left, so \d+ were not placed/);
+  assert.match(gmLog.list({ kind: "explore" })[0].text, /were found but only 1 free anchor\(s\) were left, so \d+ were not placed/);
 });
 
 test("EVERY anchor already occupied: nothing is placed, the expedition still resolves and the GM is told", async () => {
-  const { bb, scene, env } = await world({ anchors: 2 });
+  const { bb, scene } = await world({ anchors: 2 });
+  gmLog.clear();
   await submitExplore(bb, 2);
   await queue.resolveAll(api, { degree: "criticalSuccess", chat: false });
   assert.equal(anchorsOf(scene).filter(t => !t.getFlag(M, "node").occupiedBy).length, 0);
@@ -518,11 +524,12 @@ test("EVERY anchor already occupied: nothing is placed, the expedition still res
   assert.equal(results[0].status, "resolved");
   assert.equal(explored(scene).length, before, "no extra nodes");
   assert.match(results[0].message, /0 hidden node\(s\) placed \(\d+ found, only 0 free anchor\(s\)/);
-  assert.match(env.chat.at(-1).content, /so \d+ were not placed/);
+  assert.match(gmLog.list({ kind: "explore" })[0].text, /so \d+ were not placed/);
 });
 
 test("PREPARING THE SAME SCENE TWICE only uses anchors that are still free and counts the visits", async () => {
-  const { bb, scene, env } = await world({ anchors: 12, days: 8 });
+  const { bb, scene } = await world({ anchors: 12, days: 8 });
+  gmLog.clear();
   await submitExplore(bb);
   await queue.resolveAll(api, { degree: "failure", chat: false });
   const first = explored(scene).map(t => t.id);
@@ -534,7 +541,7 @@ test("PREPARING THE SAME SCENE TWICE only uses anchors that are still free and c
   const anchorIdsUsed = explored(scene).map(t => t.getFlag(M, "node").anchorId);
   assert.equal(new Set(anchorIdsUsed).size, anchorIdsUsed.length, "no anchor was used twice");
   assert.equal(exploration.scenesFor(api, "oak-wood")[0].timesPrepared, 2);
-  assert.match(env.chat.at(-1).content, /prepared 1 time\(s\) before/);
+  assert.match(gmLog.list({ kind: "explore" })[0].text, /prepared 1 time\(s\) before/);
 });
 
 test("the expedition history keeps only the last 10", async () => {
@@ -561,11 +568,11 @@ test("SEARCH spots only the hidden nodes whose Perception DC the GM-side roll be
   assert.deepEqual(state(scene).revealed.map(r => [r.name, r.by]), [["Herb Patch", "Bottlespeaker"]]);
   const known = bb.getFlag(M, "knownNodes");
   assert.deepEqual([known.length, known[0].sceneId, known[0].nodeType], [1, scene.id, "herb"]);
-  const [forPlayer, forGm] = env.chat;
-  assert.deepEqual(forPlayer.whisper, ["u-player"]);
-  assert.equal(forPlayer.content, "<p>You search the area. You spot: Herb Patch.</p>");
-  assert.deepEqual(forGm.whisper, ["gm1"]);
-  assert.match(forGm.content, /Perception total 15 \(natural 9\)\. Found 1 of 3 hidden node\(s\): Herb Patch \(DC 14\)/);
+  assert.equal(env.chat.length, 1, "only the player's own line is a chat message");
+  assert.deepEqual(env.chat[0].whisper, ["u-player"]);
+  assert.equal(env.chat[0].content, "<p>You search the area. You spot: Herb Patch.</p>");
+  assert.deepEqual(chatLeaks(env.chat), [], "the search leaves no Perception total or DC in any message");
+  assert.match(gmLog.list({ kind: "search" })[0].text, /Perception total 15 \(natural 9\)\. Found 1 of 3 hidden node\(s\): Herb Patch \(DC 14\)/);
 });
 
 test("the player's words are IDENTICAL whether the search failed or nothing was there, and never hint at what is left", async () => {

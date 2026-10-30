@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { loadDefinitions } from "../scripts/data/validate.js";
-import { asPage, seedRecords, UUID, UUID_2 } from "./helpers.js";
+import { asPage, chatLeaks, seedRecords, UUID, UUID_2 } from "./helpers.js";
+import * as gmLog from "../scripts/gm-log.js";
 import { GENERIC_FAILURE, Refusal, guard, refusal, unwrap } from "../scripts/queue/relay.js";
 
 const M = "pathfinder-progress";
@@ -420,12 +421,14 @@ test("resolving a success CONVERTS the escrow: gold, days and materials each mov
   assert.deepEqual(api.audit.scan(), [], "the ledger agrees: the days were spent through the audit commit");
 
   // Players are told in plain words, by whisper; the roll detail goes to the GM only.
-  assert.ok(env.chat.length >= 2 && env.chat.every(m => Array.isArray(m.whisper) && m.whisper.length), "no public chat message");
+  assert.equal(env.chat.length, 1, "one message, for the player and the GM; the roll detail is in the GM log, not in a whisper");
+  assert.ok(env.chat.every(m => Array.isArray(m.whisper) && m.whisper.length), "no public chat message");
   const toPlayer = env.chat.find(m => m.whisper.includes("u-ann"));
   assert.match(toPlayer.content, /crafts <em>Spider Fang Dagger<\/em>: <strong>Success<\/strong>/);
   assert.match(toPlayer.content, /Station fee: 5 gp \(paid when you queued it\)/);
   assert.doesNotMatch(toPlayer.content, /d100|natural|DC \d|roll/i);
-  assert.ok(env.chat.some(m => m.whisper.length === 1 && m.whisper[0] === "gm1" && /GM only/.test(m.content)));
+  assert.deepEqual(chatLeaks(env.chat), [], "no message has a loss roll, a chance or a DC");
+  assert.ok(gmLog.list({ kind: "craft" }).some(e => e.actorId === w.ann.id && e.detail.recipeId));
 });
 
 test("a FAILURE still spends the fee and the days; the roll only decides the item and the per-unit material loss", async () => {
@@ -767,6 +770,8 @@ test("resolving a gather rolls the yield, adds the materials, spends the claimed
   const toPlayer = env.chat.find(m => m.whisper.includes("u-ann"));
   assert.match(toPlayer.content, /gathers from <em>Herb Patch<\/em>/);
   assert.doesNotMatch(toPlayer.content, /d20|DC|rung|natural/i);
+  assert.deepEqual(chatLeaks(env.chat), [], "no message has a rung roll or a DC");
+  assert.ok(gmLog.list({ kind: "gather" }).some(e => /vs DC|hidden rung rolls none/.test(e.text)), "the GM log has them");
   assert.deepEqual(api.audit.scan(), []);
   void w.bobUser;
 });

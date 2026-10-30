@@ -9,7 +9,9 @@
 import { MODULE_ID, RESEARCH_KEYS as K } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { commit, logWorldEvent } from "../audit/store.js";
-import { gmIds, resultRecipients, whisper } from "../chat.js";
+import { resultRecipients } from "../chat.js";
+import * as gmLog from "../gm-log.js";
+import { plainText } from "../gm-log.js";
 import { playerProject } from "../difficulty.js";
 import { emit } from "../events.js";
 import { noteOverride, recordSpent } from "../downtime/store.js";
@@ -236,13 +238,18 @@ export function planUpdate(plan) {
 
 /**
  * The summary of a planned run (call after it is committed): a WHISPER to the owners and the GM with degree words only, and a
- * separate GM-only whisper with the totals and the DC. Nothing public, and no DC or total for a player (docs/11b).
+ * line in the GM log (gm-log.js) with the totals and the DC. No chat message ever carries a DC or a total (docs/11b).
  */
 export async function postResearchChat(actor, plan) {
   const base = { actorName: actor.name, project: plan.result.project, skillName: adapter.skillLabel(plan.skill), results: plan.result.results, completed: plan.result.completed };
   await postChat(actor, formatResearchSummary(base));
-  const gm = gmIds();
-  if (gm.length && plan.result.results.some(r => r.total !== null)) await whisper(gm, `<p>GM only:<br>${formatResearchSummary({ ...base, forGM: true })}</p>`);
+  if (plan.result.results.some(r => r.total !== null)) {
+    gmLog.record({
+      kind: "research", actorId: actor.id, actorName: actor.name,
+      text: plainText(formatResearchSummary({ ...base, forGM: true })),
+      detail: { goal: plan.result.project.goalName, dc: plan.result.project.dc, results: plan.result.results.map(r => ({ day: r.day, degree: r.degree, total: r.total, delta: r.delta })) }
+    });
+  }
 }
 
 /**

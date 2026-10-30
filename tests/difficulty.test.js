@@ -6,27 +6,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DAGGER, M, SEL, as, craft, env, getApi, loudly, makeActor, resolve, world } from "./fake-world.js";
+import * as gmLog from "../scripts/gm-log.js";
+import { chatLeaks } from "./helpers.js";
 import { HIDDEN_FIELDS, playerProject, withoutDifficulty } from "../scripts/difficulty.js";
+import { BAD, findings } from "./scan.js";
 
 const api = () => getApi();
-const BAD = /\bDC\b|\bodds\b|\d\s?%|\bchances?\b|\bdifficult|\bexpected\b|\bexpect ~|\bpercent\b/i;
-const ITEM_RULES = new Set(["effects", "roles"]);   // a learned effect is the ITEM's own rules text (a save DC on a venom is the item's, not the roll's)
-
-/** Everything wrong in a value: a hidden field name at any depth, or a string that talks about DCs, odds, percentages or difficulty. */
-export function findings(value, path = "$") {
-  if (typeof value === "string") return BAD.test(value) ? [`${path}: "${value}"`] : [];
-  if (Array.isArray(value)) return value.flatMap((v, i) => findings(v, `${path}[${i}]`));
-  if (value instanceof Map) return findings([...value.entries()], path);
-  if (value instanceof Set) return findings([...value], path);
-  if (value && typeof value === "object") {
-    return Object.entries(value).flatMap(([k, v]) => [
-      ...(HIDDEN_FIELDS.includes(k) ? [`${path}.${k}: hidden field`] : []),
-      ...(ITEM_RULES.has(k) ? [] : findings(v, `${path}.${k}`))
-    ]);
-  }
-  return [];
-}
-
 const roll = (degree, total, natural) => ({ options: { degreeOfSuccess: degree }, total, dice: [{ faces: 20, results: [{ result: natural, active: true }] }] });
 
 async function playerWorld(options = {}) {
@@ -139,8 +124,9 @@ test("EVERYTHING A PLAYER CAN CALL: the return values carry no hidden field and 
   assert.ok(Object.keys(seen).length >= 20, "the walk covered the surfaces");
 });
 
-test("EVERYTHING A PLAYER IS SENT: chat to a player never has a DC or a total; the whisper that does goes to the GM alone", async () => {
+test("EVERYTHING A PLAYER IS SENT: NO chat message has a DC or a total, whoever it is whispered to; the GM reads them from the GM log", async () => {
   const w = await playerWorld();
+  gmLog.clear();
   const project = await api().startProject({ actor: w.ann, recipe: "longsword-basic" });
   await api().grantDays(w.ann, 10);
   w.ann.rolls.push(roll(3, 31, 19), roll(2, 22, 11));
@@ -149,14 +135,18 @@ test("EVERYTHING A PLAYER IS SENT: chat to a player never has a DC or a total; t
   await api().queue.resolve(w.ann, craftAction.id, { degree: "success", chat: true });
   const gatherAction = await as(w.annUser, () => api().queue.submit(w.ann, "gather", { sceneId: w.table.id, tokenId: w.herb.id, skill: "survival" }));
   await api().queue.resolve(w.ann, gatherAction.id, { degree: "success", chat: true });
-  assert.ok(env.chat.length >= 5);
+  assert.equal(env.chat.length, 3, "research, craft and gather: one player-facing line each, nothing else");
   for (const message of env.chat) {
     assert.ok(Array.isArray(message.whisper) && message.whisper.length > 0, "nothing is posted publicly");
-    const toPlayer = message.whisper.some(id => id !== w.gm.id && id !== "gm");
-    if (/GM only/.test(message.content)) assert.ok(!toPlayer, `a GM-only whisper went to a player: ${message.content}`);
-    else assert.deepEqual(findings(message.content), [], `to a player: ${message.content}`);
+    assert.doesNotMatch(message.content, /GM only/, "no GM-only message exists any more");
+    assert.deepEqual(findings(message.content), [], `in chat: ${message.content}`);
   }
-  assert.ok(env.chat.some(m => /GM only/.test(m.content) && /vs DC/.test(m.content)), "and the GM still gets the totals and the DC");
+  assert.deepEqual(chatLeaks(env.chat), [], "scanned over ALL messages, whoever they are whispered to");
+  const log = api().gm.log();
+  assert.ok(log.some(e => e.kind === "research" && /vs DC/.test(e.text)), "the GM still gets the totals and the DC (research)");
+  assert.ok(log.some(e => e.kind === "craft"), "and the craft detail");
+  assert.ok(log.some(e => e.kind === "gather" && /vs DC/.test(e.text)), "and the gather rung rolls");
+  assert.throws(() => as(w.annUser, () => api().gm.log()), /GM only/);
 });
 
 test("AUDIT: the ledger and the mismatch rows carry project DCs, so scan, accept and ledger are GM-only", async () => {

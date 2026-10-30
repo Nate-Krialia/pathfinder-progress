@@ -28,6 +28,11 @@ A player client reads **no definition pack** (both packs are hidden from players
 - **Messages.** A character that does not hold a formula: "`<name>` does not know this formula." (whether or not the recipe exists). Held but the recipe exists nowhere (the GM says so): "holds an orphaned formula for this ...". Not loaded yet / no GM: "Your recipes are still loading ..." / "The GM isn't connected ...". An explore submit for a region not in play: refused plainly after one fresh ask to the GM. Anything a player client cannot check is relayed to the GM, whose validation is authoritative (craft, gather, share, build, upgrade and design all already are).
 - **GM clients are unchanged**: they still load every pack, and `api.definitions.refresh()` on a GM returns at once.
 
+## The Downtime Hub and the GM log (Stage 11a, v0.18.0)
+
+- `scripts/hub/`: `viewmodels.js` (every rule, pure), `strings.js` (every word), `render.js` (pure HTML), `facts.js` (the only Foundry-bound reader, through the player APIs), `live.js` (what redraws the window), `app.js` (the ApplicationV2 window, built lazily), `entry.js` (scene button and sheet header button). Client settings `hubWindow` and `hubDisplay` hold a player's size and display choices.
+- No chat message carries a DC or a roll total. Those go to `scripts/gm-log.js` (memory only, GM client), read with `api.gm.log()` (GM only).
+
 ## Offline queue (players submit any time)
 Sockets only reach online clients, so the queue lives in data players can write:
 1. Each player's actor has a `pendingActions` flag.

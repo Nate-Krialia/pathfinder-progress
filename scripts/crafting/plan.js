@@ -10,7 +10,7 @@ import { CRAFTING } from "../config.js";
 import { baseRoleFor, parseTier, slotRoles } from "../data/roles.js";
 import { resolveMaterialEffect } from "../data/resolver.js";
 import { isUuid } from "../data/outputRefs.js";
-import { feeForTier } from "../stations/fees.js";
+import { feeForStation } from "../stations/fees.js";
 
 const emptyDescription = () => ({
   baseTier: null,
@@ -123,7 +123,7 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
 
   if (mechanical) {
     if (errors.length) return { ok: false, errors };
-    return { ok: true, plan: { recipeId: recipe.id, recipeName: recipe.name, uses, station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null, fee: station ? (station.source === "party" ? 0 : feeForTier(station.tier)) : null, provenance: { recipeId: recipe.id, stationId: station?.id ?? null, materials: uses.map(u => ({ slot: u.slot, materialId: u.materialId, units: u.units })) } } };
+    return { ok: true, plan: { recipeId: recipe.id, recipeName: recipe.name, uses, station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null, fee: station ? feeForStation(station) : null, provenance: { recipeId: recipe.id, stationId: station?.id ?? null, materials: uses.map(u => ({ slot: u.slot, materialId: u.materialId, units: u.units })) } } };
   }
 
   // Pick the output item.
@@ -156,7 +156,7 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       description,
       station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null,
       // A workshop the party built charges no station fee; every other station charges its tier's fee.
-      fee: station ? (station.source === "party" ? 0 : feeForTier(station.tier)) : null,
+      fee: station ? feeForStation(station) : null,
       provenance: {
         recipeId: recipe.id,
         stationId: station?.id ?? null,

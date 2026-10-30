@@ -2,7 +2,7 @@
   "id": "pathfinder-progress",
   "title": "Pathfinder Progress",
   "description": "Use-based skill mastery, gathering, and crafting for Pathfinder 2e.",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "compatibility": {
     "minimum": "14",
     "verified": "14.369"
@@ -32,7 +32,8 @@
   ],
   "socket": true,
   "styles": [
-    "styles/review.css"
+    "styles/review.css",
+    "styles/hub.css"
   ],
   "authors": [
     {

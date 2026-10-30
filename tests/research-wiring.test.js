@@ -14,8 +14,9 @@ import * as store from "../scripts/research/store.js";
 import { previewCraft } from "../scripts/crafting/craft.js";
 import { collectSources } from "../scripts/data/loader.js";
 import { PACKS } from "../scripts/config.js";
+import * as gmLog from "../scripts/gm-log.js";
 import { SNAPSHOT_KEYS } from "../scripts/research/formulas.js";
-import { asPage, openDowntime, seedRecords, UUID, UUID_2 } from "./helpers.js";
+import { asPage, chatLeaks, openDowntime, seedRecords, UUID, UUID_2 } from "./helpers.js";
 
 const MODULE = "pathfinder-progress";
 const registry = loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -230,6 +231,7 @@ test("skills: several allowed means one must be named; a wrong one is refused; o
 
 test("a real roll goes through PF2e without its own chat card, and the degree and total are used", async () => {
   const { env, actor, api } = await started();
+  gmLog.clear();
   actor.rolls.push(roll(2, 15, 16), roll(3, 25, 20));
   const result = await store.research({ actor, project: DAGGER, days: 2 }, api);
   assert.deepEqual(actor.rollParams.map(p => [p.dc.value, p.skipDialog, p.createMessage]), [[14, true, false], [14, true, false]]);
@@ -239,10 +241,11 @@ test("a real roll goes through PF2e without its own chat card, and the degree an
   assert.match(env.chat[0].content, /Day 2: Critical Success \(\+2\)/);
   assert.doesNotMatch(env.chat[0].content, /\bDC\b|15|25/);
   assert.ok(Array.isArray(env.chat[0].whisper) && env.chat[0].whisper.length > 0, "never public");
-  assert.match(env.chat[1].content, /GM only/);
-  assert.match(env.chat[1].content, /Day 1: 15 vs DC 14: Success \(\+1\)/);
-  assert.match(env.chat[1].content, /Day 2: 25 vs DC 14: Critical Success \(\+2\)/);
-  assert.deepEqual(env.chat[1].whisper, ["gm"]);
+  assert.equal(env.chat.length, 1, "no second message: a GM-only whisper would still reach every client");
+  assert.deepEqual(chatLeaks(env.chat), []);
+  const [entry] = gmLog.list({ kind: "research" });
+  assert.match(entry.text, /Day 1: 15 vs DC 14: Success \(\+1\)/);
+  assert.match(entry.text, /Day 2: 25 vs DC 14: Critical Success \(\+2\)/);
 });
 
 test("a roll PF2e returns in an unreadable shape fails loudly and changes nothing", async () => {

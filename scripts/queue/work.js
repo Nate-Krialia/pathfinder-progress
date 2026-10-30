@@ -36,6 +36,7 @@ import { noteCrafted, noteGather } from "../compendium/store.js";
 import { submitShare } from "../compendium/share.js";
 import { submitBuild } from "../workshop/build.js";
 import { stationReductions } from "../workshop/rules.js";
+import * as gmLog from "../gm-log.js";
 import { GENERIC_FAILURE, refusal, unwrap } from "./relay.js";
 import { appendAction, assertOwner, callerOf, flagKey, gmIds, giveBack, note, ownerIds, pendingOf, recordReturned, takeEscrow, undoAll, undoThenThrow, whisper } from "./common.js";
 
@@ -309,7 +310,11 @@ export async function resolveCraft(api, actor, action, pending, { chat, degree: 
   if (chat) {
     const summary = formatSummary({ crafterName: actor.name, plan, outcome, itemName: created?.name, feeText: `Station fee: ${gpText(escrow.feeCopper)} (paid when you queued it).` });
     await whisper([...new Set([...ownerIds(actor), ...gmIds()])], `<p>${summary}<br>Days spent: ${action.daysReserved}.</p>`);
-    await whisper(gmIds(), `<p>GM only: ${actor.name}'s ${recipe.name}: ${outcome.degree}${outcome.lossRolls.length ? `; material loss rolls ${outcome.lossRolls.map(r => `${r.materialId} d100=${r.roll} vs ${r.chance}%${r.lost ? " lost" : " kept"}`).join(", ")}` : ""}.</p>`);
+    gmLog.record({
+      kind: "craft", actorId: actor.id, actorName: actor.name,
+      text: `${actor.name}'s ${recipe.name}: ${outcome.degree}${outcome.lossRolls.length ? `; material loss rolls ${outcome.lossRolls.map(r => `${r.materialId} d100=${r.roll} vs ${r.chance}%${r.lost ? " lost" : " kept"}`).join(", ")}` : ""}.`,
+      detail: { recipeId: recipe.id, degree: outcome.degree, made: outcome.made, lossRolls: outcome.lossRolls }
+    });
   }
   return {
     status: "resolved", daysSpent: action.daysReserved,
@@ -373,7 +378,11 @@ export async function resolveGatherAction(api, actor, action, pending, { chat, d
     + `${next.state === "depleted" ? `; the node is depleted${gone ? " and its token was deleted" : ""}` : ""}`);
   if (chat) {
     await whisper([...new Set([...ownerIds(actor), ...gmIds()])], `<p>${formatGatherSummary({ gathererName: actor.name, node, skillName: adapter.skillLabel(picked.skill), result, materialNames })}</p>`);
-    await whisper(gmIds(), `<p>GM only: ${actor.name} at ${token.name}: hidden rung rolls ${result.hidden.length ? result.hidden.map(h => `${h.materialId} d20=${h.roll}+${h.modifier} vs DC ${h.dc}${h.success ? " found" : ""}`).join(", ") : "none"}.</p>`);
+    gmLog.record({
+      kind: "gather", actorId: actor.id, actorName: actor.name,
+      text: `${actor.name} at ${token.name}: hidden rung rolls ${result.hidden.length ? result.hidden.map(h => `${h.materialId} d20=${h.roll}+${h.modifier} vs DC ${h.dc}${h.success ? " found" : ""}`).join(", ") : "none"}.`,
+      detail: { node: token.name, hidden: result.hidden }
+    });
   }
   return {
     status: "resolved", daysSpent: 0,

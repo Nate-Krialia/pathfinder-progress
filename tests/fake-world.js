@@ -111,7 +111,9 @@ function makeActor(name, { copper = 0, owners = [] } = {}) {
       for (const [path, value] of Object.entries(data)) {
         if (path.startsWith(`flags.${M}.`)) {
           const key = path.slice(`flags.${M}.`.length);
-          if (value instanceof FakeForcedDeletion) delete flags[key]; else flags[key] = clone(value);
+          // Real Foundry takes a deep path ("flags.<module>.compendium.materials.x"): the fake does too (a plain key still replaces the flag).
+          if (key.includes(".")) applyPath(flags, key, value);
+          else if (value instanceof FakeForcedDeletion) delete flags[key]; else flags[key] = clone(value);
         } else applyPath(actor, path, value);
       }
     },
@@ -200,8 +202,13 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
     users: Object.assign(collection([gm, annUser, bobUser, testUser]), { activeGM: gm }), actors: collection([]), scenes: collection([]), combats: collection([]),
     packs: { get: id => (id === "pf2e.equipment-srd" ? { getIndex: async () => [{ name: "Dagger", _id: "AAAAAAAAAAAAAAAA" }] } : undefined), filter: () => [] }, system: { id: "pf2e", version: "8.6.1" }, version: "14.369", i18n: { localize: t => t },
     modules: { get: id => modules.get(id) ?? (modules.set(id, { id, active: true }), modules.get(id)) },
-    // The chat messages the CURRENT user can see: public ones and whispers addressed to them (a GM sees all), like game.messages in Foundry.
-    messages: { get contents() { return env.chat.filter(m => game.user.isGM || !m.whisper || m.whisper.includes(game.user.id)); } },
+    // Like game.messages in real Foundry (verified in 14.369): EVERY message is delivered to EVERY client, a whisper included. `visible` is
+    // what the chat log shows this user (public ones and whispers addressed to them; a GM sees all); the rest is still readable data.
+    messages: {
+      get contents() {
+        return env.chat.map(m => Object.defineProperty({ ...m }, "visible", { enumerable: false, get: () => game.user.isGM || !m.whisper || !m.whisper.length || m.whisper.includes(game.user.id) }));
+      }
+    },
     settings: { register() {}, get: (s, k) => clone(env.values[k]), set: async (s, k, v) => { await latency(); tick(`settings.set ${k}`); env.values[k] = clone(v); } }
   };
   globalThis.foundry = {

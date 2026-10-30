@@ -1,0 +1,92 @@
+/**
+ * Where the Hub's facts come from (Stage 11a). The ONLY Foundry-bound reader: it calls the existing player APIs (formulasFor, projectInfo,
+ * stationsFor, previewCraft, compendium.knownEffect, queue.list, downtime.state) and the adapter for the bag and the purse. It adds no
+ * data to the player copy and invents nothing; the view-models (viewmodels.js) decide what any of it means.
+ */
+import * as adapter from "../adapter/pf2e.js";
+import { MODULE_ID, STATION_KEYS } from "../config.js";
+import { feeForStation } from "../stations/fees.js";
+import { S } from "./strings.js";
+import { allSlotsPicked, learnedKey, stationChoices } from "./viewmodels.js";
+
+/** The characters this user owns at Owner level (a GM owns every character, so a GM sees them all). */
+export const ownedCharacters = () => [...game.actors].filter(a => a.type === "character" && a.testUserPermission(game.user, "OWNER"));
+
+/** The character the Hub opens for: the user's assigned character if they own it, else the first they own. */
+export function defaultCharacter() {
+  const owned = ownedCharacters();
+  const mine = game.user.character;
+  return owned.find(a => a.id === mine?.id) ?? owned[0] ?? null;
+}
+
+const inventoryOf = actor => {
+  const units = {};
+  for (const stack of adapter.getMaterialStacks(actor)) units[stack.materialId] = (units[stack.materialId] ?? 0) + stack.quantity;
+  return units;
+};
+
+/** Safe reads: one broken source never blanks the whole window (it logs and the part reads as empty). */
+const attempt = (what, fn, fallback) => {
+  try { return fn(); } catch (error) { console.error(`${MODULE_ID} | the Hub could not read ${what}`, error); return fallback; }
+};
+
+export function readFacts(api, actor, state) {
+  const characters = ownedCharacters().map(a => ({ id: a.id, name: a.name }));
+  if (!actor) return { actor: null, characters, queue: [], formulas: [], researching: [], recipes: {}, materials: {}, inventory: {}, met: [], learned: {}, stations: [], preview: null, days: { free: 0, reserved: 0 }, gp: 0, downtime: { open: false, participant: false }, location: { name: null, stations: [] }, definitions: "ready" };
+
+  const defs = api.definitions;
+  const period = attempt("the downtime period", () => api.downtime.state(), { open: false, participants: {} });
+  const rows = attempt("the queue", () => api.queue.list([actor]), []);
+  const queue = rows.map(r => ({ id: r.action.id, label: r.label, days: r.action.daysReserved ?? 0 }));
+  const reserved = rows.reduce((sum, r) => sum + (r.action.daysReserved ?? 0), 0);
+
+  const formulas = attempt("the formulae", () => api.formulasFor(actor), []).filter(f => f.status !== "invalid").map(f => ({ recipeId: f.recipeId, name: f.name, access: f.access }));
+  const researching = attempt("the research", () => api.projectInfo(actor), []).filter(p => p.status === "active").map(p => {
+    const full = attempt("a project", () => api.projectInfo(actor, p.id).project, null);
+    return full?.outcome?.type === "unlockFormula" ? { id: p.id, goalName: p.goalName, recipeId: full.outcome.recipeId ?? null, progress: p.progress, threshold: p.threshold } : null;
+  }).filter(Boolean);
+
+  const recipes = {};
+  for (const f of [...formulas, ...researching]) {
+    const recipe = f.recipeId ? defs?.recipe.get(f.recipeId) : null;
+    if (recipe) recipes[recipe.id] = recipe;
+  }
+  const inventory = attempt("the bag", () => inventoryOf(actor), {});
+  const materials = {};
+  for (const id of Object.keys(inventory)) { const material = defs?.material.get(id); if (material) materials[id] = material; }
+  const met = Object.keys(materials).filter(id => attempt("the Compendium", () => api.compendium.hasMaterial(actor, id), false));
+
+  const town = attempt("the party location", () => game.settings.get(MODULE_ID, STATION_KEYS.partyLocationSetting), "") || null;
+  const reachable = attempt("the workshops", () => api.stationsFor(actor), []).filter(s => s.reachable);
+
+  const recipe = state.recipeId ? recipes[state.recipeId] : null;
+  const held = formulas.some(f => f.recipeId === state.recipeId);
+  const learned = {};
+  let stations = [];
+  let preview = null;
+  if (recipe && held) {
+    stations = attempt("the workshops for this formula", () => api.stationsFor(actor, recipe.id), []).map(s => ({
+      id: s.id, name: s.name, tier: s.tier, where: s.where, reachable: s.reachable, usable: s.usable, fee: attempt("a station fee", () => feeForStation(s), 0)
+    }));
+    for (const slot of recipe.slots) {
+      for (const id of met) {
+        if ((inventory[id] ?? 0) > 0 && materials[id].tier >= slot.tierFloor) learned[learnedKey(recipe.id, slot.name, id)] = attempt("what you have learned", () => api.compendium.knownEffect(actor, recipe.id, slot.name, id), { known: false });
+      }
+    }
+    if (allSlotsPicked(recipe, state.picks)) {
+      // Always name the workshop (the cheapest unless the player chose one): with several usable, previewCraft refuses to guess.
+      const stationId = stationChoices(stations, state.stationId).chosenId ?? undefined;
+      preview = attempt("the craft preview", () => api.previewCraft(actor, recipe.id, state.picks, stationId), null);
+    }
+  }
+
+  return {
+    actor: { id: actor.id, name: actor.name }, characters,
+    downtime: { open: Boolean(period.open), participant: Boolean(period.participants?.[actor.id]) },
+    days: { free: attempt("the days", () => api.days(actor), 0), reserved },
+    gp: attempt("the purse", () => adapter.getCopper(actor) / 100, 0),
+    location: { name: town ? (defs?.town.get(town)?.name ?? S.locationLoading) : null, stations: reachable.map(s => s.name) },
+    queue, formulas, researching, recipes, materials, inventory, met, learned, stations, preview,
+    definitions: api.definitionsStatus().status === "ready" ? "ready" : "loading"
+  };
+}

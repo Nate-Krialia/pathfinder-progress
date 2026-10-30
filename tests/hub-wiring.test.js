@@ -1,0 +1,266 @@
+/** The Downtime Hub against the REAL module in the fake Foundry (Stage 11a): the facts a player's window reads, its click handlers, live updates and entry points. */
+import test from "node:test";
+import assert from "node:assert/strict";
+import { DAGGER, SEL, as, env, fireHookAs, getApi, world } from "./fake-world.js";
+import { HUB } from "../scripts/config.js";
+import { readFacts, ownedCharacters, defaultCharacter } from "../scripts/hub/facts.js";
+import { build, openHub, savedPosition } from "../scripts/hub/app.js";
+import { actorEvent, installHubHooks, isRelevant, WATCHED_ACTOR_FLAGS, WATCHED_SETTINGS } from "../scripts/hub/live.js";
+import { installEntryPoints, mayOpenFor } from "../scripts/hub/entry.js";
+import { emptyState, formulaeTab, hubModel, pickMaterial, selectRecipe } from "../scripts/hub/viewmodels.js";
+import { renderHubMain } from "../scripts/hub/render.js";
+import { findings } from "./scan.js";
+import * as events from "../scripts/events.js";
+
+const api = () => getApi();
+const M = "pathfinder-progress";
+
+async function playerWorld(options = {}) {
+  const w = await world({ perClientDefinitions: true, downtime: 12, iron: 5, fang: 5, copper: 20000, ...options });
+  await as(w.annUser, () => api().definitions.refresh());
+  return w;
+}
+const facts = (w, state = {}) => as(w.annUser, () => readFacts(api(), w.ann, { ...emptyState(), ...state }));
+
+test("FACTS: a player's window reads the formulae, bag, days, queue and workshops through the player APIs only", async () => {
+  const w = await playerWorld();
+  const f = await facts(w, { recipeId: DAGGER });
+  assert.deepEqual([f.actor.name, f.formulas.map(x => x.recipeId)], ["Ann", [DAGGER]]);
+  assert.ok(f.recipes[DAGGER], "the recipe arrived through definitionsFor");
+  assert.equal(f.recipes[DAGGER].craftLevel, undefined, "and carries no craft level");
+  assert.equal(f.inventory.iron, 5);
+  assert.deepEqual([f.days.free, f.days.reserved, f.queue.length], [12, 0, 0]);
+  assert.equal(f.definitions, "ready");
+  assert.deepEqual(findings(f.recipes), [], "nothing hidden in the recipes it reads");
+  assert.ok(f.stations.length >= 1, "workshops for the selected recipe");
+  assert.ok(f.stations.every(s => Number.isFinite(s.fee)));
+});
+
+test("FACTS: only materials the character HAS and has MET come out as options; a material never discovered is not offered", async () => {
+  const w = await playerWorld();
+  const f = await facts(w, { recipeId: DAGGER });
+  const options = formulaeTab(f, { ...emptyState(), recipeId: DAGGER }).detail.slots.flatMap(s => s.options.map(o => o.id));
+  assert.ok(options.every(id => f.inventory[id] > 0 && f.met.includes(id)));
+  const unmet = Object.keys(f.inventory).filter(id => !f.met.includes(id));
+  assert.ok(options.every(id => !unmet.includes(id)));
+});
+
+test("FACTS: queueing a craft reserves days, and the next read shows them in the status strip and the queue", async () => {
+  const w = await playerWorld();
+  const f0 = await facts(w, { recipeId: DAGGER });
+  const state = { recipeId: DAGGER, picks: SEL };
+  const tab = formulaeTab(await facts(w, state), { ...emptyState(), ...state });
+  assert.equal(tab.detail.kind, "recipe");
+  assert.equal(tab.detail.buttons.queue.disabled, false, tab.detail.buttons.queue.reason);
+  assert.equal(f0.queue.length, 0);
+  const action = await as(w.annUser, () => api().queue.submit(w.ann, "craft", { recipe: DAGGER, selection: SEL }));
+  const after = await facts(w, { recipeId: DAGGER });
+  assert.equal(after.queue.length, 1);
+  assert.equal(after.days.reserved, action.daysReserved);
+  assert.equal(after.days.free, 12 - action.daysReserved);
+});
+
+test("FACTS: the same character with downtime closed reads as closed, and the whole page still passes the leak scan", async () => {
+  const w = await playerWorld({ downtime: 0 });
+  const f = await facts(w, { recipeId: DAGGER });
+  const model = hubModel(f, { ...emptyState(), recipeId: DAGGER, picks: SEL });
+  assert.equal(model.status.gate.open, false);
+  assert.equal(model.body.detail.buttons.queue.disabled, true);
+  assert.equal(model.body.detail.buttons.queue.reason, "Downtime isn't open right now");
+  assert.deepEqual(findings(model).filter(x => !/%/.test(x)), []);
+});
+
+test("CHARACTERS: a player lists the characters they own; the default is their assigned one", async () => {
+  const w = await playerWorld();
+  const mine = as(w.annUser, () => ownedCharacters().map(a => a.name));
+  assert.ok(mine.includes("Ann"));
+  assert.equal(as(w.annUser, () => defaultCharacter())?.name, "Ann");
+});
+
+// The window class ------------------------------------------------------------------------------------------------------
+function fakeWindow(w) {
+  globalThis.foundry.applications.api.ApplicationV2 = class { constructor(o) { this.options = o; } render() {} };
+  const Hub = build();
+  const app = new Hub(api(), w.ann);
+  app.redraw = () => { app.redraws = (app.redraws ?? 0) + 1; };
+  return { app, actions: Hub.DEFAULT_OPTIONS.actions, Hub };
+}
+const click = (actions, app, name, data = {}) => actions[name].call(app, {}, { dataset: data });
+
+test("WINDOW: every data-action the page draws has a handler, and the handlers change only the window's own state", async () => {
+  const w = await playerWorld();
+  const { app, actions } = fakeWindow(w);
+  const f = await facts(w, { recipeId: DAGGER });
+  const html = renderHubMain(hubModel({ ...f, characters: [{ id: "a", name: "A" }, { id: "b", name: "B" }], queue: [{ id: "q", label: "x", days: 1 }] }, { ...app.state, recipeId: DAGGER, showQueue: true, showDisplay: true, showSwitch: true }));
+  const used = [...new Set([...html.matchAll(/data-action="([a-z-]+)"/g)].map(m => m[1]))];
+  assert.deepEqual(used.filter(name => typeof actions[name] !== "function"), []);
+  click(actions, app, "select-recipe", { recipe: DAGGER });
+  assert.equal(app.state.recipeId, DAGGER);
+  click(actions, app, "pick-material", { slot: "blade", material: "iron" });
+  assert.deepEqual(app.state.picks, { blade: "iron" });
+  click(actions, app, "clear-slot", { slot: "blade" });
+  assert.deepEqual(app.state.picks, {});
+  click(actions, app, "set-filter", { filter: "weapon" });
+  click(actions, app, "switch-tab", { tab: "research" });
+  assert.deepEqual([app.state.filter, app.state.tab], ["weapon", "research"]);
+  click(actions, app, "toggle-display");
+  click(actions, app, "toggle-queue");
+  click(actions, app, "toggle-switch");
+  assert.deepEqual([app.state.showDisplay, app.state.showQueue, app.state.showSwitch], [true, true, true]);
+  assert.ok(app.redraws >= 8, "each click redraws");
+});
+
+test("WINDOW: display choices are remembered per player in a client setting, and Reset puts the defaults back", async () => {
+  const w = await playerWorld();
+  const { app, actions } = fakeWindow(w);
+  click(actions, app, "set-text-size", { value: "175" });
+  click(actions, app, "set-theme", { value: "contrast" });
+  click(actions, app, "set-font", { value: "hyperlegible" });
+  assert.deepEqual(app.state.display, { textSize: 175, theme: "contrast", font: "hyperlegible" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(env.values[HUB.displaySetting], { textSize: 175, theme: "contrast", font: "hyperlegible" });
+  click(actions, app, "reset-display");
+  assert.deepEqual(app.state.display, HUB.defaultDisplay);
+  click(actions, app, "set-text-size", { value: "999" });
+  assert.equal(app.state.display.textSize, 100, "an unknown size is ignored");
+});
+
+test("WINDOW: Queue the craft submits through api.queue.submit, says what happened in words, and the slots start empty again", async () => {
+  const w = await playerWorld();
+  const { app, actions } = fakeWindow(w);
+  app.state = { ...app.state, recipeId: DAGGER, picks: { ...SEL } };
+  await as(w.annUser, () => click(actions, app, "queue-craft"));
+  assert.match(app.announcements[0], /^Craft queued: .+\. \d+ days? reserved\.$/);
+  assert.deepEqual(app.state.picks, {});
+  assert.equal((await facts(w)).queue.length, 1);
+  assert.doesNotMatch(app.announcements.join(" "), /\bDC\b|odds|%/);
+});
+
+test("WINDOW: a button that is off does nothing: no slot filled, nothing queued", async () => {
+  const w = await playerWorld();
+  const { app, actions } = fakeWindow(w);
+  app.state = { ...app.state, recipeId: DAGGER, picks: { blade: "iron" } };     // a slot is still empty
+  await as(w.annUser, () => click(actions, app, "queue-craft"));
+  assert.equal(app.announcements.length, 0);
+  assert.equal((await facts(w)).queue.length, 0);
+  assert.doesNotThrow(() => { click(actions, app, "ask-crafter"); click(actions, app, "open-research"); });
+});
+
+test("WINDOW: a refusal from the queue is shown in plain words and nothing is lost", async () => {
+  const w = await playerWorld();
+  const { app, actions } = fakeWindow(w);
+  app.state = { ...app.state, recipeId: DAGGER, picks: { ...SEL } };
+  app.api = { ...api(), queue: { ...api().queue, submit: async () => { throw new Error("Ann cannot afford the 5 gp station fee."); } } };
+  await as(w.annUser, () => click(actions, app, "queue-craft"));
+  assert.match(app.announcements[0] ?? "", /^Couldn't queue the craft: /);
+});
+
+test("WINDOW: cancelling a queued item gives it back and says so", async () => {
+  const w = await playerWorld();
+  const { app, actions } = fakeWindow(w);
+  const action = await as(w.annUser, () => api().queue.submit(w.ann, "craft", { recipe: DAGGER, selection: SEL }));
+  await as(w.annUser, () => click(actions, app, "cancel-queued", { actionId: action.id }));
+  assert.match(app.announcements[0], /^Cancelled: .+ Your days and materials are back\.$/);
+  assert.equal((await facts(w)).queue.length, 0);
+});
+
+test("WINDOW: switching character starts fresh (empty slots, no recipe) but keeps the display and the tab", async () => {
+  const w = await playerWorld();
+  const { app } = fakeWindow(w);
+  app.state = { ...app.state, recipeId: DAGGER, picks: { blade: "iron" }, display: { textSize: 150, theme: "dark", font: "standard" }, tab: "formulae" };
+  app.showCharacter(w.ann);
+  assert.deepEqual([app.state.recipeId, app.state.picks, app.state.display.textSize], [null, {}, 150]);
+});
+
+test("WINDOW: the saved size and position are only used when sensible", () => {
+  env.values[HUB.sizeSetting] = { left: 10, top: 20, width: 50, height: 9999 };
+  const box = savedPosition();
+  assert.deepEqual(box, { left: 10, top: 20, width: HUB.minSize.width, height: 9999 });
+  env.values[HUB.sizeSetting] = { width: "wide" };
+  assert.deepEqual(savedPosition(), {});
+  delete env.values[HUB.sizeSetting];
+});
+
+// Live updates ----------------------------------------------------------------------------------------------------------
+test("LIVE: only data about the VIEWED character, or the shared downtime, queue and definitions state, triggers a redraw", () => {
+  const viewed = "a";
+  const yes = [
+    { type: "actor", actorId: "a", flagKeys: ["formulas"] }, { type: "actor", actorId: "a", flagKeys: ["downtimeDays"] },
+    { type: "actor", actorId: "a", flagKeys: ["pendingActions"] }, { type: "actor", actorId: "a", flagKeys: ["compendium", "x"] },
+    { type: "item", actorId: "a", isMaterial: true }, { type: "setting", key: `${M}.downtime` }, { type: "setting", key: `${M}.partyLocation` },
+    { type: "definitions" }, { type: "ownership", actorId: "z" }
+  ];
+  const no = [
+    { type: "actor", actorId: "b", flagKeys: ["formulas"] }, { type: "actor", actorId: "a", flagKeys: ["xp"] }, { type: "actor", actorId: "a", flagKeys: [] },
+    { type: "item", actorId: "a", isMaterial: false }, { type: "item", actorId: "b", isMaterial: true }, { type: "setting", key: `${M}.paused` },
+    { type: "setting", key: "core.something" }, { type: "mystery" }, null
+  ];
+  for (const e of yes) assert.equal(isRelevant(e, viewed), true, JSON.stringify(e));
+  for (const e of no) assert.equal(isRelevant(e, viewed), false, JSON.stringify(e));
+  assert.ok(WATCHED_ACTOR_FLAGS.includes("formulas") && WATCHED_SETTINGS.every(k => k.startsWith(`${M}.`)));
+  assert.deepEqual(actorEvent({ id: "a" }, { flags: { [M]: { formulas: [] }, other: { x: 1 } } }), { type: "actor", actorId: "a", flagKeys: ["formulas"] });
+  assert.equal(actorEvent({ id: "a" }, { ownership: { u: 3 } }).type, "ownership");
+});
+
+test("LIVE: a burst of relevant changes redraws ONCE (debounced), an unrelated one not at all, and no window means nothing", async () => {
+  const handlers = new Map();
+  const hooks = { on: (name, fn) => handlers.set(name, [...(handlers.get(name) ?? []), fn]) };
+  let redraws = 0;
+  let viewed = "a";
+  const notify = installHubHooks({ viewed: () => viewed, redraw: () => redraws++, hooks, delay: 10 });
+  const fire = (name, ...args) => (handlers.get(name) ?? []).forEach(fn => fn(...args));
+  fire("updateActor", { id: "a" }, { flags: { [M]: { downtimeDays: 3 } } });
+  fire("updateActor", { id: "a" }, { flags: { [M]: { pendingActions: [] } } });
+  fire("createItem", { parent: { id: "a" }, getFlag: () => ({ materialId: "iron" }) });
+  fire("updateActor", { id: "a" }, { system: { hp: 1 } });
+  fire("updateActor", { id: "b" }, { flags: { [M]: { formulas: [] } } });
+  fire("updateSetting", { key: `${M}.paused` });
+  await new Promise(r => setTimeout(r, 40));
+  assert.equal(redraws, 1);
+  fire("updateSetting", { key: `${M}.downtime` });
+  await events.emit("definitionsRefreshed", {});
+  await new Promise(r => setTimeout(r, 40));
+  assert.equal(redraws, 2, "a setting and a definitions refresh together are one redraw");
+  viewed = null;
+  assert.equal(notify({ type: "definitions" }), false, "no window open: nothing to redraw");
+});
+
+// Entry points ----------------------------------------------------------------------------------------------------------
+test("ENTRY: the scene-controls button is added for everyone; the sheet button only for a character you own", async () => {
+  const w = await playerWorld();
+  const handlers = new Map();
+  installEntryPoints(() => api(), { on: (name, fn) => handlers.set(name, fn) });
+  assert.deepEqual([...handlers.keys()].sort(), ["getActorSheetHeaderButtons", "getHeaderControlsApplicationV2", "getSceneControlButtons"]);
+  w.ann.documentName = "Actor";
+  const controls = { tokens: { tools: {} } };
+  as(w.annUser, () => handlers.get("getSceneControlButtons")(controls));
+  const tool = controls.tokens.tools.pfpDowntime;
+  assert.deepEqual([tool.button, tool.title, typeof tool.onChange], [true, "Downtime", "function"]);
+  const list = [];
+  as(w.annUser, () => handlers.get("getHeaderControlsApplicationV2")({ document: w.ann }, list));
+  assert.deepEqual(list.map(c => [c.action, c.label]), [["pfp-open-hub", "Downtime"]]);
+  as(w.annUser, () => handlers.get("getHeaderControlsApplicationV2")({ document: w.ann }, list));
+  assert.equal(list.length, 1, "never added twice");
+  const notMine = [];
+  as(w.bobUser, () => handlers.get("getHeaderControlsApplicationV2")({ document: w.ann }, notMine));
+  assert.equal(notMine.length, 0, "someone else's character gets no button");
+  const old = [];
+  as(w.annUser, () => handlers.get("getActorSheetHeaderButtons")({ actor: w.ann }, old));
+  assert.equal(old[0].label, "Downtime");
+  assert.equal(as(w.annUser, () => mayOpenFor(w.ann)), true);
+  assert.equal(mayOpenFor({ type: "npc", testUserPermission: () => true }), false);
+  const odd = { weird: {} };
+  const logged = [];
+  const spy = console.error; console.error = (...a) => logged.push(a[0]);
+  try { handlers.get("getSceneControlButtons")({}); } finally { console.error = spy; }
+  assert.match(logged[0], /shape this module does not know/);
+  void odd;
+});
+
+test("ENTRY: api.hub.open exists and the Hub never reads a definition pack on a player's client", async () => {
+  const w = await playerWorld();
+  assert.equal(typeof api().hub.open, "function");
+  const src = (await import("node:fs")).readFileSync("scripts/hub/facts.js", "utf8") + (await import("node:fs")).readFileSync("scripts/hub/app.js", "utf8");
+  assert.doesNotMatch(src, /game\.packs|getDocuments|PACKS\./);
+  void w; void openHub; void pickMaterial; void selectRecipe;
+});

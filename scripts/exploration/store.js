@@ -6,6 +6,7 @@
  *
  * Preparing a scene NEVER launches or activates it.
  */
+import * as gmLog from "../gm-log.js";
 import { EXPLORATION, MODULE_ID, NODE_ACTOR, NODE_FLAG, QUEUE_KEYS } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { loadDefinitions } from "../data/validate.js";
@@ -413,14 +414,13 @@ export async function postExploreChat(api, actor, run) {
   const scene = sceneOf(run.plan.scene.id);
   const nodes = run.plan.activations.map(a => ({ name: api.definitions.nodeType.get(a.nodeType).name, nodeType: a.nodeType, tier: a.tier, perceptionDC: a.perceptionDC }));
   const searchedBy = Object.keys(sceneState(scene.id).searches).map(id => game.actors.get(id)?.name ?? id);
-  try {
-    await ChatMessage.create({
-      whisper: ChatMessage.getWhisperRecipients("GM").map(u => u.id),
-      content: formatGmSummary({ actorName: actor.name, regionName: run.region.name, plan: run.plan, skillName: adapter.skillLabel(run.skill), dc: run.region.explorationDC, rolls: run.rolls, encounter: run.encounter, nodes, searchedBy })
-    });
-  } catch (error) {
-    console.error(`${MODULE_ID} | the expedition was prepared on "${scene.name}", but the chat message failed`, error);
-  }
+  const summary = formatGmSummary({ actorName: actor.name, regionName: run.region.name, plan: run.plan, skillName: adapter.skillLabel(run.skill), dc: run.region.explorationDC, rolls: run.rolls, encounter: run.encounter, nodes, searchedBy });
+  gmLog.record({
+    kind: "explore", actorId: actor.id, actorName: actor.name, text: gmLog.plainText(summary),
+    detail: { region: run.region.name, scene: scene.name, dc: run.region.explorationDC, rolls: run.rolls, encounter: run.encounter, nodes }
+  });
+  // A local notice on the resolving GM's own screen (no chat message, so nothing reaches the players' clients).
+  globalThis.ui?.notifications?.info?.(`${MODULE_ID}: ${actor.name}'s expedition was prepared on "${scene.name}". Details: api.gm.log().`);
 }
 
 // Searching ---------------------------------------------------------------------------------------------------
@@ -478,9 +478,10 @@ export async function runSearch({ actorId, sceneId, userId }) {
   try {
     const owners = ownerUserIds(actor);
     if (owners.length) await ChatMessage.create({ whisper: owners, speaker: ChatMessage.getSpeaker({ actor }), content: `<p>${message}</p>` });
-    await ChatMessage.create({
-      whisper: ChatMessage.getWhisperRecipients("GM").map(u => u.id),
-      content: `<p>GM only: ${actor.name} searched ${scene.name}: Perception total ${total}${natural === null ? "" : ` (natural ${natural})`}. Found ${names.length} of ${hiddenNodes.length} hidden node(s)${spottedNodes.length ? `: ${spottedNodes.map(n => `${n.token.name} (DC ${n.dc})`).join(", ")}` : ""}.</p>`
+    gmLog.record({
+      kind: "search", actorId: actor.id, actorName: actor.name,
+      text: `${actor.name} searched ${scene.name}: Perception total ${total}${natural === null ? "" : ` (natural ${natural})`}. Found ${names.length} of ${hiddenNodes.length} hidden node(s)${spottedNodes.length ? `: ${spottedNodes.map(n => `${n.token.name} (DC ${n.dc})`).join(", ")}` : ""}.`,
+      detail: { scene: scene.name, total, natural, hidden: hiddenNodes.length, spotted: spottedNodes.map(n => ({ name: n.token.name, dc: n.dc })) }
     });
   } catch (error) {
     console.error(`${MODULE_ID} | the search was resolved, but the chat message failed`, error);

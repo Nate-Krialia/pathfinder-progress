@@ -246,3 +246,41 @@ export const EXPERIMENTS = {
   // Crafting from a LOANED formula teaches the crafter. Does the formula's owner learn too? Proposal: no.
   ownerLearnsFromLoan: false
 };
+
+/** The GM's resolve log: memory only on the GM's client, never saved (docs/11b, Stage 11a). Players never get a chat message with a DC or a roll. */
+export const GM_LOG = {
+  maxEntries: 200,
+  changedHook: "pfpGmLogChanged"
+};
+
+/** The Downtime Hub window (Stage 11a, docs/11-hub-design.md + 11b). Tunables for the window; the words live in hub/strings.js. */
+export const HUB = {
+  tabs: [
+    { id: "formulae", label: "Formulae", working: true },
+    { id: "research", label: "Research", working: false },
+    { id: "commissions", label: "Commissions", working: false },
+    { id: "explore", label: "Explore", working: false },
+    { id: "workshop", label: "Workshop", working: false },
+    { id: "compendium", label: "Compendium", working: false }
+  ],
+  // Filter chips on the Formulae list. A recipe whose category is in none of them shows under All only.
+  filters: [
+    { id: "all", label: "All", categories: null },
+    { id: "weapon", label: "Weapon", categories: ["weapon"] },
+    { id: "armor", label: "Armor", categories: ["armor", "robes"] },
+    { id: "consumable", label: "Consumable", categories: ["consumable"] }
+  ],
+  sizeSetting: "hubWindow",          // client setting: { left, top, width, height }
+  displaySetting: "hubDisplay",      // client setting: { textSize, theme, font }
+  defaultSize: { width: 940, height: 680 },
+  minSize: { width: 340, height: 420 },
+  stackBelowPx: 700,                 // the two panes stack when the window is narrower than this
+  liveDebounceMs: 150,
+  saveDebounceMs: 400,
+  announceMax: 5,                    // how many past announcements the live region keeps
+  textSizes: [100, 125, 150, 175],   // percent
+  themes: ["parchment", "dark", "contrast"],
+  fonts: ["standard", "hyperlegible"],
+  defaultDisplay: { textSize: 100, theme: "parchment", font: "standard" },
+  basePx: 14                         // the window's text size at 100%; every size in the stylesheet is in rem of this
+};

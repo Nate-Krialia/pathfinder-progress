@@ -38,7 +38,7 @@ test("the stage 10d gate has exactly one code block per step, every step says wh
   assert.match(gateDoc, /game\.user\.name, game\.user\.isGM/);
   assert.match(gateDoc, /Force-reload BOTH windows first/);
   assert.match(gateDoc, /version must be \*\*0\.17\.0\*\*/);
-  assert.equal(MODULE_VERSION, "0.17.0");
+  assert.match(MODULE_VERSION, /^\d+\.\d+\.\d+$/);
 });
 
 test("GATE 16: every step runs, in order, as the right client, and reports ALL PASS", async () => {

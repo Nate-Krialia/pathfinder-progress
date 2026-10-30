@@ -37,6 +37,11 @@ Supersedes: `docs/10` "Players see no odds" and "Players are shown no odds or re
 - The player copy strips a region's `explorationDC` and `spawnTable`, a material's `effects`, a recipe's `overrides`, `output`, `itemTemplate`, `researchProject`, and the resolved outputs.
 - Research summary chat: a whisper to the owners and the GM with degree words only, plus a GM-only whisper with the total and the DC. `audit.scan/accept/ledger` are GM-only.
 
+## C2. Stage 11a (v0.18.0): chat never carries a DC
+
+- A GM-only whisper is still delivered to every client's `game.messages` (hidden from the chat log with `visible: false`, readable from the console). So NO chat message carries a DC, a roll total, a loss roll or a percentage, whatever its audience. The research totals, craft loss rolls, gather hidden rung rolls, the expedition summary and the search Perception total go to the in-memory **GM log** (`scripts/gm-log.js`, `api.gm.log()`, GM only, never saved; the local hook `pfpGmLogChanged` fires per entry for the Stage 11b GM window). It is per GM client and per session: a reload empties it, another GM does not see it.
+- The Hub (`scripts/hub/`) reads only the player APIs and adds nothing to the player copy. Where the player copy lacks data, the Hub says less instead of inventing it: no "worth X" line for materials, and a formula being researched shows under All only.
+
 ## D. Still open
 
 - Whether blueprints a character has not designed should be visible so the Hub can offer "research a design" (open since Stage 16; decided for Stage 11).

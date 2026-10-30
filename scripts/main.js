@@ -15,9 +15,12 @@ import * as downtime from "./downtime/store.js";
 import { installSocketHooks, socketStatus } from "./socket.js";
 import { suggestPayout } from "./commissions/commission.js";
 import { feeForTier } from "./stations/fees.js";
-import { AUDIT, COMMISSIONS, COMPENDIUM, DEFINITIONS_SYNC, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
+import { AUDIT, COMMISSIONS, HUB, COMPENDIUM, DEFINITIONS_SYNC, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
 import * as playerDefs from "./data/playerDefs.js";
 import * as events from "./events.js";
+import * as gmLog from "./gm-log.js";
+import { installEntryPoints } from "./hub/entry.js";
+import { openHub } from "./hub/app.js";
 import { defsState } from "./data/playerState.js";
 import * as compendium from "./compendium/store.js";
 import * as workshop from "./workshop/store.js";
@@ -45,6 +48,11 @@ Hooks.once("init", () => {
     choices: { gm: "GM grants", auto: "Automatic" },
     default: "gm"
   });
+
+  // The Downtime Hub (Stage 11a): per player, never shared.
+  game.settings.register(MODULE_ID, HUB.sizeSetting, { scope: "client", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
+  game.settings.register(MODULE_ID, HUB.displaySetting, { scope: "client", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
+  installEntryPoints(() => game.modules.get(MODULE_ID).api);
 
   // Downtime system
   game.settings.register(MODULE_ID, "itemPacks", {
@@ -230,8 +238,18 @@ Hooks.once("ready", async () => {
       /** GM testing tool: give a character a design without the research. */
       grantDesign: (actor, blueprintId) => workshop.grantDesign(api, actor, blueprintId)
     },
+    /** Open the Downtime Hub for one of your characters (any user). hub.open(actor?) */
+    hub: { open: actor => openHub(api, actor) },
     /** GM only: open the review window. */
     openReview: () => openReview(api),
+    /**
+     * GM only: the resolve log (totals, DCs and hidden rolls). Memory only on this client; never in chat or saved (docs/11b).
+     * log({ limit?, kind?, actorId? }) -> newest first. clearLog() empties it. The hook "pfpGmLogChanged" fires here on each new entry.
+     */
+    gm: {
+      log: options => { requireGMApi("gm.log"); return gmLog.list(options); },
+      clearLog: () => { requireGMApi("gm.clearLog"); gmLog.clear(); }
+    },
     /** GM only: compare what players hold with what the module granted. */
     // GM only: the ledger and the mismatch rows carry project DCs (docs/11b).
     audit: {

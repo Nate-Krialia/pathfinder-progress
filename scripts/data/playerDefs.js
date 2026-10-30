@@ -14,6 +14,7 @@ import * as adapter from "../adapter/pf2e.js";
 import { callerOf } from "../queue/common.js";
 import { asGM } from "../queue/work.js";
 import { refusal } from "../queue/relay.js";
+import * as events from "../events.js";
 import { defsState } from "./playerState.js";
 import { factsKey, loadPlayerRecords, normalizeFacts, selectRecords, stationIdsFor } from "./playerSet.js";
 import { readStations } from "../stations/store.js";
@@ -166,6 +167,7 @@ async function loadOnce({ force }) {
   boundApi.uncraftable = new Set(result?.uncraftable ?? []);
   boundApi.contexts = new Map();
   boundApi.errors = [];
+  queueMicrotask(() => events.emit("definitionsRefreshed", {}));   // the Hub redraws when its formulae arrive
   Object.assign(state, { status: "ready", message: "", key, missing: new Set(result?.missingRecipes ?? []), loadedAt: Date.now(), loads: state.loads + 1 });
   return { changed: true };
 }

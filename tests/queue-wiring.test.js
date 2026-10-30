@@ -126,7 +126,7 @@ test("resolve spends the used days, refunds the rest, rolls on the GM client, an
   assert.equal(pending(actor).length, 0);
   assert.equal(total(actor), 7 + 0, "3 days spent from 10");
   assert.equal(counter(actor), 7);
-  assert.equal(env.chat.length, 2, "the players' whisper, then the GM-only whisper with the totals (docs/11b)");
+  assert.equal(env.chat.length, 1, "one whisper to the players, with degree words only; the totals are in the GM log (docs/11b)");
   assert.deepEqual(audit.scan(), []);
 });
 
