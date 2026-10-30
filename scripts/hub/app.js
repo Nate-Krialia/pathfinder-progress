@@ -59,14 +59,14 @@ export function build() {
         "queue-craft"(event, target) { return this.#queueCraft(target); },
         "cancel-queued"(event, target) { return this.#cancel(target.dataset.actionId); },
         // Research
-        "open-in-research"(event, target) { this.#wantFocus = `project:${target.dataset.project}`; return this.#replace(openProject(this.hubState, target.dataset.project)); },
+        "open-in-research"(event, target) { this.#requestFocus(`project:${target.dataset.project}`); return this.#replace(openProject(this.hubState, target.dataset.project)); },
         "select-project"(event, target) { return this.#replace(selectProject(this.hubState, target.dataset.project)); },
         "set-skill"(event, target) { return this.#replace(setSkill(this.hubState, target.dataset.skill)); },
         "days-down"() { return this.#replace(stepDays(this.hubState, -1, this.#compose().facts.days.free)); },
         "days-up"() { return this.#replace(stepDays(this.hubState, 1, this.#compose().facts.days.free)); },
         "queue-research"() { return this.#queueResearch(); },
-        "put-aside"() { this.#wantFocus = "keep-aside"; return this.#set({ confirmAside: true }); },
-        "keep-aside"() { this.#wantFocus = "put-aside"; return this.#set({ confirmAside: false }); },
+        "put-aside"() { this.#requestFocus("keep-aside"); return this.#set({ confirmAside: true }); },
+        "keep-aside"() { this.#requestFocus("put-aside"); return this.#set({ confirmAside: false }); },
         "confirm-aside"() { return this.#putAside(); },
         "follow-lead"(event, target) { return this.#followLead(target.dataset.lead); },
         // Compendium
@@ -114,6 +114,7 @@ export function build() {
       if (this.#wired) return;
       this.#wired = true;
       this.element.addEventListener("click", event => {
+        this.#wantFocus = null;          // the person acted: a focus request from an earlier action is stale (this runs before the action's own handler)
         const target = event.target?.closest?.("[aria-disabled='true']");
         if (target) { event.preventDefault(); event.stopImmediatePropagation(); }
       }, true);
@@ -140,7 +141,7 @@ export function build() {
       if (this.#root === root) return;
       this.#removeKeys();
       this.#root = root;
-      this.#keyHandler = event => { if (HUB.keysKeptInside.includes(event.key) && root.contains(event.target)) event.stopPropagation(); };
+      this.#keyHandler = event => { if (event.key === "Tab") this.#wantFocus = null; if (HUB.keysKeptInside.includes(event.key) && root.contains(event.target)) event.stopPropagation(); };
       root.addEventListener("keydown", this.#keyHandler);
     }
 
@@ -150,7 +151,13 @@ export function build() {
       this.#keyHandler = null;
     }
 
-    #wantFocus = null;      // a control key to focus after the next draw (set by an action whose own button is about to go away)
+    #wantFocus = null;      // { key, until }: a control to focus once it is drawn ("window" = the Hub root). Set by an action whose own button is about to go away.
+
+    /**
+     * Ask for focus on a control. It is applied by the first draw that HAS that control, not just the next draw: a relayed write's update echo can arrive after the handler
+     * is done, so the draw that follows the handler may still be the old data (v0.19.1). It gives up after HUB.focusWaitMs, and any click or Tab of the person's own cancels it.
+     */
+    #requestFocus(key) { this.#wantFocus = { key, until: Date.now() + HUB.focusWaitMs }; }
     #root = null;
     #keyHandler = null;
     #focused = false;
@@ -230,9 +237,10 @@ export function build() {
         if (hadFocus) ([...main.querySelectorAll("[data-focus-key]")].find(el => focusKey && el.dataset.focusKey === focusKey) ?? root).focus({ preventScroll: true });
       }
       if (this.#wantFocus) {
-        const wanted = [...main.querySelectorAll("[data-focus-key]")].find(el => el.dataset.focusKey === this.#wantFocus);
-        this.#wantFocus = null;
-        wanted?.focus({ preventScroll: false });
+        const { key, until } = this.#wantFocus;
+        const wanted = key === "window" ? root : [...main.querySelectorAll("[data-focus-key]")].find(el => el.dataset.focusKey === key);
+        if (wanted) { this.#wantFocus = null; wanted.focus({ preventScroll: false }); }
+        else if (Date.now() > until) this.#wantFocus = null;
       }
       const live = root.querySelector(".pfp-live");
       const text = this.announcements.map(a => `<p>${a.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c])}</p>`).join("");
@@ -266,6 +274,7 @@ export function build() {
       const model = hubModel(facts, this.hubState);
       const button = model.body.detail?.buttons?.queue;
       if (!request || !button || button.disabled) return;      // an aria-disabled button never gets here; this is the belt to that brace
+      this.#announce({ text: S.working, kind: "working" });
       try {
         const recipe = facts.recipes[request.recipe];
         const action = await this.api.queue.submit(this.actor, "craft", { recipe: request.recipe, selection: request.selection, stationId: request.stationId });
@@ -280,6 +289,7 @@ export function build() {
       const { facts } = this.#compose();
       const request = researchRequest(facts, this.hubState);
       if (!request) return;                                      // an aria-disabled button never gets here; this is the belt to that brace
+      this.#announce({ text: S.working, kind: "working" });
       try {
         const action = await this.api.queue.submit(this.actor, "research", { projectId: request.projectId, skill: request.skill }, request.days);
         this.#announce({ text: S.researchQueued(request.days, request.name, action?.daysReserved ?? request.days), kind: "queued", actionId: action?.id ?? null, seen: false });
@@ -293,9 +303,11 @@ export function build() {
       const project = facts.projects.find(p => p.id === this.hubState.projectId) ?? (facts.projects.length === 1 ? facts.projects[0] : null);
       this.hubState = { ...this.hubState, confirmAside: false };
       if (!project) { this.redraw(); return; }
+      this.#announce({ text: S.working, kind: "working" });
       try {
         await this.api.research.putAside(this.actor, project.id);
         this.hubState = { ...this.hubState, projectId: null };
+        this.#requestFocus("window");
         this.#announce({ text: S.asideDone(project.goalName), kind: "aside" });
       } catch (error) {
         this.#announce({ text: S.queueFailed(error.message), kind: "error" });
@@ -303,10 +315,11 @@ export function build() {
     }
 
     async #followLead(leadId) {
+      this.#announce({ text: S.working, kind: "working" });
       try {
         const project = await this.api.research.follow(this.actor, leadId);
         this.hubState = { ...this.hubState, projectId: project.id, skill: null, checkDays: 1, confirmAside: false };
-        this.#wantFocus = `project:${project.id}`;
+        this.#requestFocus(`project:${project.id}`);
         this.#announce({ text: S.leadStarted(project.goalName), kind: "started" });
       } catch (error) {
         this.#announce({ text: S.queueFailed(error.message), kind: "error" });
@@ -317,6 +330,7 @@ export function build() {
       const { facts } = this.#compose();
       const request = shareRequest(facts, this.hubState);
       if (!request) return;
+      this.#announce({ text: S.working, kind: "working" });
       try {
         const action = await this.api.queue.submit(this.actor, "share", { kind: request.kind, key: request.key });
         this.#announce({ text: S.shareQueued(request.name), kind: "queued", actionId: action?.id ?? null, seen: false });
@@ -331,6 +345,7 @@ export function build() {
         const rows = this.api.queue.list([this.actor]);
         const row = rows.find(r => r.action.id === actionId);
         const label = row?.label ?? "";
+        this.#announce({ text: S.working, kind: "working" });
         await this.api.queue.cancel(this.actor, actionId);
         this.#announce({ text: row?.action.type === "share" ? S.shareCancelled(row.action.params?.name ?? label) : S.queueCancelled(label), kind: "cancelled" });
       } catch (error) {

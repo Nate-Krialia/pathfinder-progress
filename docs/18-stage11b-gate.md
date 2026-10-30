@@ -1,4 +1,4 @@
-# 18 Stage 11b round gate (real Foundry): the Research and Compendium tabs, and leads (v0.19.0)
+# 18 Stage 11b round gate (real Foundry): the Research and Compendium tabs, and leads (v0.19.1)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. Every step is labelled **[GM]** or **[Player]** and has ONE code block. **[Player] steps tell you what to click; the block then checks what is on screen.** Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, layout is the point. Do a group at a time.
 
@@ -6,23 +6,23 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 **What the gate shows** (the decisions of the Stage 11b round plan):
 - **Research tab:** your projects as step boxes ("Progress 3 of 8", a bar beyond 20 steps), "Roll with" skills with your own sheet modifier (never odds), days you spend (one check per day), Queue N checks, Cancel, the GM resolving in secret, recent checks in plain words (a GM's free-text note never shows), **Put the project aside** with a Confirm step ("Progress is not kept"), and **leads** (a GM hands you one; you press Start researching). "Open in Research" on the Formulae tab jumps to the project. No DC, no odds, no percentage, no pace line.
-- **Compendium tab:** Materials, Creatures, Regions, Experiments, only what you experienced (no "???"), Share with the party (Only you / Queued / Shared), Cancel while queued, the GM approves, the party reads it.
+- **Compendium tab:** Materials, Creatures, Regions, Experiments, only what you experienced (no "???"), Share with the party (Only you / Queued / Shared), Cancel while queued, the GM approves, the party reads it. A rejected share is whispered to its owner and the GM, never posted publicly (Steps 20 to 22, the GM rejects it in the queue window).
 - **Keyboard and narrow window** for both tabs.
 - Not shown, on purpose: there is no "Not shared" line when a GM rejects a share. The Hub cannot tell a rejection from any other removal, so a rejected share just goes back to "Only you".
 
-**Safety.** Throwaway things named "Gate ...": characters **Gate Scholar** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`g6-town`, `g6-ore`, `g6-steel`, `g6-ember`, `g6-star`, `g6-blade`, `g6-draught`, `g6-giant`, `g6-lantern`); they last until you reload the GM window, and SETUP registers them again. No real campaign data. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left something behind. CLEANUP always works and is safe to run twice.
+**Safety.** Throwaway things named "Gate ...": characters **Gate Scholar** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`gate-wolf` and `g6-field` in the Compendium, and `g6-town`, `g6-ore`, `g6-steel`, `g6-ember`, `g6-star`, `g6-blade`, `g6-draught`, `g6-giant`, `g6-lantern`); they last until you reload the GM window, and SETUP registers them again. No real campaign data. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left something behind. CLEANUP always works and is safe to run twice.
 
-**Restart note.** 0.19.0 changes nothing in the manifest but its version (a new socket handler is registered in code), so updating the module and force-reloading both windows (Ctrl+Shift+R) is enough.
+**Restart note.** 0.19.0 and 0.19.1 change nothing in the manifest but the version (0.19.0 registered a new socket handler in code), so updating the module and force-reloading both windows (Ctrl+Shift+R) is enough.
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.19.0**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.19.1**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.19.0"]` in the GM window and `["Test", false, "0.19.0"]` in the Player window.
+Expected: `["<your GM name>", true, "0.19.1"]` in the GM window and `["Test", false, "0.19.1"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 
@@ -81,7 +81,7 @@ await (async () => {
   const holders = game.actors.filter(a => (a.getFlag(M, "downtimeDays") ?? 0) > 0).map(a => a.name);
   if (holders.length) throw new Error(`these characters hold downtime days: ${holders.join(", ")}`);
   const shared = game.settings.get(M, "sharedCompendium") ?? {};
-  if (["experiments", "materials"].some(k => Object.keys(shared[k] ?? {}).some(id => id.startsWith("g6-")))) throw new Error("an earlier run left shared Compendium entries: run CLEANUP (the last step) first");
+  if (["experiments", "materials", "creatures", "regions"].some(k => Object.keys(shared[k] ?? {}).some(id => /^(g6-|gate-)/.test(id)))) throw new Error("an earlier run left shared Compendium entries: run CLEANUP (the last step) first");
   const published = await api.publishDefinitions();
 
   const flags = { [M]: { gateThrowaway6: true } };
@@ -134,6 +134,9 @@ await (async () => {
     root: () => document.querySelector(".pfp-hub"),
     text: () => (document.querySelector(".pfp-hub")?.textContent ?? "").replace(/\s+/g, " "),
     live: () => document.querySelector(".pfp-live")?.textContent ?? "",
+    // wait (up to 8 s) for a condition; the line under the buttons says "Working on it..." until the GM's client has answered, then the result
+    until: async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await new Promise(r => setTimeout(r, 150)); } return false; },
+    line: async () => { await p.until(() => p.live() !== "" && p.live() !== "Working on it..."); return p.live(); },
     button: (action, where = "") => document.querySelector(`.pfp-hub [data-action="${action}"]${where}`),
     off: el => el?.getAttribute("aria-disabled") === "true",
     focus: () => document.activeElement?.dataset?.focusKey ?? (document.activeElement === document.querySelector(".pfp-hub") ? "window" : document.activeElement?.tagName),
@@ -148,6 +151,7 @@ await (async () => {
   p.check("two projects", projects.map(x => x.goalName).sort().join() === "Gate Draught,Gate Giant", projects.map(x => x.goalName).join());
   p.check("a project, as the player gets it, has no DC", api.projectInfo(scholar, "unlock-g6-draught").project.dc === undefined);
   p.check("one lead", api.research.leads(scholar).length === 1 && api.research.leads(scholar)[0].name === "Gate Lantern");
+  p.leadId = api.research.leads(scholar)[0]?.id;
   p.check("a player cannot hand out leads", await api.research.giveLead(scholar, "g6-lantern", "x").then(() => false, error => /GM/.test(error.message)));
   return p.done();
 })();
@@ -177,7 +181,7 @@ await (async () => {
 
 ## Step 5 [Player]: queue three checks
 
-Click **Gate Draught**. **What you should see:** "Finishing teaches you the formula for Gate Draught."; **Roll with**: **Crafting** and **Nature**, each with "Your modifier +N" (your sheet's own number, never odds); the **Queue 1 check** button is dashed (off) with "Choose a skill to roll with first." Click **Crafting** (it gets a **SELECTED** badge). Click **One day more** twice: "**3 days (3 checks)**". Click **Queue 3 checks**.
+Click **Gate Draught**. **What you should see:** "Finishing teaches you the formula for Gate Draught."; **Roll with**: **Crafting** and **Nature**, each with "Your modifier +N" (your sheet's own number, never odds); the **Queue 1 check** button is dashed (off) with "Choose a skill to roll with first." Click **Crafting** (it gets a **SELECTED** badge). Click **One day more** twice: "**3 days (3 checks)**". Click **Queue 3 checks**. **Run the block right after the click and do not click anything else first** (the line under the buttons says "Working on it..." for a moment, then the result; the block waits for it).
 
 **What you should see now:** a line at the bottom "**3 checks queued on Gate Draught. 3 days reserved.**"; the status strip says **9 free, 3 reserved** and **1 queued**; the Gate Draught card has a **Queued** badge; the detail says "**Queued: 3 checks, 3 days reserved. The GM rolls them in secret.**" with **Cancel and get the days back**; **Queue** is off ("You already have checks queued on this...") and **Put the project aside** is off ("Cancel the queued checks first, then put it aside.").
 
@@ -185,7 +189,8 @@ Click **Gate Draught**. **What you should see:** "Finishing teaches you the form
 await (async () => {
   const p = globalThis.__p6 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
   const g = p.scholar.getFlag(p.M, "pendingActions") ?? [];
-  p.check("the live line says what was queued", /^3 checks queued on Gate Draught\. 3 days reserved\.$/.test(p.live()), p.live());
+  const line = await p.line();
+  p.check("the live line says what was queued", /^3 checks queued on Gate Draught\. 3 days reserved\.$/.test(line), line);
   p.check("the strip shows 9 free, 3 reserved and 1 queued", /9 free, 3 reserved/.test(p.text()) && /1 queued/.test(p.text()));
   p.check("the detail says the GM rolls them in secret, with Cancel", /Queued: 3 checks, 3 days reserved\. The GM rolls them in secret\./.test(p.text()) && Boolean(p.button("cancel-queued")));
   p.check("Queue and Put aside are off, with their reasons", p.off(p.button("queue-research")) && p.off(p.button("put-aside")) && /You already have checks queued on this/.test(p.text()) && /Cancel the queued checks first, then put it aside\./.test(p.text()));
@@ -231,12 +236,13 @@ await (async () => {
 
 ## Step 8 [Player]: queue one check and cancel it
 
-Make sure Crafting is still selected and click **Queue 1 check** (**One day fewer** first if it says more). Then click **Cancel and get the days back**. **What you should see:** the line "**Cancelled: Research: Gate Draught. Your days and materials are back.**" and **Nothing queued**.
+Make sure Crafting is still selected and click **Queue 1 check** (**One day fewer** first if it says more). Then click **Cancel and get the days back**. **Run the block right after the click and do not click anything else first.** **What you should see:** the line "**Cancelled: Research: Gate Draught. Your days and materials are back.**" and **Nothing queued**.
 
 ```js
 await (async () => {
   const p = globalThis.__p6 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
-  p.check("the cancel line", /^Cancelled: Research: Gate Draught\. Your days and materials are back\.$/.test(p.live()), p.live());
+  const line = await p.line();
+  p.check("the cancel line", /^Cancelled: Research: Gate Draught\. Your days and materials are back\.$/.test(line), line);
   p.check("nothing queued and nothing reserved", /Nothing queued/.test(p.text()) && /, 0 reserved/.test(p.text()) && (p.scholar.getFlag(p.M, "pendingActions") ?? []).length === 0);
   return p.done();
 })();
@@ -244,12 +250,13 @@ await (async () => {
 
 ## Step 9 [Player]: put a project aside (with the confirm step)
 
-Click the **Gate Giant** card, then **Put the project aside**. **What you should see:** the button is replaced by "**Put aside? Progress is not kept.**" with **Keep** and **Confirm**, and the **focus ring is on Keep**. Press **Keep** (Enter or Space works): the confirm goes away and the ring is back on **Put the project aside**. Press Put the project aside again, then **Confirm**. **What you should see:** the line "**Put aside: Gate Giant. Progress was not kept.**", Gate Giant gone from the list, and the focus ring on the window (not on a button, and not on the page behind).
+Click the **Gate Giant** card, then **Put the project aside**. **What you should see:** the button is replaced by "**Put aside? Progress is not kept.**" with **Keep** and **Confirm**, and the **focus ring is on Keep**. Press **Keep** (Enter or Space works): the confirm goes away and the ring is back on **Put the project aside**. Press Put the project aside again, then **Confirm**. **Run the block right after the click and do not click anything else first.** **What you should see:** the line "**Put aside: Gate Giant. Progress was not kept.**", Gate Giant gone from the list, and the focus ring on the window (not on a button, and not on the page behind).
 
 ```js
 await (async () => {
   const p = globalThis.__p6 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
-  p.check("the line says progress was not kept", /^Put aside: Gate Giant\. Progress was not kept\.$/.test(p.live()), p.live());
+  const line = await p.line();
+  p.check("the line says progress was not kept", /^Put aside: Gate Giant\. Progress was not kept\.$/.test(line), line);
   p.check("Gate Giant is gone from the list", !/Gate Giant/.test(p.root().querySelector(".pfp-list")?.textContent ?? ""));
   p.check("it is really put aside", !p.api.projectInfo(p.scholar).some(x => x.goalName === "Gate Giant" && x.status === "active"));
   p.check("focus is on the window itself", p.focus() === "window", p.focus());
@@ -259,16 +266,19 @@ await (async () => {
 
 ## Step 10 [Player]: follow the lead
 
-Click **Start researching** on **Gate Lantern**. **What you should see:** "**Research started: Gate Lantern.**"; a **Gate Lantern** card (Progress 0 of 8) selected, with the focus ring on it; and the leads area now says "**No leads yet.**" and "Leads show up here when someone points you at a formula you could research."
+Click **Start researching** on **Gate Lantern**. **Run the block right after the click and do not click anything else first.** **What you should see:** "**Research started: Gate Lantern.**"; a **Gate Lantern** card (Progress 0 of 8) selected, with the focus ring on it; and the leads area now says "**No leads yet.**" and "Leads show up here when someone points you at a formula you could research."
 
 ```js
 await (async () => {
   const p = globalThis.__p6 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
-  p.check("the line", /^Research started: Gate Lantern\.$/.test(p.live()), p.live());
+  const line = await p.line();
+  p.check("the line", /^Research started: Gate Lantern\.$/.test(line), line);
   p.check("the new project is selected and has focus", p.root().querySelector('[data-action="select-project"][aria-pressed="true"]')?.textContent.includes("Gate Lantern") && p.focus() === "project:unlock-g6-lantern", p.focus());
   p.check("Progress 0 of 8", /Progress 0 of 8/.test(p.text()));
   p.check("the lead is used up", /No leads yet\./.test(p.text()) && /Leads show up here when someone points you at a formula you could research\./.test(p.text()));
   p.check("the project exists, without a DC for the player", p.api.projectInfo(p.scholar, "unlock-g6-lantern").project.dc === undefined);
+  const again = await p.api.research.follow(p.scholar, p.leadId).then(() => null, error => error.message);
+  p.check("following the same lead a second time is refused, in plain words", typeof again === "string" && again.length > 10 && !/\bDC\b|%|odds/i.test(again), again);
   return p.done();
 })();
 ```
@@ -355,7 +365,8 @@ Click **Gate Ore**: "Tier 1"; **Where you found it**: Gate Field; **How you gath
 ```js
 await (async () => {
   const p = globalThis.__p6 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
-  p.check("the baseline", /What the cheapest materials make/.test(p.text()) && /A tier 1 result/.test(p.text()) && /Gate Ore sets the weapon's power \(tier 1\)/.test(p.text()) && /Edge needs tier 2 or higher/.test(p.text()));
+  if (!p.root() || !p.text().includes("What the cheapest materials make")) { p.check("open Compendium, then Experiments, then Gate Blade first", false); return p.done(); }
+  p.check("the baseline", /What the cheapest materials make/.test(p.text()) && /A tier 1 result/.test(p.text()) && /Gate Ore sets the weapon['’]s power \(tier 1\)/.test(p.text()) && /Edge needs tier 2 or higher/.test(p.text()));
   p.check("an unmet material is not named", /A material you have not met adds \+1d6 fire damage/.test(p.text()) && !/Gate Steel|Gate Ember/.test(p.text()));
   p.check("what you learned, in the craft form's words", /What you have learned/.test(p.text()) && /Edge, Gate Star/.test(p.text()) && /\(you crafted it\)/.test(p.text()) && /Gate Star adds \+1d8 spirit damage/.test(p.text()));
   p.check("no placeholder, no DC, odds or percentage", !/\?\?\?/.test(p.text()) && !p.leaks());
@@ -365,7 +376,9 @@ await (async () => {
 
 ## Step 17 [Player]: share two entries
 
-Click **Materials**, **Gate Ore**, then **Share with the party**. **What you should see:** the line "**Share queued: Gate Ore. Waiting for the GM.**", the pill says **Queued**, "Waiting for the GM to approve sharing it.", and the strip says **1 queued**. Click **Cancel the share**: "**Share cancelled: Gate Ore. It stays private.**" and the pill goes back to **Only you**. Now share **Gate Ore** again and also **Gate Star**.
+Click **Materials**, **Gate Ore**, then **Share with the party**. **What you should see:** the line "**Share queued: Gate Ore. Waiting for the GM.**", the pill says **Queued**, "Waiting for the GM to approve sharing it.", and the strip says **1 queued**. Click **Cancel the share**: "**Share cancelled: Gate Ore. It stays private.**" and the pill goes back to **Only you**. Now share **Gate Ore** again and also **Gate Star**. **Share ONLY Gate Ore and Gate Star** (not the creature or the region: Gate Wolf has a step of its own, below).
+
+**Run the block right after the last click.**
 
 ```js
 await (async () => {
@@ -380,6 +393,8 @@ await (async () => {
 ```
 
 ## Step 18 [GM]: approve one, reject the other
+
+**Run the code block below. Do NOT approve or reject these through the queue window** (the window is used for Gate Wolf in Step 21).
 
 ```js
 // [GM] approve Gate Ore (it goes into the shared Compendium) and reject Gate Star (it stays private).
@@ -414,9 +429,50 @@ await (async () => {
 })();
 ```
 
+## Step 20 [Player]: share the creature
+
+Go back to Gate Scholar if you are not on it. Open **Compendium**, **Creatures**, **Gate Wolf**, then **Share with the party**. **What you should see:** the line "**Share queued: Gate Wolf. Waiting for the GM.**", the pill says **Queued**, "Waiting for the GM to approve sharing it.", and the strip says **1 queued**. **Run the block right after the click.**
+
+```js
+await (async () => {
+  const p = globalThis.__p6 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
+  const line = await p.line();
+  p.check("the line", /^Share queued: Gate Wolf\. Waiting for the GM\.$/.test(line), line);
+  const shares = (p.scholar.getFlag(p.M, "pendingActions") ?? []).filter(a => a.type === "share");
+  p.check("exactly one share is waiting, and it is the creature", shares.length === 1 && shares[0].params.kind === "creature" && shares[0].params.key === "gate-wolf", shares.map(a => `${a.params.kind}:${a.params.key}`).join());
+  p.check("the strip says 1 queued", /1 queued/.test(p.text()));
+  return p.done();
+})();
+```
+
+## Step 21 [GM]: reject it THROUGH THE QUEUE WINDOW (a click, not code)
+
+Open the GM queue window (the **Review** window; if it did not open by itself, run `game.modules.get("pathfinder-progress").api.openReview()` once). Find the row "**Share: Gate Wolf (creature)**" for Gate Scholar and press **Reject**. **What you should see:** the row leaves the window. In the chat log you see a **whisper** (to the owner and to you) saying "Gate Scholar: the GM did not share "Gate Wolf" with the party. It stays private." and **no public message** about it.
+
+(There is no code block: the click is the test. Step 22 checks what the player's window can see.)
+
+## Step 22 [Player]: nothing public, and the wolf is private again (do not click first)
+
+**What you should see:** in the chat log a whisper about Gate Wolf and nothing public; on the Compendium tab (Creatures, Gate Wolf) the pill says **Only you** and the Share button is back. Open Creatures, Gate Wolf first if it is not on screen.
+
+```js
+await (async () => {
+  const p = globalThis.__p6 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
+  await p.until(() => (p.scholar.getFlag(p.M, "pendingActions") ?? []).length === 0);
+  const about = game.messages.contents.filter(m => /Gate Wolf/.test(m.content ?? ""));
+  p.check("no public message anywhere mentions Gate Wolf", about.every(m => Array.isArray(m.whisper) && m.whisper.length > 0), about.map(m => `${(m.whisper ?? []).length ? "whisper" : "PUBLIC"}: ${m.content}`).join(" | "));
+  p.check("the owner was told, privately", about.some(m => (m.whisper ?? []).includes(game.user.id) && /stays private/.test(m.content)), about.length);
+  p.check("the party's book still has no Gate Wolf", !p.api.compendium.view(p.friend).entries.creatures.some(c => c.key === "gate-wolf" || c.id === "gate-wolf"));
+  p.check("the Hub says Only you for it", !p.root() || !/Gate Wolf/.test(p.text()) || /Only you/.test(p.text()), "open Creatures, Gate Wolf");
+  p.check("nothing is queued", (p.scholar.getFlag(p.M, "pendingActions") ?? []).length === 0);
+  p.check("no DC, odds, percentage or pace", !p.leaks());
+  return p.done();
+})();
+```
+
 ## Group C: keyboard and a narrow window
 
-## Step 20 [Player]: keyboard only, on both tabs
+## Step 23 [Player]: keyboard only, on both tabs
 
 Click on blank space inside the window (not on a button). Press **Tab**: the first ring lands on **Display**. Keep pressing **Tab** and **Shift+Tab**; use **Enter** or **Space** to press things. On the **Research** tab: tab to a project card and open it, tab to a skill and choose it, tab to **One day more**, to **Queue**. Open **Put the project aside**: focus lands on **Keep**; Enter on Keep puts it back. On the **Compendium** tab: tab to a category, an entry, **Share with the party**. **What you should see:** every control you land on shows a clear ring, nothing is skipped, and Escape still closes the window.
 
@@ -429,7 +485,7 @@ await (async () => {
 })();
 ```
 
-## Step 21 [Player]: a narrow window at large text
+## Step 24 [Player]: a narrow window at large text
 
 Open **Display**, choose **175%**, and drag the window down to its minimum width (about 300px). Look at the **Research** tab with a project selected, and at the **Compendium** tab with Gate Blade open. **What you should see:** the two panes stack; step boxes wrap onto several rows without overlapping; long text wraps; badges (SELECTED, Queued, Shared, Only you) are never split; nothing is cut off at the right edge and there is no sideways scrollbar.
 
@@ -447,7 +503,7 @@ await (async () => {
 })();
 ```
 
-## Step 22 [GM]: CLEANUP (always run this, even if a step failed)
+## Step 25 [GM]: CLEANUP (always run this, even if a step failed)
 
 ```js
 // [GM] CLEANUP: deletes everything the gate made and puts back what it changed. Safe to run twice.
@@ -471,8 +527,8 @@ await (async () => {
   await attempt("the shared Compendium", async () => {
     const book = game.settings.get(M, "sharedCompendium");
     if (!book) return;
-    const drop = entries => Object.fromEntries(Object.entries(entries ?? {}).filter(([k]) => !k.startsWith("g6-")));
-    const next = { ...book, materials: drop(book.materials), experiments: drop(book.experiments) };
+    const drop = entries => Object.fromEntries(Object.entries(entries ?? {}).filter(([k]) => !/^(g6-|gate-)/.test(k)));
+    const next = { ...book, materials: drop(book.materials), experiments: drop(book.experiments), creatures: drop(book.creatures), regions: drop(book.regions) };
     if (JSON.stringify(next) !== JSON.stringify(book)) await game.settings.set(M, "sharedCompendium", next);
   });
   await attempt("audit ledger", async () => {
@@ -492,8 +548,8 @@ await (async () => {
   await attempt("publish the cleaned registry", () => api.publishDefinitions());
   api.gm.clearLog();
   delete globalThis.__g6;
-  return { problems, actorsLeft: game.actors.filter(a => names.includes(a.name)).length, downtimeOpen: api.downtime.isOpen(), testUsersCharacter: user?.character?.name ?? null, sharedLeft: Object.keys(game.settings.get(M, "sharedCompendium")?.materials ?? {}).filter(k => k.startsWith("g6-")).length, audit: api.audit.scan() };
+  return { problems, actorsLeft: game.actors.filter(a => names.includes(a.name)).length, downtimeOpen: api.downtime.isOpen(), testUsersCharacter: user?.character?.name ?? null, sharedLeft: ["materials", "experiments", "creatures", "regions"].flatMap(k => Object.keys(game.settings.get(M, "sharedCompendium")?.[k] ?? {})).filter(k => /^(g6-|gate-)/.test(k)).length, audit: api.audit.scan() };
 })();
 ```
 
-Expected: `problems: []`, `actorsLeft: 0`, `downtimeOpen: false`, `sharedLeft: 0`, and the audit list empty. In the Player window, run `delete globalThis.__p6` (or just reload).
+Expected: `problems: []`, `actorsLeft: 0`, `downtimeOpen: false`, `sharedLeft: 0` (it counts the gate's materials, experiments, creatures and regions in the shared Compendium: `gate-wolf` and `g6-field` are dropped too), and the audit list empty. In the Player window, run `delete globalThis.__p6` (or just reload).

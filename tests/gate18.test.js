@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { as, env, getApi, getUsers, makeActor, measure, quietly, snapshot, world } from "./fake-world.js";
 import { build } from "../scripts/hub/app.js";
+import { build as buildReview } from "../scripts/queue/review-app.js";
 import { installFakeApplication } from "./fake-application.js";
 import { chatLeaks } from "./helpers.js";
 
@@ -29,16 +30,16 @@ const gateWorld = options => world({ downtime: 0, iron: 0, fang: 0, perClientDef
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 test("the stage 11b gate doc: steps are labelled, click-through steps say what you should see, screenshots are asked for only where layout matters", () => {
-  assert.deepEqual([...GATE.keys()], Array.from({ length: 22 }, (_, i) => i + 1));
+  assert.deepEqual([...GATE.keys()], Array.from({ length: 25 }, (_, i) => i + 1));
   for (const [step, entry] of GATE) {
     assert.match(entry.who, /^\[(GM|Player)\]( and \[(GM|Player)\])?\s*$/, `step ${step} says who runs it`);
-    assert.ok(entry.code, `step ${step} has a code block`);
-    assert.equal((entry.text.match(/```js/g) ?? []).length, 1, `step ${step} has ONE code block`);
-    if (/\[Player\]/.test(entry.who) && step > 3) assert.match(entry.text, /What you should see|you should see/i, `click-through step ${step} says what to see`);
+    assert.equal(entry.code !== null, step !== 21, `step ${step} code block (only the GM's click-through in the queue window has none)`);
+    if (entry.code) assert.equal((entry.text.match(/```js/g) ?? []).length, 1, `step ${step} has ONE code block`);
+    if ((/\[Player\]/.test(entry.who) && step > 3) || step === 21) assert.match(entry.text, /What you should see|you should see/i, `click-through step ${step} says what to see`);
   }
   const screenshots = [...GATE].filter(([, e]) => /send me a screenshot/i.test(e.text)).map(([n]) => n);
-  assert.deepEqual(screenshots, [4, 16, 21], "screenshots: the Research tab, a Compendium experiment entry, the narrow layout");
-  assert.match(gateDoc, /version must be \*\*0\.19\.0\*\*/);
+  assert.deepEqual(screenshots, [4, 16, 24], "screenshots: the Research tab, a Compendium experiment entry, the narrow layout");
+  assert.match(gateDoc, /version must be \*\*\d+\.\d+\.\d+\*\*/);
   assert.match(gateDoc, /Force-reload BOTH windows first/);
   assert.match(gateDoc, /game\.user\.name, game\.user\.isGM/);
   assert.match(MODULE_VERSION, /^\d+\.\d+\.\d+$/);
@@ -54,7 +55,7 @@ test("GATE 18: every code step runs, in order, and the click-through steps are p
   const expectPass = async (step, user) => {
     const sink = [];
     console.log = (...args) => sink.push(args.map(String).join(" "));
-    try { assert.equal(await runBlock(step, user), "ALL PASS", `step ${step} did not report ALL PASS:\n${sink.filter(l => l.startsWith("FAIL")).join("\n")}`); } finally { console.log = logged; }
+    try { assert.equal(await runBlock(step, user), "ALL PASS", `step ${step} did not report ALL PASS:\n${sink.join("\n").split("\n").filter(l => l.startsWith("FAIL")).join("\n")}`); } finally { console.log = logged; }
   };
   installFakeApplication();
   await quietly(async () => {
@@ -160,10 +161,30 @@ test("GATE 18: every code step runs, in order, and the click-through steps are p
     await as(testUser, () => app.redraw());
     seen(/Shared[\s\S]*Everyone in the party can read this\.|Only you/);
     await expectPass(19, testUser);
+    // Steps 20-22: share the creature, the GM rejects it THROUGH THE QUEUE WINDOW (a click), the player's block checks the chat
+    await click("set-category", '[data-category="creatures"]');
+    await click("select-entry", '[data-entry="gate-wolf"]');
+    await click("share-entry");
+    await expectPass(20, testUser);
+    const wolfRow = api.queue.list([scholar]).find(r => r.action.type === "share");
+    assert.match(wolfRow.label, /^Share: Gate Wolf \(creature\)$/);
+    env.chat.length = 0;
+    const review = new (buildReview())(api);
+    await as(gm, async () => {
+      await review.render({ force: true });
+      review.element.querySelector(`[data-action="reject"][data-action-id="${wolfRow.action.id}"]`).click();
+      await wait(40);
+    });
+    assert.equal(api.queue.list([scholar]).length, 0, "the row left the queue window");
+    await as(gm, async () => { await review.close(); });
+    await as(testUser, () => app.redraw());                    // (in Foundry the live update does this)
+    await expectPass(22, testUser);
+    seen(/Gate Wolf[\s\S]*Only you can read this\./);
+
     // Group C: keyboard, and the narrow layout. jsdom has no layout engine or stylesheet, so the ring and the geometry are stubbed here; the real values are what the person checks.
     globalThis.getComputedStyle = () => ({ outlineStyle: "solid", outlineWidth: "2px" });
     await as(testUser, () => app.element.querySelector('[data-action="toggle-display"]').focus());
-    await expectPass(20, testUser);
+    await expectPass(23, testUser);
     const root = app.element.querySelector(".pfp-hub");
     for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 300);
     Object.defineProperty(root, "scrollWidth", { value: 300, configurable: true });
@@ -171,10 +192,10 @@ test("GATE 18: every code step runs, in order, and the click-through steps are p
     const frame = app.element.closest(".application") ?? app.element;
     frame.getBoundingClientRect = () => ({ width: 300 });
     await wait(20);
-    await expectPass(21, testUser);
+    await expectPass(24, testUser);
     delete globalThis.getComputedStyle;
     assert.deepEqual(chatLeaks(env.chat), [], "no chat message carries a DC or a roll");
-    const cleanup = await runBlock(22, gm);
+    const cleanup = await runBlock(25, gm);
     assert.deepEqual(cleanup, { problems: [], actorsLeft: 0, downtimeOpen: false, testUsersCharacter: null, sharedLeft: 0, audit: [] });
     await as(testUser, () => app.close());
   });
@@ -208,8 +229,8 @@ test("GATE 18: SETUP refuses to run against real data, and runs twice; CLEANUP w
     assert.equal((await runBlock(2, gm)).already, "set up");
     await as(testUser, () => getApi().definitions.refresh());
     assert.equal(await runBlock(3, testUser), "ALL PASS");
-    assert.deepEqual((await runBlock(22, gm)).problems, []);
-    assert.deepEqual((await runBlock(22, gm)).problems, []);
+    assert.deepEqual((await runBlock(25, gm)).problems, []);
+    assert.deepEqual((await runBlock(25, gm)).problems, []);
   });
   assert.equal(game.actors.getName("Gate Scholar"), undefined);
   assert.deepEqual(measure(w.ann).stash, {});

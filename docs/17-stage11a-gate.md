@@ -14,7 +14,7 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.19.0**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.19.1**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]

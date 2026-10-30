@@ -21,6 +21,7 @@ import { planEdit, planReject, planResolve, planSubmit } from "./reservation.js"
 import { runBatch } from "./queue.js";
 import { esc } from "./review.js";
 import * as work from "./work.js";
+import { resultRecipients, whisper } from "../chat.js";
 import { noteRegionExplored } from "../compendium/store.js";
 import { resolveShare } from "../compendium/share.js";
 import { applyStationUpgrade } from "../stations/store.js";
@@ -166,7 +167,9 @@ async function returnQueued(actor, actionId, { chat, verb }) {
     if (work.isWorkType(action.type)) {
       await work.note([`${action.type} ${verb}: ${described.label} for ${actor.name}`, text, action.daysReserved ? `${action.daysReserved} day(s) refunded` : ""].filter(Boolean).join("; "));
     }
-    if (chat) await postNote(actor, `<p><strong>${esc(actor.name)}</strong>: the GM returned "${esc(described.label)}". ${action.daysReserved} day(s) refunded.${text ? ` ${esc(text)}.` : ""}</p>`);
+    // A share is private until the GM approves it: its rejection is whispered to the owners and the GM, never posted publicly (v0.19.1).
+    if (chat && action.type === "share") await whisper(resultRecipients(actor), `<p><strong>${esc(actor.name)}</strong>: the GM did not share "${esc(action.params?.name ?? described.label)}" with the party. It stays private.</p>`);
+    else if (chat) await postNote(actor, `<p><strong>${esc(actor.name)}</strong>: the GM returned "${esc(described.label)}". ${action.daysReserved} day(s) refunded.${text ? ` ${esc(text)}.` : ""}</p>`);
     return { refunded: action.daysReserved, ...(text ? { returned: text } : {}) };
   });
 }

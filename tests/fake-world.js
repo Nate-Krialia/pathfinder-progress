@@ -96,6 +96,30 @@ function makeItem(actor, data) {
   return item;
 }
 
+/** Give a fake actor the delayed player-side copy and the `updateActor` echo (see makeActor). `user` is the player whose client receives it. */
+function enableEcho(actor, user, delay = 30) {
+  const pending = new Set();
+  const echo = actor.echo = {
+    delay, delivered: 0, held: false,
+    seen: structuredClone(actor.rawFlags()),
+    write(keys) {
+      keys.forEach(key => pending.add(key));
+      if (echo.held) return;
+      setTimeout(() => echo.deliver(), delay);
+    },
+    async deliver() {
+      if (!pending.size) return;
+      const keys = [...pending];
+      pending.clear();
+      echo.seen = structuredClone(actor.rawFlags());
+      echo.delivered++;
+      const changes = { flags: { [M]: Object.fromEntries(keys.map(k => [k, true])) } };
+      for (const fn of listeners.updateActor ?? []) await als.run({ user }, () => fn(actor, changes));
+    }
+  };
+  return echo;
+}
+
 function makeActor(name, { copper = 0, owners = [] } = {}) {
   const flags = {};
   const items = collection([]);
@@ -103,11 +127,16 @@ function makeActor(name, { copper = 0, owners = [] } = {}) {
     id: newId("actor"), name, type: "character", flags, items, copper, owners, rolls: [],
     get isOwner() { return game.user.isGM || owners.includes(game.user.id); },
     testUserPermission: user => owners.includes(user.id),
-    getFlag: (scope, key) => (scope === M ? clone(flags[key]) : undefined),
-    async setFlag(scope, key, value) { flags[key] = clone(value); },
+    rawFlags: () => flags,
+    // Real Foundry: a player's own copy of the actor changes when the server's update ARRIVES, in a later task, not when the GM client's write resolves.
+    // `actor.echo = { delay }` (see enableEcho) makes the fake do that: non-GM clients read a copy that is refreshed `delay` ms after a write, and the
+    // `updateActor` hook fires on the player's client then.
+    getFlag: (scope, key) => (scope === M ? clone((actor.echo && !game.user?.isGM ? actor.echo.seen : flags)[key]) : undefined),
+    async setFlag(scope, key, value) { flags[key] = clone(value); actor.echo?.write([key]); },
     async update(data) {
       await latency();
       tick("actor.update");
+      actor.echo?.write(Object.keys(data).filter(path => path.startsWith(`flags.${M}.`)).map(path => path.slice(`flags.${M}.`.length).split(".")[0]));
       for (const [path, value] of Object.entries(data)) {
         if (path.startsWith(`flags.${M}.`)) {
           const key = path.slice(`flags.${M}.`.length);
@@ -404,6 +433,6 @@ async function everyFailureLeavesNothingHalfDone(label, build, op, minWrites = 4
 }
 
 
-export { env, as, collection, makeToken, makeScene, makeItem, makeActor, world, quietly, loudly, stashOf, pendingOf, measure, events, snapshot, addNode, nodeOf, craft, gatherCall, resolve, everyFailureLeavesNothingHalfDone, listeners, latency, fireHook, fireHookAs, newId };
+export { enableEcho, env, as, collection, makeToken, makeScene, makeItem, makeActor, world, quietly, loudly, stashOf, pendingOf, measure, events, snapshot, addNode, nodeOf, craft, gatherCall, resolve, everyFailureLeavesNothingHalfDone, listeners, latency, fireHook, fireHookAs, newId };
 export const getApi = () => api;
 export const getUsers = () => users;

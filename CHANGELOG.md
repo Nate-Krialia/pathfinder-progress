@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.19.1
+
+Two bugs from gate 18 in real Foundry.
+
+- **Bug 1: a Hub action's status line and focus.** Reproduced first, on a strict fake that now delivers Foundry's update echo the way the real one does (`enableEcho`: the player's own copy of the actor changes in a later task than the relayed write, and `updateActor` fires then). Proven causes: (a) **Start researching** asked for focus on the new project's card, but the draw that followed the handler still had the OLD data (no such card yet), so the request was used up on that draw and the later echo draw had nothing to focus (focus ended on the window, failing at echo delays of 1, 30 and 400 ms); (b) the window said nothing while the relay was still answering: the echo (and the strip) update BEFORE the reply sets the result line, so the line was blank for the length of the round trip (failing test with a 400 ms reply). Not reproduced: the "queued" line being cleared by the echo of its own write (it is not, at any echo delay; a mutation that does clear it is caught) and Put aside losing focus to the page body (a mutation-safe fix is in anyway, see below). Fixes: every Hub action now sets **"Working on it..."** at once and the result when the reply arrives; focus requests (`#requestFocus`) wait for the first draw that has their control (up to `HUB.focusWaitMs`, 3 s), are cancelled by the person's own click or Tab, and Put aside now asks for the window itself (`window`) after it succeeds. The line still clears when something ELSE changes the queue (the GM resolving or rejecting it).
+- **Bug 2: a rejected Compendium share was announced in PUBLIC chat** ("the GM returned Share: Gate Wolf"), from the GM queue window's Reject (chat on by default). A share rejection is now whispered to the character's owners and the GM ("... did not share "X" with the party. It stays private."), never public. Audit of the other queue chat paths: see the report; only share changed.
+- Gate 18: Steps 5, 8, 9, 10 and 17 wait for the result line; Step 10 checks a second follow of the same lead is refused in plain words; Step 16 has a preflight and accepts a curly apostrophe; Step 17 says to share only Gate Ore and Gate Star; Step 18 says to use the code, not the window; new Steps 20 to 22 (share the wolf, the GM rejects it in the queue window, nothing public); the old 20 to 22 are now 23 to 25; CLEANUP also drops `gate-wolf` and `g6-field` from the shared Compendium (`sharedLeft` counts materials, experiments, creatures and regions).
+- Tests: new `tests/hub-echo.test.js` (17: four flows at three echo delays, the GM-resolves case, the slow-reply case), `tests/queue-chat.test.js` (2), `tests/hub-wiring.test.js` (the screen-reader test now expects the two lines "Working on it..." and the result, each heard once), `tests/gate18.test.js`.
+- No manifest change except the version: no server restart; force-reload both windows (Ctrl+Shift+R).
+
 ## 0.19.0
 
 The Stage 11b round: the Research and Compendium tabs of the Downtime Hub, and leads.

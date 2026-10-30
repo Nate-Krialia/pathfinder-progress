@@ -41,6 +41,11 @@ A player client reads **no definition pack** (both packs are hidden from players
 - **Compendium tab** (`viewmodels-compendium.js`): Materials, Creatures, Regions, Experiments; only what the character has experienced (no "???"). Sharing is **Only you / Queued / Shared**, worked out by comparing the character's entry to the shared book; Share queues a `share` item for the GM, Cancel removes it. A rejected share cannot be told apart from a cancel or a force-end (all just remove the queue row), so the Hub shows NO "Not shared" line: the entry simply goes back to "Only you".
 - Focus: auto-selecting the only project moves no focus; Open in Research, Put aside, Keep and Start researching each set a one-shot focus request (`#wantFocus`) consumed on the next draw.
 
+### Hub actions and Foundry's update echo; queue chat (v0.19.1)
+
+- A player's write is relayed to the GM client. The player's own copy of the actor changes when the server's update ARRIVES (the `updateActor` echo), which can be before or after the relay's reply. So a Hub action (1) sets a "Working on it..." line at once, then the result line when the reply arrives; (2) never clears a "queued" line on the echo of its own write (the line clears only when the action later leaves the queue after having been seen there); (3) asks for focus with `#requestFocus(key)`, which waits for the first draw that HAS the control (up to `HUB.focusWaitMs`, cancelled by the person's own click or Tab; the key `window` is the Hub root). The strict fake delivers this echo: `enableEcho` in `tests/fake-world.js`, used by `tests/hub-echo.test.js`.
+- **Queue chat.** `reject` (the GM queue window's Reject, chat on by default) posts a public note for most kinds ("the GM returned ..."). A **share** rejection is whispered to the owners and the GM instead (a share is private until approved); approval was already a whisper. Craft and gather summaries, and commission craft summaries, are public by design; research, explore, build and share results are whispers or the GM log.
+
 ## Offline queue (players submit any time)
 Sockets only reach online clients, so the queue lives in data players can write:
 1. Each player's actor has a `pendingActions` flag.
