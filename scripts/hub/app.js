@@ -42,13 +42,13 @@ export function build() {
         // Keys must match the buttons' data-action values EXACTLY (kebab-case).
         "switch-tab"(event, target) { return this.#set({ tab: target.dataset.tab }); },
         "set-filter"(event, target) { return this.#set({ filter: target.dataset.filter }); },
-        "select-recipe"(event, target) { return this.#replace(selectRecipe(this.state, target.dataset.recipe || null)); },
-        "pick-material"(event, target) { return this.#replace(pickMaterial(this.state, target.dataset.slot, target.dataset.material)); },
-        "clear-slot"(event, target) { return this.#replace(pickMaterial(this.state, target.dataset.slot, null)); },
+        "select-recipe"(event, target) { return this.#replace(selectRecipe(this.hubState, target.dataset.recipe || null)); },
+        "pick-material"(event, target) { return this.#replace(pickMaterial(this.hubState, target.dataset.slot, target.dataset.material)); },
+        "clear-slot"(event, target) { return this.#replace(pickMaterial(this.hubState, target.dataset.slot, null)); },
         "pick-station"(event, target) { return this.#set({ stationId: target.dataset.station }); },
-        "toggle-queue"() { return this.#set({ showQueue: !this.state.showQueue }); },
-        "toggle-display"() { return this.#set({ showDisplay: !this.state.showDisplay }); },
-        "toggle-switch"() { return this.#set({ showSwitch: !this.state.showSwitch }); },
+        "toggle-queue"() { return this.#set({ showQueue: !this.hubState.showQueue }); },
+        "toggle-display"() { return this.#set({ showDisplay: !this.hubState.showDisplay }); },
+        "toggle-switch"() { return this.#set({ showSwitch: !this.hubState.showSwitch }); },
         "switch-character"(event, target) { return this.showCharacter(game.actors.get(target.dataset.actor)); },
         "set-text-size"(event, target) { return this.#display({ textSize: Number(target.dataset.value) }); },
         "set-theme"(event, target) { return this.#display({ theme: target.dataset.value }); },
@@ -66,7 +66,7 @@ export function build() {
       super({ position: { ...HUB.defaultSize, ...savedPosition() }, ...options });
       this.api = api;
       this.actor = actor;
-      this.state = { ...emptyState(), display: normalizeDisplay(readSetting(HUB.displaySetting)) };
+      this.hubState = { ...emptyState(), display: normalizeDisplay(readSetting(HUB.displaySetting)) };
       this.announcements = [];
     }
 
@@ -78,7 +78,7 @@ export function build() {
     showCharacter(actor) {
       if (!actor) return undefined;
       this.actor = actor;
-      this.state = { ...emptyState(), display: this.state.display, tab: this.state.tab, layout: this.state.layout };
+      this.hubState = { ...emptyState(), display: this.hubState.display, tab: this.hubState.tab, layout: this.hubState.layout };
       return this.render({ force: true });
     }
 
@@ -93,7 +93,7 @@ export function build() {
       this.#observer = new ResizeObserver(entries => {
         const width = entries[0]?.contentRect?.width ?? 0;
         const layout = width > 0 && width < HUB.stackBelowPx ? "narrow" : "wide";
-        if (layout !== this.state.layout) { this.state = { ...this.state, layout }; this.#paint(); }
+        if (layout !== this.hubState.layout) { this.hubState = { ...this.hubState, layout }; this.#paint(); }
       });
       this.#observer.observe(this.element);
     }
@@ -126,8 +126,8 @@ export function build() {
     }
 
     #compose() {
-      const facts = readFacts(this.api, this.actor, this.state);
-      return { model: hubModel(facts, this.state), facts };
+      const facts = readFacts(this.api, this.actor, this.hubState);
+      return { model: hubModel(facts, this.hubState), facts };
     }
 
     #ensureShell(content) {
@@ -162,11 +162,11 @@ export function build() {
     /** Redraw now with the data as it is (live updates, a click). No flicker: only changed parts are replaced. */
     redraw() { if (this.element) this.#apply(this.element, this.#compose()); }
 
-    #set(change) { this.state = { ...this.state, ...change }; this.redraw(); }
-    #replace(state) { this.state = state; this.redraw(); }
+    #set(change) { this.hubState = { ...this.hubState, ...change }; this.redraw(); }
+    #replace(state) { this.hubState = state; this.redraw(); }
     #display(change) {
-      this.state = { ...this.state, display: withDisplay(this.state.display, change) };
-      writeSetting(HUB.displaySetting, this.state.display);
+      this.hubState = { ...this.hubState, display: withDisplay(this.hubState.display, change) };
+      writeSetting(HUB.displaySetting, this.hubState.display);
       this.redraw();
     }
 
@@ -177,14 +177,14 @@ export function build() {
 
     async #queueCraft() {
       const { facts } = this.#compose();
-      const request = craftRequest(facts, this.state);
-      const model = hubModel(facts, this.state);
+      const request = craftRequest(facts, this.hubState);
+      const model = hubModel(facts, this.hubState);
       const button = model.body.detail?.buttons?.queue;
       if (!request || !button || button.disabled) return;      // an aria-disabled button never gets here; this is the belt to that brace
       try {
         const recipe = facts.recipes[request.recipe];
         const action = await this.api.queue.submit(this.actor, "craft", { recipe: request.recipe, selection: request.selection, stationId: request.stationId });
-        this.state = { ...this.state, picks: {}, stationId: null };
+        this.hubState = { ...this.hubState, picks: {}, stationId: null };
         this.#announce(S.queued(recipe.name, action?.daysReserved ?? request.days));
       } catch (error) {
         this.#announce(S.queueFailed(error.message));

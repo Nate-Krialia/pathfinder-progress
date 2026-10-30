@@ -11,6 +11,9 @@ import { emptyState, formulaeTab, hubModel, pickMaterial, selectRecipe } from ".
 import { renderHubMain } from "../scripts/hub/render.js";
 import { findings } from "./scan.js";
 import * as events from "../scripts/events.js";
+import { build as buildReview } from "../scripts/queue/review-app.js";
+import { FakeApplicationV2, RENDER_STATES, REAL_MEMBERS, collisions, installFakeApplication } from "./fake-application.js";
+import { readFileSync } from "node:fs";
 
 const api = () => getApi();
 const M = "pathfinder-progress";
@@ -79,7 +82,7 @@ test("CHARACTERS: a player lists the characters they own; the default is their a
 
 // The window class ------------------------------------------------------------------------------------------------------
 function fakeWindow(w) {
-  globalThis.foundry.applications.api.ApplicationV2 = class { constructor(o) { this.options = o; } render() {} };
+  installFakeApplication();     // the STRICT stand-in: read-only getters like state/element/id, the real render lifecycle, a real DOM
   const Hub = build();
   const app = new Hub(api(), w.ann);
   app.redraw = () => { app.redraws = (app.redraws ?? 0) + 1; };
@@ -91,22 +94,22 @@ test("WINDOW: every data-action the page draws has a handler, and the handlers c
   const w = await playerWorld();
   const { app, actions } = fakeWindow(w);
   const f = await facts(w, { recipeId: DAGGER });
-  const html = renderHubMain(hubModel({ ...f, characters: [{ id: "a", name: "A" }, { id: "b", name: "B" }], queue: [{ id: "q", label: "x", days: 1 }] }, { ...app.state, recipeId: DAGGER, showQueue: true, showDisplay: true, showSwitch: true }));
+  const html = renderHubMain(hubModel({ ...f, characters: [{ id: "a", name: "A" }, { id: "b", name: "B" }], queue: [{ id: "q", label: "x", days: 1 }] }, { ...app.hubState, recipeId: DAGGER, showQueue: true, showDisplay: true, showSwitch: true }));
   const used = [...new Set([...html.matchAll(/data-action="([a-z-]+)"/g)].map(m => m[1]))];
   assert.deepEqual(used.filter(name => typeof actions[name] !== "function"), []);
   click(actions, app, "select-recipe", { recipe: DAGGER });
-  assert.equal(app.state.recipeId, DAGGER);
+  assert.equal(app.hubState.recipeId, DAGGER);
   click(actions, app, "pick-material", { slot: "blade", material: "iron" });
-  assert.deepEqual(app.state.picks, { blade: "iron" });
+  assert.deepEqual(app.hubState.picks, { blade: "iron" });
   click(actions, app, "clear-slot", { slot: "blade" });
-  assert.deepEqual(app.state.picks, {});
+  assert.deepEqual(app.hubState.picks, {});
   click(actions, app, "set-filter", { filter: "weapon" });
   click(actions, app, "switch-tab", { tab: "research" });
-  assert.deepEqual([app.state.filter, app.state.tab], ["weapon", "research"]);
+  assert.deepEqual([app.hubState.filter, app.hubState.tab], ["weapon", "research"]);
   click(actions, app, "toggle-display");
   click(actions, app, "toggle-queue");
   click(actions, app, "toggle-switch");
-  assert.deepEqual([app.state.showDisplay, app.state.showQueue, app.state.showSwitch], [true, true, true]);
+  assert.deepEqual([app.hubState.showDisplay, app.hubState.showQueue, app.hubState.showSwitch], [true, true, true]);
   assert.ok(app.redraws >= 8, "each click redraws");
 });
 
@@ -116,22 +119,22 @@ test("WINDOW: display choices are remembered per player in a client setting, and
   click(actions, app, "set-text-size", { value: "175" });
   click(actions, app, "set-theme", { value: "contrast" });
   click(actions, app, "set-font", { value: "hyperlegible" });
-  assert.deepEqual(app.state.display, { textSize: 175, theme: "contrast", font: "hyperlegible" });
+  assert.deepEqual(app.hubState.display, { textSize: 175, theme: "contrast", font: "hyperlegible" });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(env.values[HUB.displaySetting], { textSize: 175, theme: "contrast", font: "hyperlegible" });
   click(actions, app, "reset-display");
-  assert.deepEqual(app.state.display, HUB.defaultDisplay);
+  assert.deepEqual(app.hubState.display, HUB.defaultDisplay);
   click(actions, app, "set-text-size", { value: "999" });
-  assert.equal(app.state.display.textSize, 100, "an unknown size is ignored");
+  assert.equal(app.hubState.display.textSize, 100, "an unknown size is ignored");
 });
 
 test("WINDOW: Queue the craft submits through api.queue.submit, says what happened in words, and the slots start empty again", async () => {
   const w = await playerWorld();
   const { app, actions } = fakeWindow(w);
-  app.state = { ...app.state, recipeId: DAGGER, picks: { ...SEL } };
+  app.hubState = { ...app.hubState, recipeId: DAGGER, picks: { ...SEL } };
   await as(w.annUser, () => click(actions, app, "queue-craft"));
   assert.match(app.announcements[0], /^Craft queued: .+\. \d+ days? reserved\.$/);
-  assert.deepEqual(app.state.picks, {});
+  assert.deepEqual(app.hubState.picks, {});
   assert.equal((await facts(w)).queue.length, 1);
   assert.doesNotMatch(app.announcements.join(" "), /\bDC\b|odds|%/);
 });
@@ -139,7 +142,7 @@ test("WINDOW: Queue the craft submits through api.queue.submit, says what happen
 test("WINDOW: a button that is off does nothing: no slot filled, nothing queued", async () => {
   const w = await playerWorld();
   const { app, actions } = fakeWindow(w);
-  app.state = { ...app.state, recipeId: DAGGER, picks: { blade: "iron" } };     // a slot is still empty
+  app.hubState = { ...app.hubState, recipeId: DAGGER, picks: { blade: "iron" } };     // a slot is still empty
   await as(w.annUser, () => click(actions, app, "queue-craft"));
   assert.equal(app.announcements.length, 0);
   assert.equal((await facts(w)).queue.length, 0);
@@ -149,7 +152,7 @@ test("WINDOW: a button that is off does nothing: no slot filled, nothing queued"
 test("WINDOW: a refusal from the queue is shown in plain words and nothing is lost", async () => {
   const w = await playerWorld();
   const { app, actions } = fakeWindow(w);
-  app.state = { ...app.state, recipeId: DAGGER, picks: { ...SEL } };
+  app.hubState = { ...app.hubState, recipeId: DAGGER, picks: { ...SEL } };
   app.api = { ...api(), queue: { ...api().queue, submit: async () => { throw new Error("Ann cannot afford the 5 gp station fee."); } } };
   await as(w.annUser, () => click(actions, app, "queue-craft"));
   assert.match(app.announcements[0] ?? "", /^Couldn't queue the craft: /);
@@ -167,9 +170,9 @@ test("WINDOW: cancelling a queued item gives it back and says so", async () => {
 test("WINDOW: switching character starts fresh (empty slots, no recipe) but keeps the display and the tab", async () => {
   const w = await playerWorld();
   const { app } = fakeWindow(w);
-  app.state = { ...app.state, recipeId: DAGGER, picks: { blade: "iron" }, display: { textSize: 150, theme: "dark", font: "standard" }, tab: "formulae" };
+  app.hubState = { ...app.hubState, recipeId: DAGGER, picks: { blade: "iron" }, display: { textSize: 150, theme: "dark", font: "standard" }, tab: "formulae" };
   app.showCharacter(w.ann);
-  assert.deepEqual([app.state.recipeId, app.state.picks, app.state.display.textSize], [null, {}, 150]);
+  assert.deepEqual([app.hubState.recipeId, app.hubState.picks, app.hubState.display.textSize], [null, {}, 150]);
 });
 
 test("WINDOW: the saved size and position are only used when sensible", () => {
@@ -263,4 +266,195 @@ test("ENTRY: api.hub.open exists and the Hub never reads a definition pack on a 
   const src = (await import("node:fs")).readFileSync("scripts/hub/facts.js", "utf8") + (await import("node:fs")).readFileSync("scripts/hub/app.js", "utf8");
   assert.doesNotMatch(src, /game\.packs|getDocuments|PACKS\./);
   void w; void openHub; void pickMaterial; void selectRecipe;
+});
+
+// The strict ApplicationV2 (a real-Foundry bug the first fake let through: `this.state = ...` threw because ApplicationV2.state is a getter) ----------
+test("STRICT FAKE: it behaves like the real class: read-only getters throw on assignment, render() is a no-op until forced, and state moves through the real values", async () => {
+  installFakeApplication();
+  class Plain extends FakeApplicationV2 {
+    static DEFAULT_OPTIONS = { id: "plain-app", window: { title: "Plain" } };
+    async _renderHTML() { return "<p>hi</p>"; }
+    _replaceHTML(result, content) { content.innerHTML = result; }
+  }
+  const app = new Plain();
+  for (const name of REAL_MEMBERS.getters) assert.throws(() => { app[name] = {}; }, TypeError, `assigning ${name} must throw like Foundry`);
+  assert.throws(() => { app.options.window = {}; }, TypeError, "options is frozen");
+  assert.equal(app.state, RENDER_STATES.NONE);
+  await app.render();
+  assert.equal(app.state, RENDER_STATES.NONE, "a plain render() never opens a closed window");
+  assert.equal(app.element, undefined);
+  const seen = [];
+  const original = app._renderHTML.bind(app);
+  app._renderHTML = async (...args) => { seen.push(app.state); return original(...args); };
+  await app.render({ force: true });
+  assert.deepEqual([seen, app.state, app.rendered, app.id, app.element.id, app.title], [[RENDER_STATES.RENDERING], RENDER_STATES.RENDERED, true, "plain-app", "plain-app", "Plain"]);
+  await app.render();
+  assert.equal(seen.length, 2, "now a plain render redraws");
+  await app.close();
+  assert.deepEqual([app.state, app.element, document.body.children.length], [RENDER_STATES.CLOSED, undefined, 0]);
+});
+
+test("STRICT FAKE: the old kind of bug is caught: a subclass that assigns this.state in its constructor cannot even be built", () => {
+  installFakeApplication();
+  class Broken extends FakeApplicationV2 { constructor(o) { super(o); this.state = { tab: "x" }; } }
+  assert.throws(() => new Broken(), TypeError);
+  class AlsoBroken extends FakeApplicationV2 { go() { this.element = null; } }
+  assert.throws(() => new AlsoBroken().go(), TypeError);
+});
+
+test("COLLISIONS: nothing HubWindow or the review window defines or assigns shadows a real ApplicationV2 member (only the documented extension points)", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  const hub = new (build())(api(), w.ann);
+  const review = new (buildReview())(api());
+  assert.deepEqual(collisions(hub), []);
+  assert.deepEqual(collisions(review), []);
+  // What each defines on its own, for the record: these are the public names we added to the class.
+  const own = instance => Object.getOwnPropertyNames(Object.getPrototypeOf(instance)).filter(n => n !== "constructor").sort();
+  assert.deepEqual(own(hub), ["_onClose", "_onPosition", "_onRender", "_renderHTML", "_replaceHTML", "redraw", "showCharacter", "title", "viewedId"]);
+  assert.deepEqual(Object.keys(hub).filter(k => !Object.keys(new FakeApplicationV2()).includes(k)).sort(), ["actor", "announcements", "api", "hubState"]);
+  assert.deepEqual(own(review), ["_onRender", "_renderHTML", "_replaceHTML"]);
+  assert.deepEqual(Object.keys(review).filter(k => !Object.keys(new FakeApplicationV2()).includes(k)).sort(), ["api", "results"]);
+  // The collision check really catches one.
+  class Bad extends FakeApplicationV2 { get state() { return 1; } render() {} }
+  assert.deepEqual(collisions(new Bad()), ["render", "state"]);
+});
+
+test("COLLISIONS: no source line assigns to a read-only ApplicationV2 member (a static guard that does not depend on any fake)", () => {
+  const readOnly = REAL_MEMBERS.getters.filter(name => name !== "title");
+  for (const file of ["scripts/hub/app.js", "scripts/queue/review-app.js"]) {
+    const source = readFileSync(file, "utf8");
+    for (const name of readOnly) assert.doesNotMatch(source, new RegExp(`this\\.${name}\\s*(=(?!=)|\\+=|\\|\\|=|\\?\\?=)`), `${file} assigns this.${name}, which is a read-only getter on ApplicationV2`);
+    assert.doesNotMatch(source, /\bthis\.options\s*=(?!=)/, `${file} replaces this.options`);
+    assert.doesNotMatch(source, /\bapp\.(state|element|id)\s*=(?!=)/);
+  }
+});
+
+test("REAL WINDOW: HubWindow renders for real on the strict fake, and EVERY action in `actions` is driven through real clicks", async () => {
+  const w = await playerWorld();
+  const dom = installFakeApplication();
+  const errors = [];
+  const onError = event => errors.push(event.error ?? event.message);
+  window.addEventListener("error", onError);
+  await as(w.annUser, async () => {
+    const Hub = build();
+    const app = new Hub(api(), w.ann);
+    assert.equal(app.state, RENDER_STATES.NONE, "the window's own state does not touch ApplicationV2's");
+    assert.equal(app.hubState.tab, "formulae");
+    await app.render({ force: true });
+    assert.equal(app.state, RENDER_STATES.RENDERED);
+    assert.equal(app.title, "Downtime: Ann");
+    assert.equal(app.viewedId, w.ann.id);
+    const root = () => app.element.querySelector(".pfp-hub");
+    const main = () => app.element.querySelector(".pfp-main");
+    const live = () => app.element.querySelector(".pfp-live").textContent;
+    const pressed = new Set();
+    const press = async (action, where = "") => {
+      const target = [...app.element.querySelectorAll(`[data-action="${action}"]${where}`)].find(b => b.getAttribute("aria-disabled") !== "true");
+      assert.ok(target, `a live ${action} button is on the page`);
+      target.click();
+      pressed.add(action);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return target;
+    };
+    assert.match(main().textContent, /Downtime: Ann/);
+    assert.equal(root().dataset.theme, "parchment");
+
+    // Formulae: a card, the filter, the slots (empty), a pick per slot.
+    await press("set-filter", '[data-filter="weapon"]');
+    await press("select-recipe");
+    assert.equal(app.hubState.recipeId, DAGGER);
+    assert.ok([...app.element.querySelectorAll(".pfp-slot-status")].every(el => /Nothing chosen yet/.test(el.textContent)), "every slot starts empty on screen");
+    const slots = [...app.element.querySelectorAll("fieldset.pfp-slot")];
+    assert.ok(slots.length >= 1);
+    for (let i = 0; i < slots.length; i++) {
+      const option = app.element.querySelectorAll("fieldset.pfp-slot")[i].querySelector('[data-action="pick-material"]');   // re-read: every click redraws
+      assert.ok(option, "each slot offers a material");
+      option.click();
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    pressed.add("pick-material");
+    assert.equal(Object.keys(app.hubState.picks).length, slots.length, "one pick per slot");
+    await press("clear-slot");
+    await press("pick-material");
+    await press("pick-station").catch(() => {});       // only drawn when several workshops fit; a single one is still a button
+    // Queue it for real.
+    const queueButton = app.element.querySelector('[data-action="queue-craft"]');
+    assert.equal(queueButton.getAttribute("aria-disabled"), null, "the button is on");
+    queueButton.click();
+    pressed.add("queue-craft");
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.match(live(), /^Craft queued: .+\. \d+ days? reserved\.$/);
+    assert.equal((await facts(w)).queue.length, 1);
+    assert.deepEqual(app.hubState.picks, {}, "the slots are empty again");
+    assert.match(main().textContent, /1 queued/);
+
+    // The queue panel and Cancel.
+    await press("toggle-queue");
+    await press("cancel-queued");
+    assert.match(live(), /Cancelled: .+ Your days and materials are back\./);
+    assert.equal((await facts(w)).queue.length, 0);
+
+    // Display settings: each one changes the root's attributes and is saved.
+    await press("toggle-display");
+    await press("set-text-size", '[data-value="175"]');
+    assert.match(root().getAttribute("style"), /--pfp-font-size:24\.5px/);
+    await press("set-theme", '[data-value="contrast"]');
+    assert.equal(root().dataset.theme, "contrast");
+    await press("set-font", '[data-value="hyperlegible"]');
+    assert.equal(root().dataset.font, "hyperlegible");
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.deepEqual(env.values[HUB.displaySetting], { textSize: 175, theme: "contrast", font: "hyperlegible" });
+    await press("reset-display");
+    assert.deepEqual([root().dataset.theme, root().dataset.font], ["parchment", "standard"]);
+    await press("toggle-display");
+
+    // Tabs, the placeholders, the layout and the position.
+    await press("switch-tab", '[data-tab="research"]');
+    assert.match(main().textContent, /Coming in a later stage/);
+    await press("switch-tab", '[data-tab="formulae"]');
+    for (const [width, layout] of [[500, "narrow"], [900, "wide"]]) { dom.resize(app.element, width); await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(root().dataset.layout, layout, `${width}px`); }
+    app.setPosition({ left: 40, top: 50, width: 520, height: 610 });
+    await new Promise(resolve => setTimeout(resolve, HUB.saveDebounceMs + 100));
+    assert.deepEqual(env.values[HUB.sizeSetting], { left: 40, top: 50, width: 520, height: 610 });
+
+    // The rest of `actions`: placeholders, the switcher (no button with one character: call it as the handler would be), toggles.
+    const actions = Hub.DEFAULT_OPTIONS.actions;
+    await press("ask-crafter").catch(() => {});           // aria-disabled: the capture guard must swallow it
+    const ask = app.element.querySelector('[data-action="ask-crafter"]');
+    ask.click(); pressed.add("ask-crafter");
+    const research = { closest: () => null, dataset: {} };
+    for (const name of ["ask-crafter", "open-research"]) await actions[name].call(app, {}, research);
+    pressed.add("open-research");
+    await actions["toggle-switch"].call(app, {}, research); pressed.add("toggle-switch");
+    await actions["switch-character"].call(app, {}, { dataset: { actor: w.ann.id } }); pressed.add("switch-character");
+    assert.equal(app.hubState.recipeId, null, "switching character starts fresh");
+    assert.deepEqual([...Object.keys(actions)].filter(name => !pressed.has(name)), [], "every action was driven");
+    assert.deepEqual(errors, [], "nothing threw while clicking");
+
+    // An aria-disabled button does nothing when clicked.
+    await press("select-recipe");
+    const before = JSON.stringify(app.hubState);
+    app.element.querySelector('[data-action="queue-craft"]').click();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(JSON.stringify(app.hubState), before);
+    assert.equal(app.element.querySelector('[data-action="queue-craft"]').getAttribute("aria-disabled"), "true");
+    await app.close();
+    assert.equal(app.state, RENDER_STATES.CLOSED);
+  });
+  window.removeEventListener("error", onError);
+});
+
+test("REAL WINDOW: openHub re-targets the one window it opened, and a second call does not open a second", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  await as(w.annUser, async () => {
+    const first = openHub(api(), w.ann);
+    await first.render();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const again = openHub(api(), w.ann);
+    assert.equal(again, first);
+    assert.equal(document.querySelectorAll(".pfp-hub-window").length, 1);
+    await first.close();
+  });
 });

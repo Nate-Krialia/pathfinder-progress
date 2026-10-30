@@ -11,6 +11,7 @@ import { capResults } from "../scripts/queue/review.js";
 import { build, unhandledAction } from "../scripts/queue/review-app.js";
 import { renderReview } from "../scripts/queue/review.js";
 import { asPage, openDowntime, seedRecords } from "./helpers.js";
+import { installFakeApplication } from "./fake-application.js";
 
 const MODULE = "pathfinder-progress";
 const registry = loadDefinitions(seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }))).registry;
@@ -37,10 +38,8 @@ function install(actors) {
   const notices = { info: [], warn: [], error: [] };
   let n = 0;
   globalThis.game = { user: { isGM: true }, i18n: { localize: t => t }, actors: list, settings: { get: (s, k) => (k === "downtime" ? openDowntime(list.map(a => a.id)) : clone(values[k])), set: async (s, k, v) => { values[k] = clone(v); } } };
-  globalThis.foundry = {
-    utils: { randomID: () => `id${++n}` },
-    applications: { api: { ApplicationV2: class { constructor(o) { this.options = { ...this.constructor.DEFAULT_OPTIONS, ...o }; this.renders = 0; } async render() { this.renders++; } } } }
-  };
+  globalThis.foundry = { utils: { randomID: () => `id${++n}` } };
+  installFakeApplication();      // the strict ApplicationV2 stand-in (read-only getters, the real render lifecycle, a real DOM)
   globalThis.CONFIG = { PF2E: { skills: { crafting: { label: "Crafting" } } } };
   globalThis.ChatMessage = { create: async () => {}, getSpeaker: () => ({}) };
   globalThis.CSS = { escape: s => s };
@@ -55,8 +54,17 @@ async function setup() {
   await research.startProject(api, { actor: a, recipe: "dagger-spider-fang" });
   const Window = build();
   const app = new Window(api);
-  // A minimal element: the days input and a click listener registry.
-  app.element = { querySelector: () => ({ value: app.daysInput ?? "" }), addEventListener() {} };
+  // Count the real draws (an own method on the instance is fine; the strict base would refuse to overwrite a getter).
+  app.renders = 0;
+  const draw = app._renderHTML.bind(app);
+  app._renderHTML = async (...args) => { app.renders++; return draw(...args); };
+  await app.render({ force: true });
+  app.setDaysInput = async (actionId, value) => {
+    await app.render();           // the row exists now: draw it, then type into ITS input, as a person would
+    const input = app.element.querySelector(`input[data-days-for="${actionId}"]`);
+    assert.ok(input, `the window shows a days box for ${actionId}`);
+    input.value = value;
+  };
   return { a, notices, app, actions: Window.DEFAULT_OPTIONS.actions };
 }
 const call = (app, actions, name, dataset = {}) => actions[name].call(app, {}, { dataset });
@@ -106,7 +114,7 @@ test("a failing action shows an error row and never throws out of the handler; R
 test("Resolve, Reject, Set days, Refresh and Accept each do their job", async () => {
   const { a, app, actions } = await setup();
   const first = await queue.submit(a, "research", { projectId: DAGGER }, 2);
-  app.daysInput = "5";
+  await app.setDaysInput(first.id, "5");
   await call(app, actions, "edit-days", { actor: "a1", actionId: first.id });
   assert.equal(pending(a)[0].daysReserved, 5);
   await call(app, actions, "reject", { actor: "a1", actionId: first.id });
@@ -129,7 +137,7 @@ test("Resolve, Reject, Set days, Refresh and Accept each do their job", async ()
 test("a bad Set days value reports the error and keeps the window alive", async () => {
   const { a, notices, app, actions } = await setup();
   const first = await queue.submit(a, "research", { projectId: DAGGER }, 2);
-  app.daysInput = "999";
+  await app.setDaysInput(first.id, "999");
   await call(app, actions, "edit-days", { actor: "a1", actionId: first.id });
   assert.match(notices.error.at(-1), /cannot raise to 999/);
   assert.equal(pending(a)[0].daysReserved, 2);

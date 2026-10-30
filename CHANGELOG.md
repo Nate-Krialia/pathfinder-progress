@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.1
+
+Fix: the Downtime Hub did not open in real Foundry (gate 17 Step 4). `TypeError: Cannot set property state of #<ApplicationV2> which has only a getter`.
+
+- **Root cause.** `HubWindow` kept its own window state in `this.state`, but `ApplicationV2.state` is a read-only getter (its render lifecycle: NONE, RENDERING, RENDERED, CLOSING, CLOSED), so the constructor threw. The first fake `ApplicationV2` in the tests had no such getter, so every test passed. The window's own state is now `this.hubState` (a name nothing in Foundry uses).
+- **Audit.** Every name `HubWindow` and the review window define or assign was checked against the v14.369 `ApplicationV2` declarations (the community `foundry-vtt-types` package for 14.369; foundryvtt.com itself is not reachable from the build sandbox). `state` was the only collision. The scene-controls tool, the sheet header control (`onClick` on a header entry is in the v14 types), `DEFAULT_OPTIONS`, `actions` binding, `_renderHTML`/`_replaceHTML`/`_onRender`/`_onPosition`/`_onClose`, `render({ force: true })` and `foundry.applications.instances` match the declarations.
+- **A stricter fake.** `tests/fake-application.js` mirrors the real class: read-only getters (state, id, element, rendered, title, window, classList, form, minimized, hasFrame, children, parent) that throw on assignment, a frozen `options`, the real render lifecycle and its order (a plain `render()` never opens a closed window), clicks on `[data-action]` routed to `actions` with the real `this` and arguments, and a real DOM (jsdom, a new dev dependency). Both the Hub tests and the review-window tests now run on it (the review test used to assign `app.element`, which the real class also forbids). A collision check compares what the windows define with the full member list of the real class, and a static test refuses any assignment to a read-only member.
+- Tests: 926 in all (6 new). `tests/hub-wiring.test.js` now renders the Hub for real and clicks every action in `actions` through the DOM.
+- No manifest change (the version only): a force-reload of both windows is enough if you already restarted for 0.18.0.
+
 ## 0.18.0
 
 The Downtime Hub window (frame and Formulae tab) and one leak fix (Stage 11a; `docs/11-hub-design.md` with `docs/11b-hub-addendum.md` winning).

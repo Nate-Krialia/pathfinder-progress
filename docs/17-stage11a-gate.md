@@ -1,4 +1,4 @@
-# 17 Stage 11a gate (real Foundry): the Downtime Hub window, and the chat leak fix (v0.18.0)
+# 17 Stage 11a gate (real Foundry): the Downtime Hub window, and the chat leak fix (v0.18.1)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. This gate is mostly a **click-through**: steps labelled **[Player]** without a code block are things to open, click and look at, and each ends with exactly what you should see. A few steps have ONE code block (SETUP, CLEANUP, the GM's nudges, two console checks). Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, that is because layout is the point and a test cannot see it. The steps are in groups; do a group or two at a time.
 
@@ -10,17 +10,17 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 **Safety.** Everything uses throwaway things named "Gate ...": the characters **Gate Smith** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`g5-town`, `g5-away`, `g5-ore`, `g5-steel`, `g5-ember`, `g5-star`, `g5-moon`, `g5-bench`, `g5-forge`, `g5-blade`, `g5-vest`, `g5-draught`); they exist only until you reload the GM window, and SETUP registers them again and publishes them to the Player. No real campaign recipe is used. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left something behind. CLEANUP always works, is safe to run twice, and also removes the shared Compendium entries the gate wrote.
 
-**Restart note.** This release adds a stylesheet and a font to the module manifest, so after updating the module **restart the Foundry server** (not just reload the page) and relaunch the world.
+**Restart note.** 0.18.0 added a stylesheet and a font to the module manifest, so that update needed a **restart of the Foundry server**. 0.18.1 changes nothing in the manifest but its version (it fixes the window opening in real Foundry), so if you already restarted for 0.18.0, updating the module and force-reloading both windows is enough.
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.18.0**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.18.1**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.18.0"]` in the GM window and `["Test", false, "0.18.0"]` in the Player window.
+Expected: `["<your GM name>", true, "0.18.1"]` in the GM window and `["Test", false, "0.18.1"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 

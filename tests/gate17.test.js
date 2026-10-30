@@ -39,8 +39,8 @@ test("the stage 11a gate doc: steps are labelled, click-through steps say what y
   }
   const screenshots = [...GATE].filter(([, e]) => /screenshot/i.test(e.text)).map(([n]) => n);
   assert.deepEqual(screenshots, [4, 5, 11, 33, 34, 37], "screenshots are asked for at the open, the sheet button, the form, 175%, high contrast, and narrow");
-  assert.match(gateDoc, /version must be \*\*0\.18\.0\*\*/);
-  assert.match(gateDoc, /restart the Foundry server/i);
+  assert.match(gateDoc, /version must be \*\*0\.18\.1\*\*/);
+  assert.match(gateDoc, /restart of the Foundry server/i);
   assert.match(gateDoc, /game\.user\.name, game\.user\.isGM/);
   assert.match(gateDoc, /Force-reload BOTH windows first/);
   assert.match(MODULE_VERSION, /^\d+\.\d+\.\d+$/);

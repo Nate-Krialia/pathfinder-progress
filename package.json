@@ -7,6 +7,7 @@
     "build:packs": "node build/pack.mjs"
   },
   "devDependencies": {
-    "@foundryvtt/foundryvtt-cli": "^3.0.5"
+    "@foundryvtt/foundryvtt-cli": "^3.0.5",
+    "jsdom": "^29.1.1"
   }
 }
