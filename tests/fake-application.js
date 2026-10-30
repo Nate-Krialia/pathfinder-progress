@@ -111,6 +111,7 @@ export class FakeApplicationV2 {
       if (first) await this._preRender(context, ro); else await this._preRender(context, ro);
       const result = await this._renderHTML(context, ro);
       if (first) { this.#element = await this._renderFrame(ro); }
+      if (!first) this._updateFrame(ro);
       const content = this.#element.querySelector(".window-content");
       await this._replaceHTML(result, content, ro);
       if (first) { document.body.append(this.#element); globalThis.foundry?.applications?.instances?.set(this.#id, this); this._attachFrameListeners(); }
@@ -165,6 +166,10 @@ export class FakeApplicationV2 {
   async _prepareContext() { return {}; }
   async _renderHTML() { throw new Error("subclasses must implement _renderHTML"); }
   _replaceHTML() { throw new Error("subclasses must implement _replaceHTML"); }
+  /** Like the real class: the frame's title is read when the frame is BUILT, and again only if the render options ask for it (options.window.title). */
+  _updateFrame(options) {
+    if (options.window && "title" in options.window) this.#element.querySelector(".window-title").textContent = this.title;
+  }
   async _renderFrame() {
     const frame = document.createElement(this.options.tag);
     frame.id = this.#id;

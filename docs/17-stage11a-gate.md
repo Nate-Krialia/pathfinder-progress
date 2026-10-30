@@ -1,8 +1,8 @@
-# 17 Stage 11a gate (real Foundry): the Downtime Hub window, and the chat leak fix (v0.18.1)
+# 17 Stage 11a gate (real Foundry): the Downtime Hub window, and the chat leak fix (v0.18.2)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. This gate is mostly a **click-through**: steps labelled **[Player]** without a code block are things to open, click and look at, and each ends with exactly what you should see. A few steps have ONE code block (SETUP, CLEANUP, the GM's nudges, two console checks). Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, that is because layout is the point and a test cannot see it. The steps are in groups; do a group or two at a time.
 
-`tests/gate17.test.js` runs every code block below, in order, in a fake Foundry and plays the click-through steps through the same code the window uses. `docs/screens/` holds screenshots of the window drawn with throwaway data in Chromium (all three colour themes, 100% and 175% text, wide and narrow), so the layout was already looked at before you start. What no test can show is the real Foundry window: the two buttons, real resizing, real focus rings, real fonts, and how a screen reader reads it.
+`tests/gate17.test.js` runs every code block below, in order, in a fake Foundry and plays the click-through steps through the same code the window uses. `docs/screens/` holds screenshots of the window drawn with throwaway data in Chromium **inside a hostile imitation of Foundry's own button, heading and paragraph styles** (all three colour themes, 100% and 175% text, 900px down to 280px wide), and `tests/hub-layout.test.js` checks the same states with real geometry (nothing spilling out of a card, nothing overlapping, every control at least 44px, nothing cut off at the right edge), so the layout was already looked at before you start. What it cannot know is Foundry's REAL styles: the screenshots you send are how that gets checked. What no test can show is the real Foundry window: the two buttons, real resizing, real focus rings, real fonts, and how a screen reader reads it.
 
 **What the gate shows** (the decisions in `docs/11-hub-design.md`, with `docs/11b-hub-addendum.md` winning):
 - **Leak fix.** Totals, DCs and hidden rolls are no longer in ANY chat message (not even a GM-only whisper, which Foundry still hands to every client). The GM reads them with `api.gm.log()` (memory only on the GM's client, never saved).
@@ -10,17 +10,17 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 **Safety.** Everything uses throwaway things named "Gate ...": the characters **Gate Smith** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`g5-town`, `g5-away`, `g5-ore`, `g5-steel`, `g5-ember`, `g5-star`, `g5-moon`, `g5-bench`, `g5-forge`, `g5-blade`, `g5-vest`, `g5-draught`); they exist only until you reload the GM window, and SETUP registers them again and publishes them to the Player. No real campaign recipe is used. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left something behind. CLEANUP always works, is safe to run twice, and also removes the shared Compendium entries the gate wrote.
 
-**Restart note.** 0.18.0 added a stylesheet and a font to the module manifest, so that update needed a **restart of the Foundry server**. 0.18.1 changes nothing in the manifest but its version (it fixes the window opening in real Foundry), so if you already restarted for 0.18.0, updating the module and force-reloading both windows is enough.
+**Restart note.** 0.18.0 added a stylesheet and a font to the module manifest, so that update needed a **restart of the Foundry server**. 0.18.1 and 0.18.2 change nothing in the manifest but its version (0.18.2 is stylesheet and window-title fixes), so if you already restarted for 0.18.0, updating the module and force-reloading both windows is enough (Ctrl+Shift+R, so the browser does not keep the old stylesheet).
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.18.1**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.18.2**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.18.1"]` in the GM window and `["Test", false, "0.18.1"]` in the Player window.
+Expected: `["<your GM name>", true, "0.18.2"]` in the GM window and `["Test", false, "0.18.2"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 
@@ -161,7 +161,7 @@ Close the Hub window. Open **Gate Smith**'s character sheet. Look in the sheet's
 
 In the Hub, click **Switch character**.
 
-**What you should see:** a panel titled **Whose downtime?** with two buttons, **Gate Smith** (marked "selected") and **Gate Friend**. Click **Gate Friend**: the title becomes **Downtime: Gate Friend**, the Formulae list says this character doesn't know any formulae yet, and the days read **12 free, 0 reserved**. Open Switch character again and click **Gate Smith** to go back.
+**What you should see:** a panel titled **Whose downtime?** with two buttons, **Gate Smith** (marked "selected") and **Gate Friend**. Click **Gate Friend**: the title becomes **Downtime: Gate Friend**, the Formulae list says this character doesn't know any formulae yet, and the days read **12 free, 0 reserved**. **The window's own title bar (the frame) changes too**, to **Downtime: Gate Friend**, and says the same as the heading inside it. Open Switch character again and click **Gate Smith** to go back (the title bar follows again).
 
 ## Group B: looking around
 
@@ -184,7 +184,7 @@ Click **Gate Blade**.
 **What you should see:**
 - Two boxes, **Body** ("Body sets the weapon's power.") and **Edge** ("Edge adds bonus damage."), both saying **Nothing chosen yet**. **Nothing is marked "selected" anywhere.**
 - Body offers **Gate Ore**, **Gate Ember**, **Gate Steel** and **Gate Star**; Edge offers **Gate Ember**, **Gate Steel** and **Gate Star** (it needs tier 2 or better). **Gate Moonglass is not offered anywhere** (it is in the bag but you have never met it).
-- Each option shows its tier and its stock, for example **Uses 1 of 6** for Gate Ore.
+- Each option shows its tier and its stock, for example **Uses 1 of 6** for Gate Ore. **Every card grows to fit its own text:** names are left-aligned, the tier sits at the right of the name (under it in a narrow window), and no line of one card prints over the next card or is cut off by the card's edge.
 - Click **Gate Vest** and back to **Gate Blade**: the slots are empty again (choosing a formula never fills anything).
 
 ## Step 10 [Player]: effects you have learned, and ones you have not
@@ -202,7 +202,7 @@ Click **Gate Ore** in Body and **Gate Steel** in Edge. Scroll down in the right 
 
 **What you should see:**
 - Each chosen option is outlined and carries a **SELECTED** badge, and the box says "Using Gate Ore" / "Using Gate Steel".
-- A **Workshop** section with **Gate Bench** (Tier 1, "Gate Town · 1 gp", badges **Cheapest** and **selected**) and **Gate Forge** (Tier 2, "Gate Town · 5 gp").
+- A **Workshop** section with **Gate Bench** (Tier 1, "Gate Town · 1 gp", badges **Cheapest** and **selected**) and **Gate Forge** (Tier 2, "Gate Town · 5 gp"). The **Cheapest** and **selected** badges sit INSIDE the Gate Bench card, under its text, not hidden under the next card.
 - A **What you will get** box: the result is **A tier 1 Gate Blade** (you know the Body), a line "Gate Ore sets the weapon's power (tier 1)", a line "**Edge, Gate Steel: You haven't tried this here yet**", "**Station fee: 1 gp at Gate Bench**", "**Takes N days**" (note the number N), **Materials used:** `1 × Gate Ore`, `1 × Gate Steel`, and the sentence "**A failed craft can lose some materials and teaches you nothing.**" There is no percentage, no odds and no "DC" anywhere.
 - Click **Gate Forge**: the fee line becomes "Station fee: 5 gp at Gate Forge". Click **Gate Bench** again.
 - The **Queue the craft** button is solid (on) and **Ask a crafter instead** is dashed with the line "Commissions arrive in a later stage."
@@ -433,7 +433,7 @@ await (async () => {
 
 Click **Display**. **What you should see:** a panel with **Text size** (100%, 125%, 150%, 175%), **Colours** (Parchment, Dark, High contrast), **Font** (Standard, Easy-read) and **Reset to defaults** and **Done**, the current choices marked "selected". Click **125%**, **150%**, **175%** in turn: the text of the WHOLE window grows each time (real larger text, not a blurry zoom), the layout still fits (scroll if needed), no text is cut off or on top of other text, and the buttons stay easy to hit.
 
-**Send me a screenshot at 175% (Parchment, window wide).**
+**Send me a screenshot at 175% (Parchment, window wide).** Cards must still grow to fit and nothing may overlap.
 
 ## Step 34 [Player]: colours
 
@@ -455,9 +455,9 @@ Set 150%, High contrast and Easy-read, then close the Hub window and open it aga
 
 ## Step 37 [Player]: the window shrinks to a narrow layout
 
-Drag the window's edge until it is **narrower than about 700 pixels**.
+Drag the window's edge until it is **narrower than about 700 pixels**, and then keep going down to about **300 pixels**.
 
-**What you should see:** the list on the left and the craft form on the right **stack**: the list first, the form under it, in one column; nothing overlaps; the whole window scrolls. Widen it again and they go back side by side.
+**What you should see:** the list on the left and the craft form on the right **stack**: the list first, the form under it, in one column; nothing overlaps; the whole window scrolls. **At 300 pixels** the tab row wraps onto several lines (nothing is cut off at the right edge), "Workshops here: ..." wraps, long names wrap, and there is no sideways scrollbar. Try it at 150% and 175% text too. Widen it again and they go back side by side.
 
 **Send me a screenshot of the narrow, stacked window.**
 

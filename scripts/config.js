@@ -282,5 +282,6 @@ export const HUB = {
   themes: ["parchment", "dark", "contrast"],
   fonts: ["standard", "hyperlegible"],
   defaultDisplay: { textSize: 100, theme: "parchment", font: "standard" },
-  basePx: 14                         // the window's text size at 100%; every size in the stylesheet is in rem of this
+  basePx: 14,                        // the window's text size at 100%; every size in the stylesheet is in em of this
+  minTarget: 44                      // px: the smallest a clickable control may be (the stylesheet and the layout checks both use it)
 };

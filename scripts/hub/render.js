@@ -61,12 +61,12 @@ function listPane(list) {
 }
 
 function optionCard(slot, o) {
-  const effect = o.effect.known ? `<ul class="pfp-effects">${o.effect.effects.map(e => `<li>${esc(e)}</li>`).join("")}</ul>` : `<span class="pfp-unknown">${esc(o.effect.text)}</span>`;
+  const effect = o.effect.known ? `<span class="pfp-effects">${o.effect.effects.map(e => `<span class="pfp-effect">${esc(e)}</span>`).join("")}</span>` : `<span class="pfp-unknown">${esc(o.effect.text)}</span>`;
   return `<li>${button({
     action: "pick-material", cls: "pfp-option", focus: `pick:${slot.name}:${o.id}`, pressed: o.selected, data: { slot: slot.name, material: o.id },
     label: `<span class="pfp-option-name">${esc(o.name)}</span><span class="pfp-option-tier">${esc(o.tierText)}</span>`
       + `<span class="pfp-stock${o.stock.short ? " is-short" : ""}">${o.stock.short ? `<strong>${esc(o.stock.word)}.</strong> ` : ""}${esc(o.stock.text)}</span>${effect}`
-      + `${o.selected ? `<span class="pfp-badge">${esc(S.selectedWord)}</span>` : ""}`
+      + `${o.selected ? `<span class="pfp-badges"><span class="pfp-badge">${esc(S.selectedWord)}</span></span>` : ""}`
   })}</li>`;
 }
 
@@ -91,7 +91,7 @@ function stations(st) {
   return `<section class="pfp-stations" aria-label="${esc(st.heading)}"><h3>${esc(st.heading)}</h3><ul class="pfp-options">${st.options.map(o => `<li>${button({
     action: "pick-station", cls: "pfp-option", focus: `station:${o.id}`, pressed: o.selected, data: { station: o.id },
     label: `<span class="pfp-option-name">${esc(o.name)}</span><span class="pfp-option-tier">${esc(o.tierText)}</span><span class="pfp-stock">${esc(o.where)} · ${esc(o.feeText)}</span>`
-      + `${o.cheapest ? `<span class="pfp-badge">${esc(o.cheapest)}</span>` : ""}${o.selected ? `<span class="pfp-badge">${esc(S.selectedWord)}</span>` : ""}`
+      + `${o.cheapest || o.selected ? `<span class="pfp-badges">${o.cheapest ? `<span class="pfp-badge">${esc(o.cheapest)}</span>` : ""}${o.selected ? `<span class="pfp-badge">${esc(S.selectedWord)}</span>` : ""}</span>` : ""}`
   })}</li>`).join("")}</ul></section>`;
 }
 

@@ -1,0 +1,171 @@
+/**
+ * The Downtime Hub render harness (Chromium via Playwright). It draws the SAME render function the window uses, with the real stylesheet, in a page that
+ * behaves like Foundry v14 around it, and checks the layout with real geometry. Used by build/screens.mjs (screenshots) and tests/hub-layout.test.js.
+ *
+ * "Hostile Foundry": Foundry styles every unstyled <button>, <input>, <select>, heading, <p>, <fieldset> and <legend> (a fixed height, centred nowrap
+ * text, margins, borders). The module's CSS has to win against that. The hostile sheets here apply those rules (loaded BEFORE hub.css, as Foundry's are)
+ * at three strengths: a plain element selector, a high-specificity selector, and !important. Every state is rendered with and without them.
+ */
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { HUB } from "../scripts/config.js";
+import { hubModel, learnedKey } from "../scripts/hub/viewmodels.js";
+import { renderHubPage } from "../scripts/hub/render.js";
+import { BENCH, FORGE, STAR_EFFECT, STEEL_EFFECT, makeFacts, makeState } from "../tests/hub-fixtures.js";
+
+const cssUrl = pathToFileURL(new URL("../styles/hub.css", import.meta.url).pathname).href;
+
+export async function launchChromium() {
+  const { chromium } = createRequire(import.meta.url)("playwright");   // pre-installed in the cloud sandbox; it has no ESM entry
+  return chromium.launch();
+}
+
+// What Foundry does to plain elements, three strengths ---------------------------------------------------------------------------------------------------
+const common = (button, extra = "") => `
+  ${button} { height: HEIGHT; line-height: 1; text-align: center; padding: 0 0.5rem; overflow: OVERFLOW; white-space: nowrap; border: 1px solid #555; background: #2a2a2a; color: #eee; font-family: inherit; font-size: 0.875rem ${extra}; }
+  input, select, textarea { height: 2rem; padding: 0 0.5rem; border: 1px solid #555; line-height: 1; }
+  h1, h2, h3, h4 { margin: 0.6rem 0 0.4rem; border-bottom: 1px solid #777; font-weight: 700; line-height: 1.2; text-shadow: none; }
+  h1 { font-size: 2rem; } h2 { font-size: 1.5rem; } h3 { font-size: 1.25rem; } h4 { font-size: 1.1rem; }
+  p { margin: 0.75rem 0; } ul, ol { margin: 0.75rem 0; padding-left: 2rem; } li { margin: 0.25rem 0; }
+  label { display: block; margin: 0.3rem 0; } legend { padding: 0 0.5rem; margin: 0 0 0.5rem; } fieldset { margin: 0.5rem 0; padding: 0 0.5rem 0.5rem; border: 2px groove #666; }
+  span, div, section, nav, header { line-height: 1.6; }`;
+export const HOSTILE = {
+  "plain 2rem hidden": common("button", "").replaceAll("HEIGHT", "2rem").replaceAll("OVERFLOW", "hidden"),
+  "plain 2.5rem visible": common("button", "").replaceAll("HEIGHT", "2.5rem").replaceAll("OVERFLOW", "visible"),
+  "specific 2rem hidden": common(".application.window-app .window-content button, .application button[type='button']", "").replaceAll("HEIGHT", "2rem").replaceAll("OVERFLOW", "hidden"),
+  "important 2.5rem": common("button", " !important; height: 2.5rem !important; line-height: 1 !important; white-space: nowrap !important; overflow: hidden !important; text-align: center !important; padding: 0 0.5rem !important").replaceAll("HEIGHT", "2.5rem").replaceAll("OVERFLOW", "hidden")
+};
+const windowCss = `
+  html, body { margin: 0; background: #444; font-family: "Signika", sans-serif; font-size: 16px; }
+  .application { background: #1b1b1b; color: #ddd; border: 1px solid #000; box-sizing: border-box; }
+  .application .window-content { padding: 0.5rem; overflow: auto; height: 100%; box-sizing: border-box; background: #232323; }`;
+
+// The states ---------------------------------------------------------------------------------------------------------------------------------------------
+const learned = {
+  [learnedKey("gate-blade", "blade", "gate-steel")]: { known: true, effects: STEEL_EFFECT },
+  [learnedKey("gate-blade", "edge", "gate-star")]: { known: true, effects: STAR_EFFECT },
+  [learnedKey("gate-blade", "edge", "gate-ember")]: { known: true, effects: { bonusDamage: { dice: "1d6", type: "fire" } } }
+};
+const base = { learned, stations: [BENCH, FORGE], researching: [{ id: "p1", goalName: "Gate Draught", recipeId: "gate-draught", progress: 1, threshold: 8 }], queue: [{ id: "q1", label: "Craft Gate Vest", days: 1 }] };
+const okPlan = {
+  ok: true, errors: [], plan: {
+    recipeId: "gate-blade", recipeName: "Gate Blade", station: { id: "gate-bench", name: "Gate Bench", tier: 1 }, fee: 1, days: 2,
+    uses: [{ slot: "blade", materialId: "gate-steel", materialName: "Gate Steel", units: 1 }, { slot: "edge", materialId: "gate-star", materialName: "Gate Star", units: 1 }],
+    slots: [{ slot: "blade", effect: { known: true, roles: STEEL_EFFECT } }, { slot: "edge", effect: { known: true, roles: STAR_EFFECT } }], result: { known: true, baseTier: 2 }
+  }
+};
+const long = "Gate Moonglass of the Unbroken Horizon Wanderers";
+const longFacts = makeFacts({
+  ...base, materials: { "gate-iron": { kind: "material", id: "gate-iron", name: long, tier: 1 }, "gate-steel": { kind: "material", id: "gate-steel", name: "Supercalifragilisticexpialidocious-Steel", tier: 2 }, "gate-star": { kind: "material", id: "gate-star", name: "Gate Star", tier: 3 } },
+  recipes: { "gate-blade": { ...makeFacts().recipes["gate-blade"], name: "The Exceedingly Long Named Gate Blade of Wandering Heroes" }, "gate-vest": makeFacts().recipes["gate-vest"] },
+  formulas: [{ recipeId: "gate-blade", name: "x", access: "loan" }, { recipeId: "gate-vest", name: "Gate Vest", access: "owned" }],
+  location: { name: "Gate Town of the Seven Northern Marches and Beyond", stations: ["Gate Bench of the Old Smithy", "Gate Forge of the Deep Mountain Kings"] },
+  stations: [{ ...BENCH, name: "Gate Bench of the Old Smithy", where: "Gate Town of the Seven Northern Marches" }, { ...FORGE, name: "Gate Forge of the Deep Mountain Kings" }],
+  inventory: { "gate-iron": 5, "gate-steel": 1, "gate-star": 1 },
+  learned: { [learnedKey("gate-blade", "edge", "gate-star")]: { known: true, effects: { specialAbility: { title: "Unbelievably Long Special Ability Title", text: "Does a thing that takes a great many words to describe properly, wrapping across several lines.", on: "criticalHit" } } } }
+});
+export const SCENES = {
+  partial: { facts: makeFacts(base), state: makeState({ picks: { blade: "gate-steel" } }) },
+  complete: { facts: makeFacts({ ...base, inventory: { "gate-iron": 5, "gate-steel": 2, "gate-star": 1 }, preview: okPlan }), state: makeState({ picks: { blade: "gate-steel", edge: "gate-star" } }) },
+  closed: { facts: makeFacts({ ...base, downtime: { open: false, participant: false } }), state: makeState({ picks: { blade: "gate-steel", edge: "gate-star" } }) },
+  panels: { facts: makeFacts({ ...base, characters: [{ id: "gate-ann", name: "Gate Ann" }, { id: "gate-bob", name: "Gate Bob of the Long Name" }] }), state: makeState({ picks: { blade: "gate-steel" }, showDisplay: true, showQueue: true, showSwitch: true }) },
+  longNames: { facts: longFacts, state: makeState({ picks: { blade: "gate-iron", edge: "gate-star" }, showQueue: true }) },
+  researching: { facts: makeFacts({ ...base, formulas: [] }), state: makeState({ recipeId: "gate-draught" }) },
+  short: { facts: makeFacts({ ...base, inventory: { "gate-iron": 1, "gate-ember": 1 }, met: ["gate-iron", "gate-ember"], materials: { "gate-iron": { kind: "material", id: "gate-iron", name: "Gate Iron", tier: 1 }, "gate-ember": { kind: "material", id: "gate-ember", name: "Gate Ember", tier: 2 } } }), state: makeState({ recipeId: "gate-vest", picks: { hide: "gate-ember" } }) },
+  empty: { facts: { ...makeFacts(), actor: null, characters: [] }, state: makeState() }
+};
+
+// The checks ---------------------------------------------------------------------------------------------------------------------------------------------
+/** Runs in the page. Returns a list of plain-text problems. */
+function pageChecks({ minTarget }) {
+  const problems = [];
+  const root = document.querySelector(".pfp-hub");
+  const name = el => `${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? `.${el.className.trim().split(/\s+/)[0]}` : ""} "${(el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 36)}"`;
+  const style = el => getComputedStyle(el);
+  const scrolls = el => /(auto|scroll)/.test(style(el).overflowY) || /(auto|scroll)/.test(style(el).overflowX);
+  const els = [root, ...root.querySelectorAll("*")].filter(el => el.getClientRects().length);
+
+  // 1. No element's content spills out of its own box (text overflowing a fixed-height card or a nowrap line).
+  for (const el of els) {
+    if (scrolls(el) || el === root) continue;
+    if (el.scrollHeight > el.clientHeight + 1 && el.clientHeight > 0) problems.push(`content overflows its box vertically (${el.scrollHeight} > ${el.clientHeight}): ${name(el)}`);
+    if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) problems.push(`content overflows its box horizontally (${el.scrollWidth} > ${el.clientWidth}): ${name(el)}`);
+  }
+  // 2. No two siblings overlap (cards, options, slots, buttons, panels), and no two children of one card overlap each other.
+  const overlap = (a, b) => { const x = Math.min(a.right, b.right) - Math.max(a.left, b.left); const y = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top); return x > 1 && y > 1; };
+  const groups = new Map();
+  for (const el of els) { if (el === root) continue; const key = el.parentElement; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(el); }
+  for (const [, siblings] of groups) {
+    const boxes = siblings.map(el => [el, el.getBoundingClientRect()]).filter(([, r]) => r.width > 0 && r.height > 0);
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const [a, ra] = boxes[i], [b, rb] = boxes[j];
+      if (style(a).position === "absolute" || style(b).position === "absolute") continue;
+      if (overlap(ra, rb)) problems.push(`siblings overlap: ${name(a)} / ${name(b)}`);
+    }
+  }
+  // 2b. Nothing in the Hub is positioned absolutely or fixed: badges, pills and bars stay in the flow, so they cannot print over a neighbour.
+  for (const el of els) if (/(absolute|fixed)/.test(style(el).position)) problems.push(`positioned ${style(el).position} (it can cover a neighbour): ${name(el)}`);
+  // 3. Every control is a big enough target.
+  for (const el of root.querySelectorAll("[data-action]")) {
+    const r = el.getBoundingClientRect();
+    if (r.height < minTarget - 0.5 || r.width < minTarget - 0.5) problems.push(`target ${r.width.toFixed(0)}x${r.height.toFixed(0)} is under ${minTarget}px: ${name(el)}`);
+  }
+  // 4. Nothing is cut off at the right edge, and the page itself does not scroll sideways.
+  const vw = document.documentElement.clientWidth;
+  if (document.documentElement.scrollWidth > vw + 1) problems.push(`the page scrolls sideways (${document.documentElement.scrollWidth} > ${vw})`);
+  if (root.scrollWidth > root.clientWidth + 1) problems.push(`the window content is wider than the window (${root.scrollWidth} > ${root.clientWidth})`);
+  for (const el of els) { const r = el.getBoundingClientRect(); if (r.right > vw + 1 && r.width > 0) problems.push(`runs past the right edge (${r.right.toFixed(0)} > ${vw}): ${name(el)}`); }
+  // 5. No text is clipped by an ancestor that hides overflow.
+  for (const el of els) {
+    if (![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
+    const r = el.getBoundingClientRect();
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      const s = style(p);
+      const hideX = /(hidden|clip)/.test(s.overflowX), hideY = /(hidden|clip)/.test(s.overflowY);
+      if (hideX || hideY) {
+        const pr = p.getBoundingClientRect();
+        // Only the axis that hides is a clip (an overflow-y:auto scroller with overflow-x:hidden scrolls vertically: that is not a clip).
+        const clipped = (hideX && (r.right > pr.right + 1 || r.left < pr.left - 1)) || (hideY && !/(auto|scroll)/.test(s.overflowY) && (r.bottom > pr.bottom + 1 || r.top < pr.top - 1));
+        if (clipped) { problems.push(`text clipped by ${name(p)}: ${name(el)}`); break; }
+      }
+    }
+  }
+  return [...new Set(problems)];
+}
+
+/** One page, reused. It is loaded from a real file: a stylesheet link from about:blank to file:// is blocked, which silently renders everything unstyled. */
+export async function openHarness(browser) {
+  const page = await browser.newPage();
+  const file = join(mkdtempSync(join(tmpdir(), "pfp-harness-")), "harness.html");
+  writeFileSync(file, `<!doctype html><meta charset="utf-8"><style id="window">${windowCss}</style><style id="hostile"></style><link rel="stylesheet" href="${cssUrl}"><style id="extra"></style><body></body>`);
+  await page.goto(pathToFileURL(file).href);
+  // Fail loudly if the real stylesheet did not load (a layout "pass" against no CSS at all would mean nothing).
+  const loaded = await page.evaluate(() => { const probe = document.createElement("div"); probe.className = "pfp-hub"; document.body.append(probe); const ok = getComputedStyle(probe).display === "flex"; probe.remove(); return ok; });
+  if (!loaded) throw new Error("the harness could not load styles/hub.css");
+  return page;
+}
+
+/**
+ * Render one state. Options: { scene, theme, textSize, width, hostile (a HOSTILE key or null), font, announce, height, fit, shot (path) }.
+ * Returns { problems, layout }.
+ */
+export async function renderState(page, { scene, theme = "parchment", textSize = 100, width = 900, height, hostile = null, font = "standard", announce = null, shot = null, extraCss = "" }) {
+  const spec = SCENES[scene];
+  const layout = width < HUB.stackBelowPx ? "narrow" : "wide";
+  const model = hubModel(spec.facts, { ...spec.state, layout, display: { theme, textSize, font } });
+  const html = renderHubPage(model, announce ? [announce] : []);
+  const frameHeight = height ?? (layout === "narrow" ? null : 820);
+  await page.setViewportSize({ width, height: frameHeight ?? 900 });
+  await page.evaluate(({ html, hostileCss, extraCss, frameHeight }) => {
+    document.getElementById("hostile").textContent = hostileCss;
+    document.getElementById("extra").textContent = extraCss;
+    document.body.innerHTML = `<div class="application window-app theme-dark" style="width:100%;${frameHeight ? `height:${frameHeight}px` : ""}"><section class="window-content">${html}</section></div>`;
+  }, { html, hostileCss: hostile ? HOSTILE[hostile] : "", extraCss, frameHeight });
+  await page.evaluate(() => document.fonts.ready);
+  const problems = await page.evaluate(pageChecks, { minTarget: HUB.minTarget ?? 44 });
+  if (shot) await page.screenshot({ path: shot, fullPage: layout === "narrow" });
+  return { problems, layout };
+}

@@ -79,11 +79,14 @@ export function build() {
       if (!actor) return undefined;
       this.actor = actor;
       this.hubState = { ...emptyState(), display: this.hubState.display, tab: this.hubState.tab, layout: this.hubState.layout };
-      return this.render({ force: true });
+      // ApplicationV2 reads the title when the frame is BUILT; a later title change has to be asked for: render option window.title (documented in
+      // WindowRenderOptions) refreshes the frame's title, and _onRender below keeps it in step on every draw (belt and braces).
+      return this.render({ force: true, window: { title: this.title } });
     }
 
     /** Interrupting a click on an aria-disabled button: it stays focusable (its reason is on screen) but does nothing. */
     _onRender() {
+      this.#syncTitle();
       if (this.#wired) return;
       this.#wired = true;
       this.element.addEventListener("click", event => {
@@ -96,6 +99,12 @@ export function build() {
         if (layout !== this.hubState.layout) { this.hubState = { ...this.hubState, layout }; this.#paint(); }
       });
       this.#observer.observe(this.element);
+    }
+
+    /** The frame's title follows the viewed character (the frame only reads the title when it is built). */
+    #syncTitle() {
+      const heading = this.window?.title;
+      if (heading && heading.textContent !== this.title) heading.textContent = this.title;
     }
 
     #wired = false;

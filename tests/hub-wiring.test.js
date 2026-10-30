@@ -458,3 +458,19 @@ test("REAL WINDOW: openHub re-targets the one window it opened, and a second cal
     await first.close();
   });
 });
+
+test("REAL WINDOW: the frame's title follows Switch character (the frame only reads the title when it is built)", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  await as(w.gm, async () => {
+    const app = new (build())(api(), w.ann);
+    await app.render({ force: true });
+    const heading = () => app.element.querySelector(".window-title").textContent;
+    assert.deepEqual([heading(), app.title], ["Downtime: Ann", "Downtime: Ann"]);
+    await app.showCharacter(w.bob);
+    assert.equal(app.title, `Downtime: ${w.bob.name}`);
+    assert.equal(heading(), `Downtime: ${w.bob.name}`, "the frame says who the body says");
+    assert.match(app.element.querySelector(".pfp-main").textContent, new RegExp(`Downtime: ${w.bob.name}`));
+    await app.close();
+  });
+});
