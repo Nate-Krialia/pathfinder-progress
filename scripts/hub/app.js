@@ -67,8 +67,11 @@ export function build() {
       this.api = api;
       this.actor = actor;
       this.hubState = { ...emptyState(), display: normalizeDisplay(readSetting(HUB.displaySetting)) };
-      this.announcements = [];
+      this.hubStatus = null;           // the one visible status line: { text, kind: "queued" | "cancelled" | "error", actionId?, seen? }
     }
+
+    /** The visible (and spoken) status lines: none, or the one current line. */
+    get announcements() { return this.hubStatus ? [this.hubStatus.text] : []; }
 
     get title() { return this.actor ? `${S.appTitle}: ${this.actor.name}` : S.appTitle; }
 
@@ -78,6 +81,7 @@ export function build() {
     showCharacter(actor) {
       if (!actor) return undefined;
       this.actor = actor;
+      this.#setStatus(null);
       this.hubState = { ...emptyState(), display: this.hubState.display, tab: this.hubState.tab, layout: this.hubState.layout };
       // ApplicationV2 reads the title when the frame is BUILT; a later title change has to be asked for: render option window.title (documented in
       // WindowRenderOptions) refreshes the frame's title, and _onRender below keeps it in step on every draw (belt and braces).
@@ -87,6 +91,10 @@ export function build() {
     /** Interrupting a click on an aria-disabled button: it stays focusable (its reason is on screen) but does nothing. */
     _onRender() {
       this.#syncTitle();
+      const root = this.element?.querySelector(".pfp-hub");
+      if (root) this.#installKeys(root);
+      // First open: focus goes to the Hub's root, not to a control, so Tab lands on the first control (Display) and no ring appears by itself.
+      if (root && !this.#focused) { this.#focused = true; root.focus({ preventScroll: true }); }
       if (this.#wired) return;
       this.#wired = true;
       this.element.addEventListener("click", event => {
@@ -107,6 +115,29 @@ export function build() {
       if (heading && heading.textContent !== this.title) heading.textContent = this.title;
     }
 
+    /**
+     * Foundry's KeyboardManager cancels Tab (its "cycle view" binding) and similar keys before the browser can move focus, and a Space then scrolls the page. So
+     * Tab, Enter and Space are stopped from bubbling OUT of the Hub root (never preventDefault: the browser still moves focus and presses the button), and only
+     * when the event came from inside the Hub. One listener per frame (not per render); removed on close. Escape and every other key are untouched.
+     */
+    #installKeys(root) {
+      if (this.#root === root) return;
+      this.#removeKeys();
+      this.#root = root;
+      this.#keyHandler = event => { if (HUB.keysKeptInside.includes(event.key) && root.contains(event.target)) event.stopPropagation(); };
+      root.addEventListener("keydown", this.#keyHandler);
+    }
+
+    #removeKeys() {
+      if (this.#root && this.#keyHandler) this.#root.removeEventListener("keydown", this.#keyHandler);
+      this.#root = null;
+      this.#keyHandler = null;
+    }
+
+    #root = null;
+    #keyHandler = null;
+    #focused = false;
+    #statusTimer = null;
     #wired = false;
     #observer = null;
     #saveTimer = null;
@@ -122,7 +153,10 @@ export function build() {
 
     _onClose() {
       this.#observer?.disconnect();
+      this.#removeKeys();
       clearTimeout(this.#saveTimer);
+      clearTimeout(this.#statusTimer);
+      cancelAnimationFrame(this.#paintFrame);
     }
 
     async _renderHTML() {
@@ -136,12 +170,29 @@ export function build() {
 
     #compose() {
       const facts = readFacts(this.api, this.actor, this.hubState);
+      this.#reconcileStatus(facts);
       return { model: hubModel(facts, this.hubState), facts };
+    }
+
+    /** A "Craft queued" line stops being true when its action leaves the queue (resolved, cancelled, gone): drop it then. (Not before it has been seen there: the write can arrive a moment after the submit returns.) */
+    #reconcileStatus(facts) {
+      const status = this.hubStatus;
+      if (status?.kind !== "queued" || !status.actionId) return;
+      if (facts.queue.some(q => q.id === status.actionId)) status.seen = true;
+      else if (status.seen) this.#setStatus(null);
+    }
+
+    /** Set (or clear) the visible status line. It also clears by itself after HUB.statusMs. Clearing never re-announces: the live region only changes when the text does. */
+    #setStatus(status) {
+      clearTimeout(this.#statusTimer);
+      this.hubStatus = status;
+      if (status) this.#statusTimer = setTimeout(() => { this.hubStatus = null; this.redraw(); }, HUB.statusMs);
     }
 
     #ensureShell(content) {
       if (content.querySelector(".pfp-hub")) return;
-      content.innerHTML = `<div class="pfp-hub"><div class="pfp-main"></div><div class="pfp-live" role="status" aria-live="polite" aria-label="${S.liveRegionLabel}"></div></div>`;
+      // tabindex -1: a click on blank space inside the window puts focus INSIDE the Hub (not on the page body), so Tab starts from here.
+      content.innerHTML = `<div class="pfp-hub" tabindex="-1"><div class="pfp-main"></div><div class="pfp-live" role="status" aria-live="polite" aria-label="${S.liveRegionLabel}"></div></div>`;
     }
 
     /** Replace the main part only if it changed, and put focus and scroll back where they were. */
@@ -151,12 +202,15 @@ export function build() {
       const main = root.querySelector(".pfp-main");
       const html = renderHubMain(model);
       if (main.dataset.html !== html) {
-        const focusKey = main.contains(document.activeElement) ? document.activeElement?.dataset?.focusKey : null;
+        const hadFocus = main.contains(document.activeElement);
+        const focusKey = hadFocus ? document.activeElement?.dataset?.focusKey : null;
         const scrolls = Object.fromEntries([...main.querySelectorAll("[data-scroll-key]")].map(el => [el.dataset.scrollKey, el.scrollTop]));
         main.innerHTML = html;
         main.dataset.html = html;
         for (const el of main.querySelectorAll("[data-scroll-key]")) el.scrollTop = scrolls[el.dataset.scrollKey] ?? 0;
-        if (focusKey) [...main.querySelectorAll("[data-focus-key]")].find(el => el.dataset.focusKey === focusKey)?.focus({ preventScroll: true });
+        // Focus the player had stays where it was; if its control is gone (a panel closed, a row left the queue) it falls back to the Hub root, not the page body.
+        // Focus that was NOT in the Hub is never taken.
+        if (hadFocus) ([...main.querySelectorAll("[data-focus-key]")].find(el => focusKey && el.dataset.focusKey === focusKey) ?? root).focus({ preventScroll: true });
       }
       const live = root.querySelector(".pfp-live");
       const text = this.announcements.map(a => `<p>${a.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c])}</p>`).join("");
@@ -179,8 +233,8 @@ export function build() {
       this.redraw();
     }
 
-    #announce(text) {
-      this.announcements = [text, ...this.announcements].slice(0, HUB.announceMax);
+    #announce(status) {
+      this.#setStatus(status);
       this.redraw();
     }
 
@@ -194,9 +248,9 @@ export function build() {
         const recipe = facts.recipes[request.recipe];
         const action = await this.api.queue.submit(this.actor, "craft", { recipe: request.recipe, selection: request.selection, stationId: request.stationId });
         this.hubState = { ...this.hubState, picks: {}, stationId: null };
-        this.#announce(S.queued(recipe.name, action?.daysReserved ?? request.days));
+        this.#announce({ text: S.queued(recipe.name, action?.daysReserved ?? request.days), kind: "queued", actionId: action?.id ?? null, seen: false });
       } catch (error) {
-        this.#announce(S.queueFailed(error.message));
+        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
       }
     }
 
@@ -205,9 +259,9 @@ export function build() {
         const rows = this.api.queue.list([this.actor]);
         const label = rows.find(r => r.action.id === actionId)?.label ?? "";
         await this.api.queue.cancel(this.actor, actionId);
-        this.#announce(S.queueCancelled(label));
+        this.#announce({ text: S.queueCancelled(label), kind: "cancelled" });
       } catch (error) {
-        this.#announce(S.queueFailed(error.message));
+        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
       }
     }
   };

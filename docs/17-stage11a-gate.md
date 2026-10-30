@@ -1,4 +1,4 @@
-# 17 Stage 11a gate (real Foundry): the Downtime Hub window, and the chat leak fix (v0.18.2)
+# 17 Stage 11a gate (real Foundry): the Downtime Hub window, and the chat leak fix (v0.18.3)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. This gate is mostly a **click-through**: steps labelled **[Player]** without a code block are things to open, click and look at, and each ends with exactly what you should see. A few steps have ONE code block (SETUP, CLEANUP, the GM's nudges, two console checks). Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, that is because layout is the point and a test cannot see it. The steps are in groups; do a group or two at a time.
 
@@ -10,17 +10,17 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 **Safety.** Everything uses throwaway things named "Gate ...": the characters **Gate Smith** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`g5-town`, `g5-away`, `g5-ore`, `g5-steel`, `g5-ember`, `g5-star`, `g5-moon`, `g5-bench`, `g5-forge`, `g5-blade`, `g5-vest`, `g5-draught`); they exist only until you reload the GM window, and SETUP registers them again and publishes them to the Player. No real campaign recipe is used. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left something behind. CLEANUP always works, is safe to run twice, and also removes the shared Compendium entries the gate wrote.
 
-**Restart note.** 0.18.0 added a stylesheet and a font to the module manifest, so that update needed a **restart of the Foundry server**. 0.18.1 and 0.18.2 change nothing in the manifest but its version (0.18.2 is stylesheet and window-title fixes), so if you already restarted for 0.18.0, updating the module and force-reloading both windows is enough (Ctrl+Shift+R, so the browser does not keep the old stylesheet).
+**Restart note.** 0.18.0 added a stylesheet and a font to the module manifest, so that update needed a **restart of the Foundry server**. 0.18.1, 0.18.2 and 0.18.3 change nothing in the manifest but its version (0.18.3 is keyboard handling, narrow-window wrapping and the status line), so if you already restarted for 0.18.0, updating the module and force-reloading both windows is enough (Ctrl+Shift+R, so the browser does not keep the old stylesheet).
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.18.2**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.18.3**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.18.2"]` in the GM window and `["Test", false, "0.18.2"]` in the Player window.
+Expected: `["<your GM name>", true, "0.18.3"]` in the GM window and `["Test", false, "0.18.3"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 
@@ -308,7 +308,7 @@ await (async () => {
 
 ## Step 22 [Player]: you learned something (do not close or reload the window)
 
-**What you should see, without touching the window:** the queue is empty again ("Nothing queued"). On Gate Blade, under **Edge**, **Gate Steel** now says "**Gate Steel adds +1d4 fire damage**" instead of "You haven't tried this here yet". Under **Body**, **Gate Steel** STILL says "You haven't tried this here yet" (what you learn is per slot and per material). Choose **Gate Ore** and **Gate Steel** again: **What you will get** lists "Edge: Gate Steel adds +1d4 fire damage" and no unlearned effect.
+**What you should see, without touching the window:** the queue is empty again ("Nothing queued"), and **the line at the bottom of the window ("Craft queued: ... days reserved.") has gone away by itself**: the window never says "queued" in one place and "Nothing queued" in another. (That line also fades out on its own after about 10 seconds, and a "Cancelled: ..." line likewise; a screen reader hears each one once when it appears, and nothing is announced when it goes.) On Gate Blade, under **Edge**, **Gate Steel** now says "**Gate Steel adds +1d4 fire damage**" instead of "You haven't tried this here yet". Under **Body**, **Gate Steel** STILL says "You haven't tried this here yet" (what you learn is per slot and per material). Choose **Gate Ore** and **Gate Steel** again: **What you will get** lists "Edge: Gate Steel adds +1d4 fire damage" and no unlearned effect.
 
 ## Step 23 [Player]: queue a second craft that will fail
 
@@ -455,19 +455,22 @@ Set 150%, High contrast and Easy-read, then close the Hub window and open it aga
 
 ## Step 37 [Player]: the window shrinks to a narrow layout
 
-Drag the window's edge until it is **narrower than about 700 pixels**, and then keep going down to about **300 pixels**.
+Drag the window's edge until it is **narrower than about 700 pixels**, and then keep going: **the window will not get narrower than about 300 pixels** (it has a minimum width now; the resize handle just stops there).
 
-**What you should see:** the list on the left and the craft form on the right **stack**: the list first, the form under it, in one column; nothing overlaps; the whole window scrolls. **At 300 pixels** the tab row wraps onto several lines (nothing is cut off at the right edge), "Workshops here: ..." wraps, long names wrap, and there is no sideways scrollbar. Try it at 150% and 175% text too. Widen it again and they go back side by side.
+**What you should see:** the list on the left and the craft form on the right **stack**: the list first, the form under it, in one column; nothing overlaps; the whole window scrolls. **At 300 pixels** the tab row wraps onto several lines (nothing is cut off at the right edge), "Workshops here: ..." wraps, long names wrap, and there is no sideways scrollbar. Try it at 150% and 175% text too, and open **Display** and **Switch character**: the **SELECTED** badge is never split ("SELECTE / D" or one letter per line); if it does not fit beside a label it drops onto its own line under it, and words such as "Dark" and "High contrast" are never broken in the middle. Widen it again and they go back side by side.
 
 **Send me a screenshot of the narrow, stacked window.**
 
 ## Step 38 [Player]: keyboard only
 
-Click on the empty title area of the Hub window, then use only the keyboard. **What you should see:**
+**Why this step needed a fix:** Foundry cancels Tab (its own "cycle view" key binding) and similar keys before the browser can move focus, so inside an ordinary window Tab did nothing and Space scrolled the page. The Hub now stops Tab, Enter and Space from reaching Foundry's handler (only when the key was pressed inside the Hub; Escape and every other key are untouched, so Escape still closes the window).
+
+**Click on blank space inside the window** (not on a button), then use only the keyboard. **What you should see:** the **first Tab ring lands on Display** (opening the window also puts focus on the window itself, so no ring shows until you press Tab).
 1. **Tab** moves through every control in a sensible order (Display, Switch character if shown, View queue, the tabs, the chips, the formula cards, the slot options, the workshops, Queue the craft, Ask a crafter instead). A **thick blue (or white in High contrast) ring** shows where you are every time.
 2. **Enter** or **Space** presses the control: pick a formula, then pick a material for each slot, with no mouse.
 3. Tab to **Queue the craft** while it is off: it takes focus and its reason is read out; pressing Enter does nothing. Fill the slots, tab to **Queue the craft**, press Enter: the craft is queued, and focus is not lost.
-4. After a live update (for example the GM grants you a day), the focus ring is still on the same button.
+4. After a live update (for example the GM grants you a day), the focus ring is still on the same button. If the button you were on disappears (for example you close a panel with the keyboard), focus goes to the window, not to the page behind it.
+5. **Shift+Tab** goes backwards, and **Escape** still closes the window.
 
 If you can use a screen reader, turn it on and queue a craft: it should announce "Craft queued: ... days reserved." without you moving.
 

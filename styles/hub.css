@@ -37,7 +37,7 @@
 .pfp-hub *, .pfp-hub *::before, .pfp-hub *::after { box-sizing: border-box !important; min-width: 0; }
 .pfp-hub :is(div, section, nav, header, span, p, ul, ol, li, fieldset, legend, label, h1, h2, h3, h4, strong, em, progress) {
   margin: 0; padding: 0; border: 0; background: none; height: auto; min-height: 0; max-height: none; line-height: 1.4; text-align: start; text-transform: none; letter-spacing: normal;
-  font: inherit; font-size: inherit; color: inherit; text-shadow: none; text-decoration: none; white-space: normal; overflow: visible; overflow-wrap: anywhere; float: none; position: static; width: auto;
+  font: inherit; font-size: inherit; color: inherit; text-shadow: none; text-decoration: none; white-space: normal; overflow: visible; overflow-wrap: break-word; float: none; position: static; width: auto;
 }
 .pfp-hub :is(h1, h2, h3, h4, strong) { font-weight: 700; }
 .pfp-hub em { font-style: italic; }
@@ -45,6 +45,11 @@
 .pfp-hub :is(ul, ol) { list-style: none; }
 .pfp-hub :is(div, section, nav, header, ul, li, fieldset) { display: block; }
 .pfp-hub :is(span, strong, em, label) { display: inline; }
+
+/* Ordinary words never split mid-word: text wraps at spaces, and only a single word wider than its whole container breaks (overflow-wrap: break-word). The
+   `anywhere` value is NOT used by default: it lets a flex or grid item shrink to a sliver, which is what broke "Dark" into "Da/rk" in a narrow window. Items in a
+   row do not shrink below their content (flex: 0 0 auto): the row wraps instead. */
+.pfp-hub .pfp-badge, .pfp-hub .pfp-pill, .pfp-hub .pfp-count { white-space: nowrap !important; overflow-wrap: normal !important; word-break: keep-all !important; min-width: max-content !important; flex: 0 0 auto; }
 
 /* ---- Buttons: real <button>s that grow with their content ------------------------------------------------------------------------------------- */
 .pfp-hub button.pfp-btn {
@@ -54,7 +59,7 @@
   height: auto !important; min-height: var(--pfp-target) !important; max-height: none !important; min-width: var(--pfp-target) !important;
   margin: 0 !important; padding: 0.4em 0.8em !important;
   font: inherit !important; font-size: 1em !important; line-height: 1.35 !important; letter-spacing: normal !important; text-transform: none !important; text-shadow: none !important;
-  text-align: start !important; white-space: normal !important; overflow: visible !important; overflow-wrap: anywhere !important; word-break: normal !important;
+  text-align: start !important; white-space: normal !important; overflow: visible !important; overflow-wrap: break-word !important; word-break: normal !important;
   color: var(--pfp-text) !important; background: var(--pfp-card) !important; border: 2px solid var(--pfp-border) !important; border-radius: 0.4em !important;
   cursor: pointer; box-shadow: none !important; justify-content: center !important;
 }
@@ -65,8 +70,12 @@
 .pfp-hub button.pfp-primary { background: var(--pfp-accent) !important; color: var(--pfp-accent-text) !important; border-color: var(--pfp-accent) !important; font-weight: 700 !important; }
 .pfp-hub button.pfp-primary.is-disabled { background: var(--pfp-panel) !important; color: var(--pfp-text) !important; border-color: var(--pfp-border) !important; }
 /* Short buttons (Display, tabs, chips, Cancel...) sit in a row and size to their text; the card-like ones (formulae, materials, workshops) fill the row. */
-.pfp-hub button.pfp-btn:not(.pfp-card):not(.pfp-option) { display: inline-flex !important; flex-direction: row !important; flex-wrap: wrap !important; align-items: center !important; align-content: center !important; column-gap: 0.4em !important; }
+.pfp-hub button.pfp-btn:not(.pfp-card):not(.pfp-option) { flex: 0 0 auto; max-width: 100% !important; display: inline-flex !important; flex-direction: row !important; flex-wrap: wrap !important; align-items: center !important; align-content: center !important; column-gap: 0.4em !important; }
 .pfp-hub button.pfp-card, .pfp-hub button.pfp-option { width: 100%; }
+
+/* The window frame: ApplicationV2 v14 has no min-size option; it clamps to the element's CSS min-width. Keep this equal to HUB.minSize.width (a test checks). */
+.pfp-hub-window { min-width: 300px; }
+.pfp-hub:focus, .pfp-hub:focus-visible { outline: none !important; }   /* focus is put on the root on open so Tab starts at the first control: no ring on the blank root */
 
 .pfp-hub .pfp-row { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; }
 .pfp-hub .pfp-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5em; }
@@ -106,7 +115,8 @@
 .pfp-hub button.pfp-option > .pfp-option-tier { grid-column: 2; justify-self: end; text-align: end; color: var(--pfp-muted); font-size: 0.9em; }
 /* In a narrow window the tier goes UNDER the name instead of beside it (a squeezed name column would break words letter by letter). */
 .pfp-hub[data-layout="narrow"] button.pfp-option { grid-template-columns: minmax(0, 1fr) !important; }
-.pfp-hub[data-layout="narrow"] button.pfp-option > .pfp-option-name, .pfp-hub[data-layout="narrow"] button.pfp-option > .pfp-option-tier { grid-column: 1; justify-self: start; text-align: start; }
+.pfp-hub[data-layout="narrow"] button.pfp-option > .pfp-option-name { grid-column: 1; }   /* stretch (never justify-self: start): fit-content would be as wide as the longest word and break-word would not get to break it */
+.pfp-hub[data-layout="narrow"] button.pfp-option > .pfp-option-tier { grid-column: 1; justify-self: start; text-align: start; }
 .pfp-hub button.pfp-card { gap: 0.25em !important; }
 .pfp-hub .pfp-card-name { display: block; font-weight: 700; }
 .pfp-hub .pfp-card-note { display: block; color: var(--pfp-muted); font-size: 0.9em; }
@@ -139,6 +149,16 @@
 .pfp-hub .pfp-live { border-top: 1px solid var(--pfp-border); padding-top: 0.3em; }
 .pfp-hub .pfp-live:empty { border: 0; padding: 0; }
 .pfp-hub .pfp-live p { font-weight: 700; margin-bottom: 0.2em; }
+
+/* ---- A narrow window: tighter padding, so the nested boxes leave room for an unsplittable badge at large text sizes -------------------------------------- */
+.pfp-hub[data-layout="narrow"] { padding: 0.4em; gap: 0.4em; }
+.pfp-hub[data-layout="narrow"] .pfp-pane { padding: 0.4em; }
+.pfp-hub[data-layout="narrow"] fieldset.pfp-slot { padding: 0.4em 0.4em; }
+.pfp-hub[data-layout="narrow"] .pfp-panel, .pfp-hub[data-layout="narrow"] .pfp-outcome { padding: 0.4em 0.5em; }
+.pfp-hub[data-layout="narrow"] .pfp-fieldset { padding: 0.3em 0.4em; }
+.pfp-hub[data-layout="narrow"] button.pfp-btn { padding: 0.3em 0.5em !important; }
+.pfp-hub[data-layout="narrow"] .pfp-badge { padding: 0 0.3em; letter-spacing: 0; font-size: 0.75em; }
+.pfp-hub[data-layout="narrow"] .pfp-pill { padding: 0.05em 0.45em; }
 
 @media (prefers-reduced-motion: no-preference) { .pfp-hub button.pfp-btn { transition: border-color 0.12s ease, background-color 0.12s ease; } }
 @media (prefers-reduced-motion: reduce) { .pfp-hub *, .pfp-hub *::before, .pfp-hub *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }

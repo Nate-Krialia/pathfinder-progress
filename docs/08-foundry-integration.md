@@ -46,6 +46,8 @@ Sockets only reach online clients, so the queue lives in data players can write:
 ## UI surfaces
 **Player: Downtime Hub** (standalone ApplicationV2 window, opened from a button; optionally a header button on the PF2e sheet later). Tabs: Research, Explore, Commissions, Workshop, Formulas. Shows day budget and queue.
 
+**Keyboard (any window we build).** Foundry's KeyboardManager cancels Tab (its "cycle view" binding) and similar keys before the browser can move focus, so inside an ApplicationV2 window Tab does nothing and Space scrolls the page behind it. Every ApplicationV2 window we build must stop Tab, Enter and Space from bubbling out of its root (never `preventDefault`: the browser still moves focus and presses the button), only for events that came from inside the window, once per frame, removed on close, and give the root `tabindex="-1"` so a click on blank space focuses the window rather than the page. The Hub does this in one place (`scripts/hub/app.js`, `HUB.keysKeptInside`); Escape and other keys stay untouched. The strict test fake cannot reproduce Foundry's own handler, so the proof is the gate (`docs/17`, Step 38).
+
 **Gather dialog**: opened by clicking a node token in the scene; small dialog for skill choice and roll.
 
 **GM tools**

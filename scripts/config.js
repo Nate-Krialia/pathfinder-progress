@@ -273,11 +273,12 @@ export const HUB = {
   sizeSetting: "hubWindow",          // client setting: { left, top, width, height }
   displaySetting: "hubDisplay",      // client setting: { textSize, theme, font }
   defaultSize: { width: 940, height: 680 },
-  minSize: { width: 340, height: 420 },
+  minSize: { width: 300, height: 420 },   // the stylesheet's .pfp-hub-window min-width must equal this (a test checks); ApplicationV2 has no min-size option, it reads the CSS
   stackBelowPx: 700,                 // the two panes stack when the window is narrower than this
   liveDebounceMs: 150,
   saveDebounceMs: 400,
-  announceMax: 5,                    // how many past announcements the live region keeps
+  statusMs: 10000,                   // how long the visible "Craft queued" / "Cancelled" line stays (it also goes as soon as it stops being true)
+  keysKeptInside: ["Tab", "Enter", " "],   // Foundry's KeyboardManager cancels these before the browser can act; the Hub stops them reaching it (never preventDefault)
   textSizes: [100, 125, 150, 175],   // percent
   themes: ["parchment", "dark", "contrast"],
   fonts: ["standard", "hyperlegible"],

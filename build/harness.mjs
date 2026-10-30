@@ -79,8 +79,12 @@ export const SCENES = {
 };
 
 // The checks ---------------------------------------------------------------------------------------------------------------------------------------------
-/** Runs in the page. Returns a list of plain-text problems. */
-function pageChecks({ minTarget }) {
+/**
+ * Runs in the page. Returns a list of plain-text problems.
+ * belowMinimum: the window is narrower than HUB.minSize.width (it cannot be dragged there; the harness draws it anyway as a stress test): an unsplittable badge
+ * may then be wider than the box it sits in, so only the badge, overlap, position and target checks apply.
+ */
+function pageChecks({ minTarget, checkWords, belowMinimum }) {
   const problems = [];
   const root = document.querySelector(".pfp-hub");
   const name = el => `${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? `.${el.className.trim().split(/\s+/)[0]}` : ""} "${(el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 36)}"`;
@@ -92,7 +96,7 @@ function pageChecks({ minTarget }) {
   for (const el of els) {
     if (scrolls(el) || el === root) continue;
     if (el.scrollHeight > el.clientHeight + 1 && el.clientHeight > 0) problems.push(`content overflows its box vertically (${el.scrollHeight} > ${el.clientHeight}): ${name(el)}`);
-    if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) problems.push(`content overflows its box horizontally (${el.scrollWidth} > ${el.clientWidth}): ${name(el)}`);
+    if (!belowMinimum && el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) problems.push(`content overflows its box horizontally (${el.scrollWidth} > ${el.clientWidth}): ${name(el)}`);
   }
   // 2. No two siblings overlap (cards, options, slots, buttons, panels), and no two children of one card overlap each other.
   const overlap = (a, b) => { const x = Math.min(a.right, b.right) - Math.max(a.left, b.left); const y = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top); return x > 1 && y > 1; };
@@ -115,11 +119,11 @@ function pageChecks({ minTarget }) {
   }
   // 4. Nothing is cut off at the right edge, and the page itself does not scroll sideways.
   const vw = document.documentElement.clientWidth;
-  if (document.documentElement.scrollWidth > vw + 1) problems.push(`the page scrolls sideways (${document.documentElement.scrollWidth} > ${vw})`);
-  if (root.scrollWidth > root.clientWidth + 1) problems.push(`the window content is wider than the window (${root.scrollWidth} > ${root.clientWidth})`);
-  for (const el of els) { const r = el.getBoundingClientRect(); if (r.right > vw + 1 && r.width > 0) problems.push(`runs past the right edge (${r.right.toFixed(0)} > ${vw}): ${name(el)}`); }
+  if (!belowMinimum && document.documentElement.scrollWidth > vw + 1) problems.push(`the page scrolls sideways (${document.documentElement.scrollWidth} > ${vw})`);
+  if (!belowMinimum && root.scrollWidth > root.clientWidth + 1) problems.push(`the window content is wider than the window (${root.scrollWidth} > ${root.clientWidth})`);
+  for (const el of belowMinimum ? [] : els) { const r = el.getBoundingClientRect(); if (r.right > vw + 1 && r.width > 0) problems.push(`runs past the right edge (${r.right.toFixed(0)} > ${vw}): ${name(el)}`); }
   // 5. No text is clipped by an ancestor that hides overflow.
-  for (const el of els) {
+  for (const el of belowMinimum ? [] : els) {
     if (![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
     const r = el.getBoundingClientRect();
     for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
@@ -131,6 +135,24 @@ function pageChecks({ minTarget }) {
         const clipped = (hideX && (r.right > pr.right + 1 || r.left < pr.left - 1)) || (hideY && !/(auto|scroll)/.test(s.overflowY) && (r.bottom > pr.bottom + 1 || r.top < pr.top - 1));
         if (clipped) { problems.push(`text clipped by ${name(p)}: ${name(el)}`); break; }
       }
+    }
+  }
+  // 6. Words are not broken mid-word (any word of 12 characters or fewer, where the window is 280px or wider), and a badge, pill or count never splits at all
+  //    (not even between its own words): it wraps as a whole onto its own line, or stays whole.
+  const range = document.createRange();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const parent = node.parentElement;
+    if (!parent || !parent.getClientRects().length) continue;
+    const inBadge = Boolean(parent.closest(".pfp-badge, .pfp-pill, .pfp-count"));
+    if (!inBadge && !checkWords) continue;
+    const lines = (from, to) => { range.setStart(node, from); range.setEnd(node, to); return [...range.getClientRects()].filter(r => r.width > 0); };
+    const split = rects => rects.length > 1 && rects.some(r => Math.abs(r.top - rects[0].top) > 2);
+    if (inBadge && split(lines(0, node.textContent.length))) problems.push(`a badge is split across lines: ${name(parent.closest(".pfp-badge, .pfp-pill, .pfp-count"))}`);
+    if (!checkWords) continue;
+    for (const m of node.textContent.matchAll(/\S+/g)) {
+      if (m[0].length > 12 || /[-\u2013\u2014/]/.test(m[0])) continue;
+      if (split(lines(m.index, m.index + m[0].length))) problems.push(`the word "${m[0]}" is broken across lines: ${name(parent)}`);
     }
   }
   return [...new Set(problems)];
@@ -165,7 +187,7 @@ export async function renderState(page, { scene, theme = "parchment", textSize =
     document.body.innerHTML = `<div class="application window-app theme-dark" style="width:100%;${frameHeight ? `height:${frameHeight}px` : ""}"><section class="window-content">${html}</section></div>`;
   }, { html, hostileCss: hostile ? HOSTILE[hostile] : "", extraCss, frameHeight });
   await page.evaluate(() => document.fonts.ready);
-  const problems = await page.evaluate(pageChecks, { minTarget: HUB.minTarget ?? 44 });
+  const problems = await page.evaluate(pageChecks, { minTarget: HUB.minTarget ?? 44, checkWords: width >= 280, belowMinimum: width < HUB.minSize.width });
   if (shot) await page.screenshot({ path: shot, fullPage: layout === "narrow" });
   return { problems, layout };
 }

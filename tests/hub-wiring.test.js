@@ -311,8 +311,8 @@ test("COLLISIONS: nothing HubWindow or the review window defines or assigns shad
   assert.deepEqual(collisions(review), []);
   // What each defines on its own, for the record: these are the public names we added to the class.
   const own = instance => Object.getOwnPropertyNames(Object.getPrototypeOf(instance)).filter(n => n !== "constructor").sort();
-  assert.deepEqual(own(hub), ["_onClose", "_onPosition", "_onRender", "_renderHTML", "_replaceHTML", "redraw", "showCharacter", "title", "viewedId"]);
-  assert.deepEqual(Object.keys(hub).filter(k => !Object.keys(new FakeApplicationV2()).includes(k)).sort(), ["actor", "announcements", "api", "hubState"]);
+  assert.deepEqual(own(hub), ["_onClose", "_onPosition", "_onRender", "_renderHTML", "_replaceHTML", "announcements", "redraw", "showCharacter", "title", "viewedId"]);
+  assert.deepEqual(Object.keys(hub).filter(k => !Object.keys(new FakeApplicationV2()).includes(k)).sort(), ["actor", "api", "hubState", "hubStatus"]);
   assert.deepEqual(own(review), ["_onRender", "_renderHTML", "_replaceHTML"]);
   assert.deepEqual(Object.keys(review).filter(k => !Object.keys(new FakeApplicationV2()).includes(k)).sort(), ["api", "results"]);
   // The collision check really catches one.
@@ -473,4 +473,198 @@ test("REAL WINDOW: the frame's title follows Switch character (the frame only re
     assert.match(app.element.querySelector(".pfp-main").textContent, new RegExp(`Downtime: ${w.bob.name}`));
     await app.close();
   });
+});
+
+// Keyboard, focus and the transient status line (0.18.3) ---------------------------------------------------------------------------------------------------
+const keydown = (target, key, init = {}) => { const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }); target.dispatchEvent(event); return event; };
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test("KEYBOARD: Tab, Shift+Tab, Enter and Space from inside the Hub never reach a parent (Foundry's own handler), are never preventDefault-ed by us, and nothing else is touched", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  await as(w.annUser, async () => {
+    const app = new (build())(api(), w.ann);
+    await app.render({ force: true });
+    const root = app.element.querySelector(".pfp-hub");
+    const seen = [];
+    const parent = event => seen.push([event.key, event.shiftKey, event.defaultPrevented]);
+    document.body.addEventListener("keydown", parent);
+    const button = app.element.querySelector('[data-action="set-filter"]');
+    for (const [key, init] of [["Tab", {}], ["Tab", { shiftKey: true }], ["Enter", {}], [" ", {}]]) {
+      const event = keydown(button, key, init);
+      assert.equal(event.defaultPrevented, false, `${key}: we never preventDefault (the browser still moves focus / presses the button)`);
+    }
+    assert.deepEqual(seen, [], "none of Tab, Shift+Tab, Enter or Space left the Hub");
+    keydown(root, "Tab");
+    assert.deepEqual(seen, [], "a key pressed on the Hub root itself is kept inside too");
+    // everything else, and Escape in particular (it still closes the window the way Foundry does), bubbles out untouched
+    for (const key of ["Escape", "ArrowDown", "ArrowLeft", "a", "F6", "Home"]) { const event = keydown(button, key); assert.equal(event.defaultPrevented, false, key); }
+    assert.deepEqual(seen.map(([key]) => key), ["Escape", "ArrowDown", "ArrowLeft", "a", "F6", "Home"]);
+    // a key outside the Hub is untouched
+    seen.length = 0;
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    for (const key of ["Tab", "Enter", " "]) keydown(outside, key);
+    assert.deepEqual(seen.map(([key]) => key), ["Tab", "Enter", " "], "outside the Hub, nothing is stopped");
+    document.body.removeEventListener("keydown", parent);
+    await app.close();
+  });
+});
+
+test("KEYBOARD: one listener per frame (redraws and a character switch never stack them), removed on close; the root takes focus on open", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  const proto = window.Element.prototype;
+  const add = proto.addEventListener, remove = proto.removeEventListener;
+  const added = [], removed = [];
+  proto.addEventListener = function (type, listener, options) { if (type === "keydown" && this.classList?.contains("pfp-hub")) added.push(listener); return add.call(this, type, listener, options); };
+  proto.removeEventListener = function (type, listener, options) { if (type === "keydown" && this.classList?.contains("pfp-hub")) removed.push(listener); return remove.call(this, type, listener, options); };
+  try {
+    await as(w.annUser, async () => {
+      const app = new (build())(api(), w.ann);
+      await app.render({ force: true });
+      const root = app.element.querySelector(".pfp-hub");
+      assert.equal(root.getAttribute("tabindex"), "-1", "a click on blank space focuses the Hub, not the page body");
+      assert.equal(document.activeElement, root, "on open, focus is on the root, not on a control: Tab goes to the first control and no ring appears by itself");
+      for (let i = 0; i < 5; i++) { app.hubState = { ...app.hubState, filter: i % 2 ? "weapon" : "all" }; app.redraw(); await app.render(); }
+      await app.showCharacter(w.ann);
+      assert.equal(added.length, 1, `exactly one keydown listener was ever added (${added.length})`);
+      await app.close();
+      assert.deepEqual(removed, added, "the same listener was removed on close");
+    });
+  } finally { proto.addEventListener = add; proto.removeEventListener = remove; }
+});
+
+test("FOCUS: a live redraw keeps the focus ring on the same button, never steals focus that was elsewhere, and falls back to the Hub (not the page body) when its button is gone", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  await as(w.annUser, async () => {
+    const app = new (build())(api(), w.ann);
+    await app.render({ force: true });
+    const root = app.element.querySelector(".pfp-hub");
+    app.element.querySelector('[data-action="select-recipe"]').click();
+    await wait(5);
+    const option = app.element.querySelector('[data-action="pick-material"]');
+    option.focus();
+    const key = option.dataset.focusKey;
+    // a live update that changes what is drawn (the GM grants a day): the status strip text changes, the focus stays put
+    const before = app.element.querySelector(".pfp-main").textContent;
+    await as(w.gm, () => api().grantDays(w.ann, 1));
+    app.redraw();
+    assert.notEqual(app.element.querySelector(".pfp-main").textContent, before, "the redraw really replaced the content");
+    assert.equal(document.activeElement.dataset.focusKey, key, "the same button still has focus after a live redraw");
+    assert.ok(app.element.contains(document.activeElement));
+    // focus that was NOT in the Hub is never taken by a redraw
+    document.activeElement.blur();
+    await as(w.gm, () => api().grantDays(w.ann, 1));
+    app.redraw();
+    assert.equal(document.activeElement, document.body, "a live redraw does not move focus into the Hub");
+    // focus on a control that disappears falls back to the root
+    app.element.querySelector('[data-action="toggle-display"]').click();
+    await wait(5);
+    const done = app.element.querySelector('[data-action="reset-display"]');
+    done.focus();
+    app.element.querySelector('[data-action="toggle-display"]').click();      // closes the panel: the focused button is gone
+    await wait(5);
+    assert.equal(document.activeElement, root, "focus falls back to the Hub root, not the page body");
+    await app.close();
+  });
+  void wait;
+});
+
+test("STATUS: 'Craft queued' goes when its action is resolved while the window is open; a screen reader hears it ONCE, and clearing is silent", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  await as(w.annUser, async () => {
+    const app = new (build())(api(), w.ann);
+    await app.render({ force: true });
+    const live = app.element.querySelector(".pfp-live");
+    const announced = [];
+    new MutationObserver(records => { for (const r of records) for (const n of r.addedNodes) announced.push(n.textContent); }).observe(live, { childList: true, subtree: true });
+    app.hubState = { ...app.hubState, recipeId: DAGGER, picks: { ...SEL } };
+    app.redraw();
+    app.element.querySelector('[data-action="queue-craft"]').click();
+    await wait(60);
+    assert.match(live.textContent, /^Craft queued: /);
+    assert.match(app.element.querySelector(".pfp-main").textContent, /1 queued/);
+    for (let i = 0; i < 3; i++) { app.redraw(); await wait(2); }
+    assert.equal(announced.filter(Boolean).length, 1, "redraws with the same line do not re-announce it");
+    // the GM resolves it while the window is open; the live-update path redraws
+    const action = api().queue.list([w.ann])[0].action;
+    await as(w.gm, () => api().queue.resolve(w.ann, action.id, { degree: "success", chat: false }));
+    app.redraw();
+    await wait(5);
+    assert.match(app.element.querySelector(".pfp-main").textContent, /Nothing queued/, "the status strip says nothing is queued");
+    assert.equal(live.textContent, "", "so the line under it is gone too: the window no longer contradicts itself");
+    assert.deepEqual(app.announcements, []);
+    assert.equal(announced.filter(Boolean).length, 1, "clearing added nothing: no second announcement");
+    await app.close();
+  });
+});
+
+test("STATUS: a status line that is not yet in the queue (the write arrives a moment later) is kept, and the 'Cancelled' line stays true until it times out", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  const original = HUB.statusMs;
+  HUB.statusMs = 60;
+  try {
+    await as(w.annUser, async () => {
+      const app = new (build())(api(), w.ann);
+      await app.render({ force: true });
+      const live = app.element.querySelector(".pfp-live");
+      // the submit returns an id the actor flag does not show yet: not cleared
+      app.hubStatus = { text: "Craft queued: Gate Blade. 2 days reserved.", kind: "queued", actionId: "not-visible-yet", seen: false };
+      app.redraw();
+      assert.equal(app.announcements.length, 1, "unseen: kept");
+      // cancel really cancels, says so, and keeps saying it (it stays true) until the timeout
+      app.hubState = { ...app.hubState, recipeId: DAGGER, picks: { ...SEL } };
+      app.redraw();
+      app.hubStatus = null;
+      app.element.querySelector('[data-action="queue-craft"]').click();
+      await wait(40);
+      const rowId = api().queue.list([w.ann])[0].action.id;
+      app.element.querySelector('[data-action="toggle-queue"]').click();
+      await wait(5);
+      app.element.querySelector(`[data-action="cancel-queued"][data-action-id="${rowId}"]`).click();
+      await wait(20);
+      assert.match(live.textContent, /^Cancelled: /);
+      for (let i = 0; i < 3; i++) { app.redraw(); }
+      assert.match(live.textContent, /^Cancelled: /, "redraws do not clear it");
+      await wait(120);
+      assert.equal(live.textContent, "", "after the timeout it is gone");
+      assert.deepEqual(app.announcements, []);
+      await app.close();
+    });
+  } finally { HUB.statusMs = original; }
+});
+
+test("STATUS: the line also goes after HUB.statusMs on its own, and when you switch character; a close leaves no timer running", async () => {
+  const w = await playerWorld();
+  installFakeApplication();
+  const original = HUB.statusMs;
+  HUB.statusMs = 40;
+  try {
+    await as(w.gm, async () => {
+      const app = new (build())(api(), w.ann);
+      await app.render({ force: true });
+      app.hubStatus = null;
+      app.hubState = { ...app.hubState, recipeId: DAGGER, picks: { ...SEL } };
+      app.redraw();
+      app.element.querySelector('[data-action="queue-craft"]').click();
+      await wait(25);
+      assert.equal(app.announcements.length, 1);
+      await wait(120);
+      assert.deepEqual(app.announcements, [], "timed out");
+      app.hubState = { ...app.hubState, picks: { ...SEL } };
+      app.redraw();
+      app.element.querySelector('[data-action="queue-craft"]').click();
+      await wait(25);
+      assert.equal(app.announcements.length >= 0, true);
+      const before = app.announcements.length;
+      await app.showCharacter(w.bob);
+      assert.deepEqual(app.announcements, [], `switching character clears it (it said ${before})`);
+      app.hubStatus = { text: "x", kind: "error" };
+      await app.close();
+    });
+  } finally { HUB.statusMs = original; }
 });

@@ -1,7 +1,7 @@
 /** Runs the whole layout matrix and prints every problem (node build/layout-check.mjs). The test (tests/hub-layout.test.js) runs the same matrix. */
 import { HOSTILE, SCENES, launchChromium, openHarness, renderState } from "./harness.mjs";
 
-export const MATRIX = { themes: ["parchment", "dark", "contrast"], sizes: [100, 175], widths: [900, 600, 320, 280], hostiles: [null, ...Object.keys(HOSTILE)] };
+export const MATRIX = { themes: ["parchment", "dark", "contrast"], sizes: [100, 175], widths: [900, 600, 320, 280, 220], hostiles: [null, ...Object.keys(HOSTILE)] };
 
 export async function runMatrix({ quick = false } = {}) {
   const browser = await launchChromium();
@@ -18,7 +18,7 @@ export async function runMatrix({ quick = false } = {}) {
     await one({ scene, theme, textSize, width, hostile });
   }
   // every text size at the narrow widths, the font swap and the announcement line
-  for (const textSize of [100, 125, 150, 175]) for (const width of [320, 280]) for (const hostile of MATRIX.hostiles) {
+  for (const textSize of [100, 125, 150, 175]) for (const width of [320, 280, 220]) for (const hostile of MATRIX.hostiles) {
     await one({ scene: "partial", textSize, width, hostile });
     await one({ scene: "longNames", textSize, width, hostile, font: "hyperlegible", announce: "Craft queued: Gate Blade. 2 days reserved." });
   }

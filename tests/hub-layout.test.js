@@ -25,7 +25,7 @@ test("LAYOUT: every Hub state fits, in every theme and size, at 900/600/320/280p
 
 test("LAYOUT: the matrix covers what it says (scenes, themes, sizes, widths, hostile strengths)", { skip }, () => {
   assert.deepEqual(MATRIX.themes, ["parchment", "dark", "contrast"]);
-  assert.deepEqual([MATRIX.sizes, MATRIX.widths], [[100, 175], [900, 600, 320, 280]]);
+  assert.deepEqual([MATRIX.sizes, MATRIX.widths], [[100, 175], [900, 600, 320, 280, 220]]);
   assert.deepEqual(MATRIX.hostiles, [null, ...Object.keys(HOSTILE)]);
   assert.ok(Object.keys(HOSTILE).length >= 4 && Object.keys(SCENES).length >= 8);
   assert.ok(/!important/.test(HOSTILE["important 2.5rem"]) && /2rem/.test(HOSTILE["plain 2rem hidden"]) && /2\.5rem/.test(HOSTILE["plain 2.5rem visible"]));
@@ -42,12 +42,18 @@ test("LAYOUT MUTATION: the checks fail when a card gets a fixed height back, a b
       "absolute badge": ".pfp-hub .pfp-badge { position: absolute !important; right: 0; bottom: 0; }",
       "tabs that do not wrap": ".pfp-hub .pfp-tabs { flex-wrap: nowrap !important; } .pfp-hub button.pfp-tab { white-space: nowrap !important; }",
       "small targets": ".pfp-hub button.pfp-btn { min-height: 30px !important; padding: 0 !important; }",
-      "nowrap text": ".pfp-hub .pfp-stock, .pfp-hub .pfp-unknown, .pfp-hub .pfp-option-name { white-space: nowrap !important; overflow-wrap: normal !important; }"
+      "nowrap text": ".pfp-hub .pfp-stock, .pfp-hub .pfp-unknown, .pfp-hub .pfp-option-name { white-space: nowrap !important; overflow-wrap: normal !important; }",
+      // the 0.18.3 checks: a badge that wraps letter by letter (SELECTE/D), and ordinary words broken mid-word ("Da/rk")
+      "a badge that wraps letters": { scene: "partial", width: 280, textSize: 175, css: ".pfp-hub .pfp-badge { white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-all !important; min-width: 0 !important; max-width: 3.5em !important; }" },
+      "words broken mid-word": { scene: "panels", width: 280, textSize: 175, css: ".pfp-hub button.pfp-btn { overflow-wrap: anywhere !important; word-break: break-all !important; max-width: 5em !important; }" },
+      "a badge that wraps letters at 220": { scene: "partial", width: 220, textSize: 175, css: ".pfp-hub .pfp-badge { white-space: normal !important; word-break: break-all !important; min-width: 0 !important; max-width: 3.5em !important; }" }
     };
-    for (const [label, extraCss] of Object.entries(mutations)) {
-      const { problems } = await renderState(page, { ...base, scene: label === "nowrap text" ? "longNames" : base.scene, extraCss });
+    for (const [label, spec] of Object.entries(mutations)) {
+      const mutation = typeof spec === "string" ? { scene: label === "nowrap text" ? "longNames" : base.scene, css: spec } : spec;
+      const { problems } = await renderState(page, { ...base, scene: mutation.scene, width: mutation.width ?? base.width, textSize: mutation.textSize ?? base.textSize, extraCss: mutation.css });
       assert.ok(problems.length > 0, `${label}: the checks must fail`);
     }
+    for (const [scene, width, textSize] of [["partial", 280, 175], ["panels", 280, 175]]) assert.deepEqual((await renderState(page, { scene, width, textSize })).problems, [], `${scene} at ${width}px ${textSize}% is clean before the mutations`);
     // and the hostile styles really are hostile: against the OLD style of rule (a bare card with Foundry's button rules) the checks fail
     const bare = await renderState(page, { ...base, hostile: "plain 2rem hidden", extraCss: ".pfp-hub button.pfp-btn { all: revert !important; height: 2rem; overflow: hidden; white-space: nowrap; }" });
     assert.ok(bare.problems.length > 0, "without the reset, Foundry's button rules break the cards");
@@ -65,4 +71,13 @@ test("LAYOUT: the default theme is Parchment and the stylesheet never reads the 
   for (const saved of [undefined, null, {}, [], "dark", { theme: "neon" }, { theme: 5 }]) assert.equal(normalizeDisplay(saved).theme, "parchment", JSON.stringify(saved));
   assert.equal(normalizeDisplay({ theme: "dark" }).theme, "dark", "only the player's own saved choice changes it");
   assert.equal(rootAttributes(hubModel(makeFacts(), emptyState()))["data-theme"], "parchment");
+});
+
+test("LAYOUT: the window has a minimum width (the stylesheet's min-width equals HUB.minSize.width, and the constructor clamps a saved width to it)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { HUB } = await import("../scripts/config.js");
+  const css = readFileSync("styles/hub.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(css, new RegExp(`\\.pfp-hub-window\\s*\\{[^}]*min-width:\\s*${HUB.minSize.width}px`), `.pfp-hub-window { min-width: ${HUB.minSize.width}px }`);
+  assert.ok(HUB.minSize.width >= 280 && HUB.minSize.width <= 320, "about 300px");
+  assert.match(readFileSync("scripts/hub/app.js", "utf8"), /classes: \["pfp-hub-window"\]/, "the window frame carries the class the rule targets");
 });

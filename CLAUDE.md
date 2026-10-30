@@ -40,7 +40,7 @@ Read this file first on every task. Then load only the system file(s) the task t
 - **Difficulty is hidden from players, everywhere** (`docs/11b-hub-addendum.md`, which wins over `docs/10` and `docs/11`): a player is never shown a DC, odds, a percentage or difficulty wording, in a return value, a queue row, a preview, a chat message or the Compendium. It is stripped at the source, not hidden in a UI. The GM sees everything. The honor system applies to data Foundry stores and delivers (an actor flag, a token flag, a world setting).
 - **Experiments**: a material's effect in a recipe is shown to a character only if they have learned it (a successful craft teaches it, per recipe, slot and material; a formula's baseline is revealed when it is owned; the party's shared book counts). Effects come from the ONE resolver.
 - Each downtime day goes to exactly one activity (research, exploring, crafting, workshop upgrade). Gathering costs node charges, not days, and needs no downtime.
-- Prefer Foundry-native building blocks: Items, compendium packs, flags, tokens, ApplicationV2, socketlib.
+- Prefer Foundry-native building blocks: Items, compendium packs, flags, tokens, ApplicationV2, socketlib. Foundry cancels Tab and similar keys before the browser acts: an ApplicationV2 window we build stops Tab/Enter/Space bubbling out of its root (`docs/08`, UI surfaces).
 - Keep tunable numbers in one config object/file, never hardcoded in logic.
 - Every resolved action produces a human-readable result record (chat card and/or summary) for the players.
 

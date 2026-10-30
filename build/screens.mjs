@@ -17,6 +17,9 @@ for (const scene of ["complete", "closed", "panels", "longNames", "short", "rese
   jobs.push({ scene, theme: "parchment", textSize: 100, width: 900, hostile: HOSTILE });
   jobs.push({ scene, theme: "dark", textSize: 175, width: 280, hostile: HOSTILE });
 }
+// 0.18.3: the Display panel and the SELECTED badge in a narrow window at 175% text (the real-Foundry finding), at the new minimum width and at a stress width below it
+for (const width of [300, 280, 220]) jobs.push({ scene: "panels", theme: "dark", textSize: 175, width, hostile: HOSTILE, tag: width < 300 ? "below-minimum-width" : "minimum-width" });
+jobs.push({ scene: "partial", theme: "parchment", textSize: 175, width: 300, hostile: HOSTILE, tag: "minimum-width" });
 jobs.push({ scene: "partial", theme: "dark", textSize: 125, width: 600, hostile: HOSTILE }, { scene: "longNames", theme: "contrast", textSize: 150, width: 320, hostile: HOSTILE, font: "hyperlegible", announce: "Craft queued: Gate Blade. 2 days reserved." });
 
 const browser = await launchChromium();
