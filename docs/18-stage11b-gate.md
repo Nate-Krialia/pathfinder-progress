@@ -1,4 +1,4 @@
-# 18 Stage 11b round gate (real Foundry): the Research and Compendium tabs, and leads (v0.19.2)
+# 18 Stage 11b round gate (real Foundry): the Research and Compendium tabs, and leads (v0.20.0)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. Every step is labelled **[GM]** or **[Player]** and has ONE code block. **[Player] steps tell you what to click; the block then checks what is on screen.** The blocks can be run at any time: the helper in Step 3 records every line the Hub's status line shows (they vanish after about 10 seconds), and the blocks read that record. Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, layout is the point. Do a group at a time.
 
@@ -12,17 +12,17 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 **Safety.** Throwaway things named "Gate ...": characters **Gate Scholar** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`gate-wolf` and `g6-field` in the Compendium, and `g6-town`, `g6-ore`, `g6-steel`, `g6-ember`, `g6-star`, `g6-blade`, `g6-draught`, `g6-giant`, `g6-lantern`); they last until you reload the GM window, and SETUP registers them again. No real campaign data. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left something behind. CLEANUP always works and is safe to run twice.
 
-**Restart note.** 0.19.0, 0.19.1 and 0.19.2 change nothing in the manifest but the version (0.19.0 registered a new socket handler in code), so updating the module and force-reloading both windows (Ctrl+Shift+R) is enough.
+**Restart note.** 0.19.0 to 0.20.0 change nothing in the manifest but the version (0.19.0 registered a new socket handler in code), so updating the module and force-reloading both windows (Ctrl+Shift+R) is enough.
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.19.2**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.20.0**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.19.2"]` in the GM window and `["Test", false, "0.19.2"]` in the Player window.
+Expected: `["<your GM name>", true, "0.20.0"]` in the GM window and `["Test", false, "0.20.0"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 

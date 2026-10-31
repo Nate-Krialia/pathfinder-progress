@@ -158,8 +158,8 @@ test("PLAYER COPY: a recipe lists which (slot, material) pairs it overrides, wit
 
 test("MIGRATION: older per-recipe facts fold into the class, except for an overridden material; idempotent; the old facts stay", () => {
   const old = { experiments: {
-    plate: { recipeId: "plate", name: "Plate", firstAt: 1, slots: { shell: { wyrm: { materialId: "wyrm", materialName: "Wyrmroot", tier: 2, effects: { resistance: { type: "fire", value: 6 } }, at: 3 } } } },
     mail: { recipeId: "mail", name: "Mail", firstAt: 1, slots: { rings: { wyrm: { materialId: "wyrm", materialName: "Wyrmroot", tier: 2, effects: { resistance: { type: "fire", value: 9 } }, at: 4 } } } },
+    plate: { recipeId: "plate", name: "Plate", firstAt: 1, slots: { shell: { wyrm: { materialId: "wyrm", materialName: "Wyrmroot", tier: 2, effects: { resistance: { type: "fire", value: 6 } }, at: 3 } } } },
     gone: { recipeId: "gone", name: "Gone", firstAt: 1, slots: { x: { wyrm: { materialId: "wyrm", materialName: "W", effects: { basePower: "T9" }, at: 4 } } } }
   } };
   const recipeOf = id => ({ plate: ARMOR, mail: ARMOR2 })[id];

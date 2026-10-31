@@ -11,6 +11,8 @@ These decisions were confirmed by the project owner after the real-Foundry gates
 
 Supersedes: `docs/10` "Players see no odds" and "Players are shown no odds or results" (they were not fully true: an explore row of `api.queue.list()`, a research row, `api.projectInfo`, the research chat message and the project returned by a relayed upgrade or design start carried the DC and the odds); `docs/10` Stage 16 note that a region's `explorationDC` stays in the player copy (it goes when the row stops carrying it); `docs/11` lines that show odds "in words and percent", "real odds of progress each", and "difficulty scales with tier".
 
+> **Superseded in part by `docs/11c-discovery-addendum.md`:** knowledge is now per material per ITEM CLASS (a recipe category), with per-recipe knowledge only for a recipe's overrides. The rules below that say "per material, per recipe" read that way no longer.
+
 ## B. Experiments (a new Compendium category, per character, shareable)
 
 - Craft slots start EMPTY in the Hub (UI later). The backend supports previewing a selection whose effect is unknown.

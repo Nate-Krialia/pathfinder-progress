@@ -79,14 +79,14 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
  * @returns a failed preview, or null when every material in the selection is open to this character
  */
 function studyGate(actor, selection, api, prepared) {
-  if (!prepared.ok) return null;
   const errors = [];
   for (const materialId of new Set(Object.values(selection ?? {}))) {
     let open = true;
     try { open = propertiesOpen(api, actor, materialId); } catch (error) { console.error(`${MODULE_ID} | could not check whether ${actor.name} has studied "${materialId}"`, error); }
     if (!open) errors.push(W.notStudied(api.definitions?.material.get(materialId)?.name ?? materialId));
   }
-  return errors.length ? { ok: false, errors, plan: null, stations: prepared.stations ?? { verdicts: [], chosen: null } } : null;
+  // The study comes first in the list (it is the reason to fix before anything else), then whatever else was wrong.
+  return errors.length ? { ok: false, errors: [...errors, ...(prepared.ok ? [] : prepared.errors)], plan: null, stations: prepared.stations ?? { verdicts: [], chosen: null } } : null;
 }
 
 /**
@@ -103,9 +103,9 @@ function playerPreview(actor, recipe, selection, api, stationId, stacks) {
     formulas: readFormulaList(actor), crafterName: actor.name, mechanical: true
   });
   // A player client only knows the materials the character has met: a material it does not have is "you do not have it", not "unknown".
-  if (!prepared.ok) return { ...prepared, errors: prepared.errors.map(e => e.replace(/unknown material "([^"]+)"/, 'you do not have "$1"')) };
   const blocked = studyGate(actor, selection, api, prepared);
-  if (blocked) return blocked;
+  if (blocked) return { ...blocked, errors: blocked.errors.map(e => e.replace(/unknown material "([^"]+)"/, 'you do not have "$1"')) };
+  if (!prepared.ok) return { ...prepared, errors: prepared.errors.map(e => e.replace(/unknown material "([^"]+)"/, 'you do not have "$1"')) };
 
   let books;
   try { books = booksFor(actor); } catch (error) { console.error(`${MODULE_ID} | ${actor.name}'s Compendium could not be read, so no effect is shown as known`, error); books = { own: {}, shared: {} }; }

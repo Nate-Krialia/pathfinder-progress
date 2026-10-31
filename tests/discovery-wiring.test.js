@@ -268,3 +268,15 @@ test("A damaged ledger fails loudly, naming the character", async () => {
   assert.throws(() => readLedger(w.ann), /Ann's discoveries are invalid/);
   void getUsers; void makeActor; void loudly;
 });
+
+test("RECORDER: a craft teaches a material's behaviour for the item CLASS, but an overridden slot teaches only that recipe", async () => {
+  const w = await discoveryWorld();
+  const { noteCrafted } = await import("../scripts/compendium/store.js");
+  const longsword = api().definitions.recipe.get("longsword-basic");        // silver in its coating slot has a recipe override
+  await noteCrafted(api().definitions, w.ann, longsword, [{ slot: "blade", materialId: "iron" }, { slot: "coating", materialId: "silver" }]);
+  const book = w.ann.getFlag(M, "compendium");
+  assert.deepEqual(Object.keys(book.classes.weapon), ["iron"], "iron has no override here: the whole weapon class learns it");
+  assert.deepEqual(Object.keys(book.experiments["longsword-basic"].slots), ["coating"], "silver's override is this recipe's own fact");
+  assert.equal(book.experiments["longsword-basic"].category, "weapon");
+  assert.equal(book.classes.weapon.silver, undefined, "and does NOT teach the class what silver does elsewhere");
+});

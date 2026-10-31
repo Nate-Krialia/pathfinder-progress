@@ -17,7 +17,9 @@ Read this file first on every task. Then load only the system file(s) the task t
 | `docs/07-stations.md` | Fixed/portable stations, tiers, fees, ownership |
 | `docs/08-foundry-integration.md` | Adapter, sockets, action queue, permissions, UI surfaces |
 | `docs/09-build-order.md` | Staged build plan with test gates |
-| `docs/18-stage11b-gate.md` | Real-Foundry gate for the Hub's Research and Compendium tabs and leads (v0.19.2) |
+| `docs/11c-discovery-addendum.md` | Tag themes and item classes: how material effects are learned (wins over 11b where they differ) |
+| `docs/18-stage11b-gate.md` | Real-Foundry gate for the Hub's Research and Compendium tabs and leads |
+| `docs/19-stage11c-gate.md` | Real-Foundry gate for the discovery chain, gold values and the Discovery tracks window (v0.20.0) |
 
 ## Design pillars (non-negotiable)
 
@@ -41,7 +43,8 @@ Read this file first on every task. Then load only the system file(s) the task t
 - **Difficulty is hidden from players, everywhere** (`docs/11b-hub-addendum.md`, which wins over `docs/10` and `docs/11`): a player is never shown a DC, odds, a percentage or difficulty wording, in a return value, a queue row, a preview, a chat message or the Compendium. It is stripped at the source, not hidden in a UI. The GM sees everything. The honor system applies to data Foundry stores and delivers (an actor flag, a token flag, a world setting).
 - **Relayed handlers take the sender from the socket** (`senderOf` in `scripts/queue/common.js`), never from a client-supplied id; refusals travel as data with a plain reason. The Hub reads project data only through `api.projectInfo` and never shows a GM's free-text log note (`docs/08`, Stage 11b round).
 - **Private things never go to public chat.** Every queue rejection (a research project, a blueprint, a patron, a region, a Compendium share) is whispered to the character's owners and the GM (`scripts/queue/store.js`, `returnQueued`), and no chat message carries a node charge count. A Hub focus request waits for its control to be drawn (a relayed write's update echo can arrive after the handler, `docs/08`).
-- **Experiments**: a material's effect in a recipe is shown to a character only if they have learned it (a successful craft teaches it, per recipe, slot and material; a formula's baseline is revealed when it is owned; the party's shared book counts). Effects come from the ONE resolver.
+- **Experiments** (`docs/11c-discovery-addendum.md`, which replaced 11b's per-recipe rule): a material's behaviour is learned per material per ITEM CLASS (the recipe's category) by a successful craft, so one armor craft teaches all armors; a recipe's own OVERRIDE for a material is learned per recipe; a formula's baseline is revealed when it is owned; the party's shared book counts. Effects come from the ONE resolver (recipe override > material class > material default).
+- **Research tracks are GM-only data** (a material's, a note's or a formula version's milestones and step thresholds; also the Discovery tracks window's overlay). They never reach a player's definitions or an actor flag; players see only a plain stage (Just started, Getting somewhere, Nearly there) and `hasTrack` yes/no. A material's tag and theme are sent only once the character knows them (no track, studied, or already crafted with). Material tier and formula version are separate axes.
 - Each downtime day goes to exactly one activity (research, exploring, crafting, workshop upgrade). Gathering costs node charges, not days, and needs no downtime.
 - Prefer Foundry-native building blocks: Items, compendium packs, flags, tokens, ApplicationV2, socketlib. Foundry cancels Tab and similar keys before the browser acts: an ApplicationV2 window we build stops Tab/Enter/Space bubbling out of its root (`docs/08`, UI surfaces).
 - Keep tunable numbers in one config object/file, never hardcoded in logic.
