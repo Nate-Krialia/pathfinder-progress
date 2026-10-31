@@ -39,7 +39,7 @@ const checkRow = entry => {
 export function leadCards(facts) {
   return facts.leads.map(lead => {
     if (lead.source === "item") {
-      const text = lead.itemKind === "note" ? S.leadNote(lead.name) : S.leadItem(lead.name);
+      const text = lead.paused ? S.leadResume(lead.name) : lead.itemKind === "note" ? S.leadNote(lead.name) : S.leadItem(lead.name);
       return { key: `lead:${lead.id}`, id: lead.id, name: safeText(lead.name, S.leadHidden), note: safeText(text, S.leadHidden), button: { text: lead.paused ? S.leadStartAgain : S.leadStart, disabled: false, why: null } };
     }
     const used = facts.projects.some(p => p.recipeId === lead.recipeId) || facts.formulas.some(f => f.recipeId === lead.recipeId);

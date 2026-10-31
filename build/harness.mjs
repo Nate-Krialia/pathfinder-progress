@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { HUB } from "../scripts/config.js";
 import { hubModel, learnedKey } from "../scripts/hub/viewmodels.js";
 import { renderHubPage } from "../scripts/hub/render.js";
+import { editorModel, renderEditor } from "../scripts/discovery/editor-model.js";
 import { BENCH, BIG_PROJECT, BOOK_ENTRIES, FORGE, LEAD, PROJECT, STAR_EFFECT, STEEL_EFFECT, UPGRADE, compendiumFacts, compendiumState, makeBook, makeFacts, makeState, researchFacts, researchState } from "../tests/hub-fixtures.js";
 
 const cssUrl = pathToFileURL(new URL("../styles/hub.css", import.meta.url).pathname).href;
@@ -83,7 +84,27 @@ const ITEM_LEADS = [
 ];
 const R = { ...Object.fromEntries([["researchEmpty", { facts: researchFacts({ projects: [], leads: [] }), state: researchState() }]]) };
 
+// The Discovery tracks window (Stage 11c, GM only) with a registry big enough to need the search, the chips and the folding: 300 items, long names.
+const editorRegistry = (n = 300) => {
+  const material = new Map(), note = new Map(), recipe = new Map([["gate-blade", { id: "gate-blade", name: "Gate Blade" }]]);
+  for (let i = 0; i < n; i++) {
+    const kind = i % 5 === 0 ? "note" : i % 7 === 0 ? "recipe" : "material";
+    const long = i % 11 === 0 ? ` of the Unbroken Horizon Wanderers and Their Faithful Companions ${i}` : ` ${i}`;
+    if (kind === "material") material.set(`gate-m${i}`, { id: `gate-m${i}`, name: `Gate Material${long}`, tier: 1, value: 5, tag: i % 3 === 0 ? "gate-tag" : undefined, research: i % 4 === 0 ? { milestones: [{ steps: 4, grants: { type: "properties" } }, { steps: 8, grants: { type: "formula", recipeId: "gate-blade" } }, { steps: 12, grants: { type: "formula", recipeId: "gate-blade" } }] } : undefined });
+    else if (kind === "note") note.set(`gate-n${i}`, { id: `gate-n${i}`, name: `Gate Note${long}`, recipeId: "gate-blade", research: i % 2 ? { milestones: [{ steps: 3, grants: { type: "formula" } }] } : undefined });
+    else recipe.set(`gate-r${i}`, { id: `gate-r${i}`, name: `Gate Blade Mark${long}`, version: 2 });
+  }
+  return { material, note, recipe, tag: new Map([["gate-tag", { id: "gate-tag", name: "Mitflit parts of the Unbroken Horizon", theme: "cowardice" }]]) };
+};
+const EDITOR_REGISTRY = editorRegistry();
+const editorScene = over => ({ editor: { registry: EDITOR_REGISTRY, overlay: {}, ...over } });
 export const SCENES = {
+  editorEmpty: editorScene({}),
+  editor300: editorScene({ selectedKey: "material:gate-m4" }),
+  editorRows: editorScene({ selectedKey: "material:gate-m8", draft: [{ steps: "4", type: "properties", recipeId: "" }, { steps: "4", type: "formula", recipeId: "" }, { steps: "abc", type: "formula", recipeId: "gate-blade" }], dirty: true }),
+  editorFiltered: editorScene({ selectedKey: "note:gate-n5", filters: { search: "unbroken", kinds: ["material", "note"], track: "has" }, collapsed: ["recipe"] }),
+  editorFolded: editorScene({ selectedKey: "recipe:gate-r7", collapsed: ["material", "note"] }),
+  editorNone: editorScene({ filters: { search: "no such thing" } }),
   ...R,
   researchOne: { facts: researchFacts({ projects: [PROJECT], leads: [LEAD] }), state: researchState({ skill: "crafting", checkDays: 2 }) },
   researchStudy: { facts: researchFacts({ projects: [STUDY, PROJECT], leads: ITEM_LEADS, days: { free: 9, reserved: 0 } }), state: researchState({ projectId: STUDY.id, skill: "nature", checkDays: 2 }) },
@@ -152,7 +173,7 @@ function pageChecks({ minTarget, checkWords, belowMinimum }) {
   // 2b. Nothing in the Hub is positioned absolutely or fixed: badges, pills and bars stay in the flow, so they cannot print over a neighbour.
   for (const el of els) if (/(absolute|fixed)/.test(style(el).position)) problems.push(`positioned ${style(el).position} (it can cover a neighbour): ${name(el)}`);
   // 3. Every control is a big enough target.
-  for (const el of root.querySelectorAll("[data-action]")) {
+  for (const el of root.querySelectorAll("[data-action], input, select")) {
     const r = el.getBoundingClientRect();
     if (r.height < minTarget - 0.5 || r.width < minTarget - 0.5) problems.push(`target ${r.width.toFixed(0)}x${r.height.toFixed(0)} is under ${minTarget}px: ${name(el)}`);
   }
@@ -216,8 +237,8 @@ export async function openHarness(browser) {
 export async function renderState(page, { scene, theme = "parchment", textSize = 100, width = 900, height, hostile = null, font = "standard", announce = null, shot = null, extraCss = "" }) {
   const spec = SCENES[scene];
   const layout = width < HUB.stackBelowPx ? "narrow" : "wide";
-  const model = hubModel(spec.facts, { ...spec.state, layout, display: { theme, textSize, font } });
-  const html = renderHubPage(model, announce ? [announce] : []);
+  const display = { theme, textSize, font };
+  const html = spec.editor ? renderEditor(editorModel({ ...spec.editor, layout, display })) : renderHubPage(hubModel(spec.facts, { ...spec.state, layout, display }), announce ? [announce] : []);
   const frameHeight = height ?? (layout === "narrow" ? null : 820);
   await page.setViewportSize({ width, height: frameHeight ?? 900 });
   await page.evaluate(({ html, hostileCss, extraCss, frameHeight }) => {

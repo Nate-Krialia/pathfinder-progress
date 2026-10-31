@@ -215,7 +215,7 @@ test("RELAY: selectRecords sends a tag definition only along with a material who
 });
 
 test("WORDS: everything the discovery chain says to a player is plain: no number, DC, odds, percent or difficulty wording", () => {
-  const lines = [...W.stages, W.studyGoal("Iron"), W.studyName("Iron"), W.leadItem("Iron"), W.leadNote("Torn Page"), W.leadVersion("Ore"), W.learnedProperties("Iron", "Ore", "cowardice"), W.learnedProperties("Iron"), W.learnedFormula("Blade"), W.needItem("Iron"), W.trackGone("Iron"), W.notStudied("Iron"), W.alreadyStudying("Iron"), W.alreadyStudied("Iron"), W.noSuchLead, W.summary("Ann", "Iron", ["success", "failure"])];
+  const lines = [...W.stages, W.studyGoal("Iron"), W.studyName("Iron"), W.leadItem("Iron"), W.leadResume("Iron"), W.leadNote("Torn Page"), W.leadVersion("Ore"), W.learnedProperties("Iron", "Ore", "cowardice"), W.learnedProperties("Iron"), W.learnedFormula("Blade"), W.needItem("Iron"), W.trackGone("Iron"), W.notStudied("Iron"), W.alreadyStudying("Iron"), W.alreadyStudied("Iron"), W.noSuchLead, W.summary("Ann", "Iron", ["success", "failure"])];
   for (const line of lines) {
     assert.doesNotMatch(line, DIFFICULTY_WORDS, line);
     assert.doesNotMatch(line, /\d/, `${line}: no count`);

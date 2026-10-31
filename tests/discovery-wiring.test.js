@@ -139,22 +139,37 @@ test("RETROACTIVE: a track added later does not lock out someone who already lea
   assert.equal(api().discovery.propertiesOpen(w.bob, "iron"), false, "someone who has not is not");
 });
 
-test("PUT ASIDE keeps a study's progress; it comes back as a lead and following picks it up where it stopped", async () => {
-  const w = await discoveryWorld();
-  await give(w, "g7-a");
-  await as(w.annUser, () => api().research.follow(w.ann, "item:material:g7-a"));
-  await study(w, "material:g7-a", "success", 3);
-  const out = await as(w.annUser, () => api().research.putAside(w.ann, "study:material:g7-a"));
-  assert.deepEqual(out, { kept: true });
-  assert.equal(ledger(w.ann)["material:g7-a"].steps, 3, "progress kept");
-  assert.deepEqual(as(w.annUser, () => api().projectInfo(w.ann)).filter(p => p.kind === "study"), [], "no longer an active study");
-  assert.deepEqual(leadIds(w), ["item:material:g7-a"], "a lead again");
-  await as(w.annUser, () => api().research.follow(w.ann, "item:material:g7-a"));
-  assert.deepEqual([ledger(w.ann)["material:g7-a"].steps, ledger(w.ann)["material:g7-a"].paused], [3, undefined]);
-  const action = await as(w.annUser, () => api().queue.submit(w.ann, "research", { projectId: "study:material:g7-a", skill: "crafting" }, 1));
-  await assert.rejects(as(w.annUser, () => api().research.putAside(w.ann, "study:material:g7-a")), /Cancel the queued research/);
-  await as(w.annUser, () => api().queue.cancel(w.ann, action.id));
-});
+// Foundry MERGES an update into the stored flag (the fake now does too): a key left out of the new value survives. Picking a put-aside study up again must clear `paused` explicitly.
+for (const [label, key, setup] of [
+  ["a material", "material:g7-a", async w => { await give(w, "g7-a"); }],
+  ["a note", "note:g7-page", async w => { await giveNote(w, "g7-page"); }],
+  ["a higher formula version", "recipe:g7-blade2", async () => {}]
+]) {
+  test(`PUT ASIDE (${label}) keeps a study's progress; it comes back as a lead and picking it up RESUMES it (paused is cleared, it is active again)`, async () => {
+    const w = await discoveryWorld();
+    await setup(w);
+    const id = `study:${key}`;
+    if (key.startsWith("recipe:")) await api().discovery.startStudy(w.ann, key); else await as(w.annUser, () => api().research.follow(w.ann, `item:${key}`));
+    await study(w, key, "success", 2);
+    const before = as(w.annUser, () => api().projectInfo(w.ann)).filter(p => p.kind === "study");
+    assert.deepEqual(before.map(p => p.id), [id]);
+    assert.deepEqual(await as(w.annUser, () => api().research.putAside(w.ann, id)), { kept: true });
+    assert.deepEqual([ledger(w.ann)[key].steps, ledger(w.ann)[key].paused], [2, true], "progress kept, paused");
+    assert.deepEqual(as(w.annUser, () => api().projectInfo(w.ann)).filter(p => p.kind === "study"), [], "no longer an active study");
+    const lead = as(w.annUser, () => api().research.leadsFor(w.ann)).find(l => l.id === `item:${key}`);
+    assert.equal(lead?.paused, true, "a lead again, marked as a study picked up again");
+    const resumed = await as(w.annUser, () => api().research.follow(w.ann, `item:${key}`));
+    assert.equal(resumed.id, id);
+    assert.deepEqual([ledger(w.ann)[key].steps, ledger(w.ann)[key].status, ledger(w.ann)[key].paused], [2, "active", false], "resumed: progress kept, active, NOT paused");
+    assert.deepEqual(as(w.annUser, () => api().projectInfo(w.ann)).filter(p => p.kind === "study").map(p => [p.id, p.stageWord]), [[id, before[0].stageWord]], "back in the Active projects with the stage word it had");
+    assert.equal(as(w.annUser, () => api().research.leadsFor(w.ann)).some(l => l.id === `item:${key}`), false, "and no longer a lead");
+    const action = await as(w.annUser, () => api().queue.submit(w.ann, "research", { projectId: id, skill: "crafting" }, 1));
+    await assert.rejects(as(w.annUser, () => api().research.putAside(w.ann, id)), /Cancel the queued research/);
+    await as(w.annUser, () => api().queue.cancel(w.ann, action.id));
+    await study(w, key, "success", 1);
+    assert.ok(ledger(w.ann)[key].steps >= 3, "and it can be studied again");
+  });
+}
 
 test("ITEM GONE: a queued check on an item the character no longer holds is invalid, refunds the days and keeps the progress; the item back = studying again", async () => {
   const w = await discoveryWorld();
@@ -279,4 +294,31 @@ test("RECORDER: a craft teaches a material's behaviour for the item CLASS, but a
   assert.deepEqual(Object.keys(book.experiments["longsword-basic"].slots), ["coating"], "silver's override is this recipe's own fact");
   assert.equal(book.experiments["longsword-basic"].category, "weapon");
   assert.equal(book.classes.weapon.silver, undefined, "and does NOT teach the class what silver does elsewhere");
+});
+
+test("PREVIEW: with no workshop in the party's town the player's headline is a plain sentence, and the study reason still comes first", async () => {
+  const w = await discoveryWorld();
+  await give(w, "iron", 1); await give(w, "spider-fang", 1);
+  api().definitions.town.set("g7-away", { kind: "town", id: "g7-away", name: "Gate Away" });
+  await as(w.gm, () => api().setLocation("g7-away"));                  // a town with no workshop: the player's copy then holds no station at all
+  await as(w.annUser, () => api().definitions.refresh({ force: true }));
+  const sel = { blade: "iron", fang: "spider-fang" };
+  const plain = as(w.annUser, () => api().previewCraft(w.ann, DAGGER, sel, undefined));
+  assert.equal(plain.ok, false);
+  assert.deepEqual(plain.errors, ["There's no workshop here to craft in."]);
+  api().definitions.material.get("iron").research = track([4, "properties"]);
+  await as(w.annUser, () => api().definitions.refresh({ force: true }));
+  const both = as(w.annUser, () => api().previewCraft(w.ann, DAGGER, sel, undefined));
+  assert.deepEqual(both.errors, ["You haven't studied Iron enough to craft with it yet.", "There's no workshop here to craft in."], "the study reason stays first");
+});
+
+test("THE FAKE behaves like Foundry here: an update MERGES an object into the stored flag, so a key left out survives; ForcedDeletion removes it; arrays replace", async () => {
+  const w = await world({ downtime: 0, iron: 0, fang: 0 });
+  await w.ann.update({ [`flags.${M}.probe`]: { keep: 1, drop: 2, list: [1, 2, 3] } });
+  await w.ann.update({ [`flags.${M}.probe`]: { keep: 5, list: [9] } });
+  assert.deepEqual(w.ann.getFlag(M, "probe"), { keep: 5, drop: 2, list: [9] }, "'drop' was left out of the update and is still there; the array was replaced");
+  await w.ann.update({ [`flags.${M}.probe.drop`]: new (globalThis.foundry.data.operators.ForcedDeletion)() });
+  assert.deepEqual(w.ann.getFlag(M, "probe"), { keep: 5, list: [9] });
+  await w.ann.setFlag(M, "probe", { extra: true });
+  assert.deepEqual(w.ann.getFlag(M, "probe"), { keep: 5, list: [9], extra: true }, "setFlag is an update too");
 });

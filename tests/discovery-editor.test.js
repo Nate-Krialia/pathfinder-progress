@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { M, as, getApi, getUsers, world } from "./fake-world.js";
-import { E, draftOf, edit, editorModel, listItems, problemsOf, renderEditor, trackOfDraft } from "../scripts/discovery/editor-model.js";
+import { E, draftOf, edit, editorModel, filterItems, listItems, problemsOf, renderEditor, trackOfDraft } from "../scripts/discovery/editor-model.js";
 import { build } from "../scripts/discovery/editor-app.js";
 import { keyOfItem } from "../scripts/discovery/entry.js";
 import { installFakeApplication } from "./fake-application.js";
@@ -57,10 +57,41 @@ test("MODEL: Save is off with no change or with a problem; the detail says which
   assert.equal(editorModel({ ...base, selectedKey: null }).detail.text, E.pick);
 });
 
+test("FILTERS: the search box and the chips narrow the list; groups count what they show; a group can be folded shut", () => {
+  const reg = registry();
+  const items = listItems(reg, {});
+  assert.deepEqual(filterItems(items, { search: "pla" }).map(i => i.key), ["material:plain"]);
+  assert.deepEqual(filterItems(items, { search: "metal" }).map(i => i.key), ["material:ore"], "the search also reads the sub line (the tag)");
+  assert.deepEqual(filterItems(items, { kinds: ["note", "recipe"] }).map(i => i.key), ["note:page", "recipe:blade2"]);
+  assert.deepEqual(filterItems(items, { track: "has" }).map(i => i.key), ["material:ore", "note:page"]);
+  assert.deepEqual(filterItems(items, { track: "none" }).map(i => i.key), ["material:plain", "recipe:blade2"]);
+  assert.deepEqual(filterItems(items, { kinds: ["material"], track: "none", search: "p" }).map(i => i.key), ["material:plain"], "they combine");
+  const model = editorModel({ registry: reg, overlay: {}, filters: { track: "has" }, collapsed: ["note"] });
+  assert.deepEqual(model.list.groups.map(g => [g.kind, g.count, g.collapsed, g.items.length]), [["material", "1 of 2", false, 1], ["note", "1", true, 1], ["recipe", "0 of 1", false, 0]]);
+  assert.equal(editorModel({ registry: reg, filters: { search: "zzz" } }).list.empty, E.noMatches);
+  const html = renderEditor(model);
+  assert.match(html, /aria-expanded="false"[^>]*>▸ Notes \(1\)/, "a folded group shows its heading and count and no items");
+  assert.doesNotMatch(html, /data-key="note:page"/);
+  assert.match(html, /data-action="toggle-chip"[^>]*data-chip="track:has"[^>]*aria-pressed="true"/);
+});
+
+test("LAYOUT (markup): the list is the LEFT pane and the editor the RIGHT one; Save and Discard are outside the scrolling part; the intro sits in its own header", () => {
+  const html = renderEditor(editorModel({ registry: registry(), overlay: {}, selectedKey: "material:ore" }));
+  assert.ok(html.indexOf("pfp-editor-list") < html.indexOf("pfp-editor-detail"), "list first, editor second, inside one .pfp-body grid");
+  assert.match(html, /<div class="pfp-body pfp-editor-body">/);
+  assert.match(html, /<header class="pfp-editor-head"><p class="pfp-note">A track is a list of milestones/);
+  const detail = html.slice(html.indexOf("pfp-editor-detail"));
+  const scrollEnd = detail.indexOf("</div>", detail.indexOf("pfp-editor-scroll"));
+  assert.ok(detail.indexOf('data-action="save-track"') > detail.indexOf("pfp-editor-actions") && detail.indexOf("pfp-editor-actions") > scrollEnd - 400, "the action row follows the scroll area");
+  assert.match(html, /data-layout="wide"/);
+  assert.match(renderEditor(editorModel({ registry: registry(), layout: "narrow" })), /data-layout="narrow"/);
+});
+
 test("MARKUP: every control is a real button or a labelled field; an off button keeps aria-disabled", () => {
   const html = renderEditor(editorModel({ registry: registry(), overlay: {}, selectedKey: "material:ore" }));
   assert.match(html, /<button type="button"[^>]*data-action="pick-item"[^>]*data-key="material:ore"[^>]*aria-pressed="true"/);
   assert.match(html, /<input type="number"[^>]*aria-label="Steps 1"/);
+  assert.match(html, /<input type="search"[^>]*aria-label="Search items"/);
   assert.match(html, /<button[^>]*data-action="save-track"[^>]*aria-disabled="true"/);
   assert.doesNotMatch(html, /<script|onclick=/);
 });
@@ -84,6 +115,21 @@ test("WINDOW: pick, add the default track, break it, fix it, save; a player cann
   const click = async (action, where = "") => { const t = [...el().querySelectorAll(`[data-action="${action}"]${where}`)].find(b => b.getAttribute("aria-disabled") !== "true"); assert.ok(t, `${action} is live`); await as(w.gm, async () => { t.click(); await wait(15); }); };
   const type = async (field, index, value) => { const input = el().querySelector(`[data-field="${field}"][data-index="${index}"]`); input.value = value; await as(w.gm, async () => { input.dispatchEvent(new window.Event("change", { bubbles: true })); await wait(15); }); };
   assert.match(text(), /Gate Ore X[\s\S]*No track yet/);
+  // the list: search and chips narrow it, and the editor keeps its item
+  const search = el().querySelector('[data-field="search"]');
+  search.value = "ore x"; search.setSelectionRange?.(5, 5);
+  await as(w.gm, async () => { search.dispatchEvent(new window.Event("input", { bubbles: true })); await wait(15); });
+  assert.equal(document.activeElement?.dataset?.field, "search", "focus stays in the search box while typing");
+  assert.match(text(), /Materials \([\d]+ of \d+\)/);
+  assert.equal(el().querySelectorAll('[data-action="pick-item"]').length, 1);
+  await click("toggle-chip", '[data-chip="kind:note"]');
+  assert.equal(el().querySelectorAll('[data-action="pick-item"]').length, 0, "notes only + the search: nothing matches");
+  assert.match(text(), /Nothing matches/);
+  await click("toggle-chip", '[data-chip="kind:note"]');
+  await click("toggle-group", '[data-kind="material"]');
+  assert.equal(el().querySelectorAll('[data-action="pick-item"]').length, 0, "folded");
+  await click("toggle-group", '[data-kind="material"]');
+  assert.match(text(), /Gate Ore X[\s\S]*No track yet/, "the editor kept the item");
   await click("add-default");
   assert.equal(el().querySelectorAll(".pfp-milestone").length, 2);
   assert.equal(el().querySelector('[data-action="save-track"]').getAttribute("aria-disabled"), "true", "the default's formula has not been picked: nothing to save yet");

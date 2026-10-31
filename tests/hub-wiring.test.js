@@ -807,6 +807,7 @@ const BOOK = (...ids) => ({ v: 1, materials: Object.fromEntries(ids.map((id, i) 
 
 test("COMPENDIUM WINDOW: categories, an entry, Share (queued, cancel), the GM approves while the window is open, and a rejected share goes back to Only you", async () => {
   const w = await playerWorld({ downtime: 12 });
+  await w.ann.update({ [`flags.${M}.compendium`]: new (globalThis.foundry.data.operators.ForcedDeletion)() });      // (setFlag merges, as in Foundry: clear the book the world made first)
   await w.ann.setFlag(M, "compendium", BOOK("iron", "silver"));
   await as(w.annUser, async () => {
     const { app, main, live, press } = await openTab(w, "compendium");

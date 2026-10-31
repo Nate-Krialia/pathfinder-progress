@@ -66,7 +66,14 @@ test("RESEARCH: Put aside on a study keeps its progress (the words say so) and i
   await press("confirm-aside");
   assert.match(live(), /^Put aside: Study: Gate Ore A\. Your progress is kept\.$/);
   assert.match(main(), /Pick the study up again/);
+  assert.match(main(), /You've started studying Gate Ore A\. Pick it up again whenever you like\./, "a lead for a study with progress does not say it was never studied");
+  assert.doesNotMatch(main(), /haven't studied it yet/);
+  assert.doesNotMatch(main().match(/You've started studying[^.]*\. Pick it up again whenever you like\./)[0], /\d/);
   assert.equal(w.ann.getFlag(M, "discoveries").items["material:g7-a"].steps, 2);
+  await press("follow-lead");
+  assert.match(live(), /^Research started: Study: Gate Ore A\.$/);
+  assert.match(main(), /Study: Gate Ore A[\s\S]*Getting somewhere/, "the study is back under Active projects");
+  assert.doesNotMatch(main(), /No research projects yet|Pick the study up again/);
   await as(w.annUser, () => app.close());
 });
 

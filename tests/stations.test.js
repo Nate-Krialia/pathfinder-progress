@@ -199,7 +199,7 @@ test("selection: with nothing usable, the error gives each station's reason", ()
 });
 
 test("selection: no stations at all is its own message", () => {
-  assert.deepEqual(selectStation({ verdicts: [], recipe: RECIPE }).errors, ["no stations are defined"]);
+  assert.deepEqual(selectStation({ verdicts: [], recipe: RECIPE }).errors, ["There's no workshop here to craft in."]);
 });
 
 // The join ------------------------------------------------------------------------------------

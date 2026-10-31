@@ -8,6 +8,8 @@ import { check } from "../data/schema.js";
 import { TRACK_SCHEMA } from "../data/schemas.js";
 import { DISCOVERY } from "../config.js";
 import { defaultTrack, itemKey, trackOf } from "./track.js";
+import { normalizeDisplay } from "../hub/display.js";
+import { rootAttributes } from "../hub/render.js";
 
 export const E = {
   title: "Discovery tracks",
@@ -34,7 +36,16 @@ export const E = {
   cleared: name => `${name} now uses the definition's track.`,
   needFormula: "pick a formula that exists",
   noUnsaved: "Nothing to save.",
-  unsaved: "You have unsaved changes."
+  unsaved: "You have unsaved changes.",
+  searchLabel: "Search items",
+  searchHint: "Type part of a name",
+  filtersLabel: "Show",
+  chipKinds: { material: "Materials", note: "Notes", recipe: "Higher versions" },
+  chipTrack: { has: "Has a track", none: "No track" },
+  groupCount: (shown, total) => (shown === total ? `${total}` : `${shown} of ${total}`),
+  noMatches: "Nothing matches. Clear the search or a filter.",
+  collapse: "Hide this group",
+  expand: "Show this group"
 };
 
 const KIND_LABEL = { material: "Material", note: "Note", recipe: "Formula version" };
@@ -85,21 +96,45 @@ export function problemsOf(draft, kind, itemId, registry) {
   return problems;
 }
 
+/** Apply the search box and the filter chips. `filters`: { search, kinds: [kind...] (none = all), track: "all" | "has" | "none" }. */
+export function filterItems(items, filters = {}) {
+  const text = String(filters.search ?? "").trim().toLowerCase();
+  const kinds = filters.kinds?.length ? new Set(filters.kinds) : null;
+  return items.filter(i => (!kinds || kinds.has(i.kind))
+    && (filters.track === "has" ? i.hasTrack : filters.track === "none" ? !i.hasTrack : true)
+    && (!text || `${i.name} ${i.sub}`.toLowerCase().includes(text)));
+}
+
 /**
  * The window's model.
- * @param {{ registry, overlay, selectedKey, draft, dirty, message }} input
+ * @param {{ registry, overlay, selectedKey, draft, dirty, message, filters, collapsed, layout, display }} input
  */
-export function editorModel({ registry, overlay = {}, selectedKey = null, draft = null, dirty = false, message = "" }) {
-  const items = listItems(registry, overlay);
-  const groups = ["material", "note", "recipe"].map(kind => ({ kind, heading: E.groups[kind], items: items.filter(i => i.kind === kind).map(i => ({ ...i, selected: i.key === selectedKey })) })).filter(g => g.items.length);
-  const item = items.find(i => i.key === selectedKey) ?? null;
-  if (!item) return { title: E.title, intro: E.intro, groups, detail: { kind: "empty", text: E.pick }, message };
+export function editorModel({ registry, overlay = {}, selectedKey = null, draft = null, dirty = false, message = "", filters = {}, collapsed = [], layout = "wide", display }) {
+  const all = listItems(registry, overlay);
+  const shown = filterItems(all, filters);
+  const hidden = new Set(collapsed);
+  const groups = ["material", "note", "recipe"].map(kind => {
+    const total = all.filter(i => i.kind === kind).length;
+    const items = shown.filter(i => i.kind === kind);
+    return { kind, heading: E.groups[kind], total, count: E.groupCount(items.length, total), collapsed: hidden.has(kind), items: items.map(i => ({ ...i, selected: i.key === selectedKey })) };
+  }).filter(g => g.total);
+  const list = {
+    searchLabel: E.searchLabel, search: filters.search ?? "", filtersLabel: E.filtersLabel,
+    chips: [
+      ...Object.keys(E.chipKinds).map(kind => ({ id: `kind:${kind}`, label: E.chipKinds[kind], selected: Boolean(filters.kinds?.includes(kind)) })),
+      ...["has", "none"].map(t => ({ id: `track:${t}`, label: E.chipTrack[t], selected: filters.track === t }))
+    ],
+    groups, empty: shown.length === 0 ? E.noMatches : null
+  };
+  const base = { title: E.title, intro: E.intro, list, message, layout, display };
+  const item = all.find(i => i.key === selectedKey) ?? null;
+  if (!item) return { ...base, detail: { kind: "empty", text: E.pick } };
   const def = registry[item.kind].get(item.id);
   const rows = draft ?? draftOf(trackOf(def, overlay, item.key));
   const problems = problemsOf(rows, item.kind, item.id, registry);
   const recipeChoices = [...registry.recipe.values()].map(r => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name));
   return {
-    title: E.title, intro: E.intro, groups, message,
+    ...base,
     detail: {
       kind: "item", key: item.key, itemKind: item.kind, name: item.name, label: KIND_LABEL[item.kind],
       facts: [def.tag ? E.tagLine(registry.tag?.get(def.tag)?.name ?? def.tag) : null, item.kind === "material" && Number.isFinite(def.value) ? E.valueLine(def.value) : null].filter(Boolean),
@@ -116,16 +151,19 @@ export function editorModel({ registry, overlay = {}, selectedKey = null, draft 
 
 // Markup --------------------------------------------------------------------------------------------------------------
 const esc = text => String(text ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const button = ({ action, label, data = {}, disabled = false, pressed }) =>
-  `<button type="button" class="pfp-btn${disabled ? " is-disabled" : ""}" data-action="${action}"${Object.entries(data).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("")}${pressed === undefined ? "" : ` aria-pressed="${pressed}"`}${disabled ? ' aria-disabled="true"' : ""}>${esc(label)}</button>`;
+const button = ({ action, label, data = {}, disabled = false, pressed, expanded }) =>
+  `<button type="button" class="pfp-btn${disabled ? " is-disabled" : ""}" data-action="${action}"${Object.entries(data).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("")}${pressed === undefined ? "" : ` aria-pressed="${pressed}"`}${expanded === undefined ? "" : ` aria-expanded="${expanded}"`}${disabled ? ' aria-disabled="true"' : ""}>${esc(label)}</button>`;
 
 export function renderEditor(model) {
-  const groups = model.groups.map(g => `<section aria-label="${esc(g.heading)}"><h3>${esc(g.heading)}</h3><ul class="pfp-cards">${g.items.map(i => `<li>${button({
-    action: "pick-item", pressed: i.selected, data: { key: i.key },
-    label: `${i.name}${i.sub ? ` (${i.sub})` : ""}${i.hasTrack ? " · has a track" : ""}${i.edited ? " · edited here" : ""}`
-  })}</li>`).join("")}</ul></section>`).join("");
+  const l = model.list;
+  const chips = l.chips.map(c => button({ action: "toggle-chip", label: c.label, pressed: c.selected, data: { chip: c.id } })).join("");
+  const groups = l.groups.map(g => `<section class="pfp-editor-group" aria-label="${esc(g.heading)}"><h3>${button({ action: "toggle-group", label: `${g.collapsed ? "▸" : "▾"} ${g.heading} (${g.count})`, data: { kind: g.kind }, pressed: undefined, expanded: !g.collapsed })}</h3>
+    ${g.collapsed ? "" : `<ul class="pfp-cards">${g.items.map(i => `<li>${button({
+      action: "pick-item", pressed: i.selected, data: { key: i.key },
+      label: `${i.name}${i.sub ? ` (${i.sub})` : ""}${i.hasTrack ? " · has a track" : ""}${i.edited ? " · edited here" : ""}`
+    })}</li>`).join("")}</ul>`}</section>`).join("");
   const d = model.detail;
-  let detail;
+  let detail, actions = "";
   if (d.kind === "empty") detail = `<p class="pfp-empty">${esc(d.text)}</p>`;
   else {
     const rows = d.rows.map(r => `<li class="pfp-milestone"><label>${esc(E.stepsLabel)} <input type="number" min="1" step="1" data-field="steps" data-index="${r.index}" value="${esc(r.steps)}" aria-label="${esc(E.stepsLabel)} ${r.index + 1}"></label>
@@ -135,9 +173,15 @@ export function renderEditor(model) {
     detail = `<h2>${esc(d.name)}</h2><p class="pfp-note">${esc(d.label)}</p>${d.facts.map(f => `<p class="pfp-note">${esc(f)}</p>`).join("")}<p class="pfp-note">${esc(d.source)}</p>
       ${rows ? `<ol class="pfp-milestones">${rows}</ol>` : ""}${d.problems.map(p => `<p class="pfp-why" role="alert">${esc(p)}</p>`).join("")}
       <div class="pfp-row">${button({ action: "add-row", label: E.addMilestone, disabled: !d.canAdd })}${button({ action: "add-default", label: E.addDefault })}</div>
-      <div class="pfp-row">${button({ action: "save-track", label: E.save, disabled: !d.canSave })}${button({ action: "revert-track", label: E.revert, disabled: !d.canRevert })}${button({ action: "use-definition", label: E.useDefinition, disabled: !d.canUseDefinition })}</div>
       ${d.state ? `<p class="pfp-note">${esc(d.state)}</p>` : ""}`;
+    // Save, Discard and Use the definition's track sit OUTSIDE the scrolling part: they are always on screen, however long the list or the rows are.
+    actions = `<div class="pfp-row pfp-editor-actions">${button({ action: "save-track", label: E.save, disabled: !d.canSave })}${button({ action: "revert-track", label: E.revert, disabled: !d.canRevert })}${button({ action: "use-definition", label: E.useDefinition, disabled: !d.canUseDefinition })}</div>`;
   }
-  return `<div class="pfp-hub pfp-editor" tabindex="-1"><p class="pfp-note">${esc(model.intro)}</p>${model.message ? `<p class="pfp-result" role="status">${esc(model.message)}</p>` : ""}
-    <div class="pfp-main"><div class="pfp-pane pfp-list">${groups}</div><div class="pfp-pane pfp-detail">${detail}</div></div></div>`;
+  const attrs = Object.entries(rootAttributes({ display: model.display ?? normalizeDisplay({}), layout: model.layout })).map(([k, v]) => `${k}="${esc(v)}"`).join(" ");
+  return `<div class="pfp-hub pfp-editor" tabindex="-1" ${attrs}><header class="pfp-editor-head"><p class="pfp-note">${esc(model.intro)}</p>${model.message ? `<p class="pfp-result" role="status">${esc(model.message)}</p>` : ""}</header>
+    <div class="pfp-body pfp-editor-body"><div class="pfp-pane pfp-list pfp-editor-list" data-scroll-key="list">
+      <label class="pfp-search">${esc(l.searchLabel)} <input type="search" data-field="search" value="${esc(l.search)}" placeholder="${esc(E.searchHint)}" aria-label="${esc(l.searchLabel)}"></label>
+      <div class="pfp-row" role="group" aria-label="${esc(l.filtersLabel)}">${chips}</div>
+      <div class="pfp-editor-scroll" data-scroll-key="items">${groups}${l.empty ? `<p class="pfp-empty">${esc(l.empty)}</p>` : ""}</div></div>
+      <div class="pfp-pane pfp-detail pfp-editor-detail"><div class="pfp-editor-scroll" data-scroll-key="detail">${detail}</div>${actions}</div></div></div>`;
 }

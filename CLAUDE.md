@@ -19,7 +19,7 @@ Read this file first on every task. Then load only the system file(s) the task t
 | `docs/09-build-order.md` | Staged build plan with test gates |
 | `docs/11c-discovery-addendum.md` | Tag themes and item classes: how material effects are learned (wins over 11b where they differ) |
 | `docs/18-stage11b-gate.md` | Real-Foundry gate for the Hub's Research and Compendium tabs and leads |
-| `docs/19-stage11c-gate.md` | Real-Foundry gate for the discovery chain, gold values and the Discovery tracks window (v0.20.0) |
+| `docs/19-stage11c-gate.md` | Real-Foundry gate for the discovery chain, gold values and the Discovery tracks window (v0.20.1) |
 
 ## Design pillars (non-negotiable)
 
@@ -45,6 +45,7 @@ Read this file first on every task. Then load only the system file(s) the task t
 - **Private things never go to public chat.** Every queue rejection (a research project, a blueprint, a patron, a region, a Compendium share) is whispered to the character's owners and the GM (`scripts/queue/store.js`, `returnQueued`), and no chat message carries a node charge count. A Hub focus request waits for its control to be drawn (a relayed write's update echo can arrive after the handler, `docs/08`).
 - **Experiments** (`docs/11c-discovery-addendum.md`, which replaced 11b's per-recipe rule): a material's behaviour is learned per material per ITEM CLASS (the recipe's category) by a successful craft, so one armor craft teaches all armors; a recipe's own OVERRIDE for a material is learned per recipe; a formula's baseline is revealed when it is owned; the party's shared book counts. Effects come from the ONE resolver (recipe override > material class > material default).
 - **Research tracks are GM-only data** (a material's, a note's or a formula version's milestones and step thresholds; also the Discovery tracks window's overlay). They never reach a player's definitions or an actor flag; players see only a plain stage (Just started, Getting somewhere, Nearly there) and `hasTrack` yes/no. A material's tag and theme are sent only once the character knows them (no track, studied, or already crafted with). Material tier and formula version are separate axes.
+- **A flag update MERGES into what is stored** (real Foundry; the test fake does the same): a key left out of the new object survives. To clear a value write it explicitly (`paused: false`) or use `foundry.data.operators.ForcedDeletion`; never rely on omitting a key. Arrays replace.
 - Each downtime day goes to exactly one activity (research, exploring, crafting, workshop upgrade). Gathering costs node charges, not days, and needs no downtime.
 - Prefer Foundry-native building blocks: Items, compendium packs, flags, tokens, ApplicationV2, socketlib. Foundry cancels Tab and similar keys before the browser acts: an ApplicationV2 window we build stops Tab/Enter/Space bubbling out of its root (`docs/08`, UI surfaces).
 - Keep tunable numbers in one config object/file, never hardcoded in logic.

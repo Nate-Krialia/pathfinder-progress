@@ -1,4 +1,4 @@
-# 19 Stage 11c gate (real Foundry): the discovery chain, item classes, gold values and the leftovers (v0.20.0)
+# 19 Stage 11c gate (real Foundry): the discovery chain, item classes, gold values and the leftovers (v0.20.1)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. Every step is labelled **[GM]** or **[Player]**. **[Player] steps tell you what to click; the block then checks what is on screen.** The blocks can be run at any time: the helper in Step 3 records every line the Hub's status line shows (they vanish after about 10 seconds), and the blocks read that record. Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, layout is the point.
 
@@ -14,19 +14,21 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 - **No GM connected:** each action says what it was trying to do.
 - Not shown, on purpose: the "GM didn't answer" line and the busy button (they need a GM that is connected and silent; the automated tests cover them).
 
+**Fixtures, not behaviour.** SETUP plants some things so the steps have something to look at: the Compendium entries for Gate Ore A, Gate Ore B and Gate Plain (normally an entry appears when you find the material), and the already-started Gate Page study (normally you would start it yourself). They are there so the steps can be short; they are not how the module finds or starts things.
+
 **Safety.** Throwaway things named "Gate ...": characters **Gate Scholar** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`g7-ore`, `g7-a`, `g7-b`, `g7-plain`, `g7-blade`, `g7-blade2`, `g7-lantern`, `g7-charm`, `g7-trinket`, `g7-page`, `g7-letter`, `g7-town`); they last until you reload the GM window, and SETUP registers them again. No real campaign data. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left tracks behind. CLEANUP always works and is safe to run twice.
 
 **Restart note.** 0.20.0 adds a world setting (the tracks overlay) and a stylesheet rule, nothing else in the manifest but the version: update the module and **force-reload both windows** (Ctrl+Shift+R). If the Discovery tracks button is missing, restart the Foundry server once.
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.20.0**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.20.1**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.20.0"]` in the GM window and `["Test", false, "0.20.0"]` in the Player window.
+Expected: `["<your GM name>", true, "0.20.1"]` in the GM window and `["Test", false, "0.20.1"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 
@@ -160,8 +162,8 @@ await (async () => {
   // the recorder works: it sees a line we set (a throwaway element, removed again)
   const probe = Object.assign(document.createElement("div"), { className: "pfp-live", textContent: "recorder check" });
   document.body.append(probe);
-  await p.until(() => p.said(/^recorder check$/), 1000);
-  p.check("the recorder sees a line (the test line)", p.said(/^recorder check$/), p.lines());
+  await p.until(() => p.said(/(^| \| )recorder check$/), 1000);
+  p.check("the recorder sees a line (the test line)", p.said(/(^| \| )recorder check$/), p.lines());
   probe.remove();
   await new Promise(r => setTimeout(r, 50));
   log.length = 0; last = liveText();
@@ -305,7 +307,7 @@ await (async () => {
 
 ## Step 11 [Player]: Put aside keeps a study's progress
 
-Open the **Research** tab. Click **Study: Gate Page** (**Getting somewhere**), then **Put the study aside**. **What you should see:** "**Put aside? Your progress is kept.**" with **Keep** and **Confirm**; the focus ring is on **Keep**. Press **Confirm**: "**Put aside: Study: Gate Page. Your progress is kept.**" and the card is gone from the list; under the leads, **Gate Page** now has the button **Pick the study up again**. Press it: the study is back, still **Getting somewhere**.
+Open the **Research** tab. Click **Study: Gate Page** (**Getting somewhere**), then **Put the study aside**. **What you should see:** "**Put aside? Your progress is kept.**" with **Keep** and **Confirm**; the focus ring is on **Keep**. Press **Confirm**: "**Put aside: Study: Gate Page. Your progress is kept.**" and the card is gone from the list; under the leads, **Gate Page** now says "**You've started studying Gate Page. Pick it up again whenever you like.**" with the button **Pick the study up again**. Press it: the study is back, still **Getting somewhere**.
 
 ```js
 await (async () => {
@@ -313,6 +315,9 @@ await (async () => {
   p.check("the put-aside line", p.said(/^Put aside: Study: Gate Page\. Your progress is kept\.$/), p.lines());
   p.check("the pick-up line", p.said(/^Research started: Study: Gate Page\.$/), p.lines());
   p.check("it is back, and still Getting somewhere", /Study: Gate Page[\s\S]*Getting somewhere/.test(p.text()));
+  const entry = p.scholar.getFlag(p.M, "discoveries")?.items?.["note:g7-page"];
+  p.check("the study is no longer paused after the pick-up (Foundry merges an update into what is stored, so this has to be false)", Boolean(entry) && !entry.paused && entry.status === "active", JSON.stringify(entry));
+  p.check("and it is back under Active projects, not still offered as a lead", !p.api.research.leadsFor(p.scholar).some(l => l.id === "item:note:g7-page") && p.api.projectInfo(p.scholar).some(x => x.id === "study:note:g7-page"));
   p.check("nothing numeric on screen", !p.leaks() && p.root().querySelectorAll(".pfp-step, progress").length === 0);
   return p.done();
 })();
@@ -325,6 +330,8 @@ await (async () => {
 Open it from the scene controls (the open-book button next to the Review button), or run `game.modules.get("pathfinder-progress").api.discovery.openEditor()`. **What to do and see:** pick **Gate Plain** (Materials, "No track yet"); press **Add the default track**: two rows, "Steps 4 / Properties" and "Steps 8 / A formula", with the message "Pick a formula that exists." and **Save** off. Choose **Gate Trinket** in the second row: the message goes and **Save** turns on. Change the second row's steps to **4**: "must be more than the milestone before it (4)" and **Save** is off again; set it to **10**. Press **Save**: "Saved the track for Gate Plain." and the item shows "has a track" and "edited here". Press **Use the definition's track**: back to "No track yet". Also open a Gate Ore A item sheet (give yourself one if needed) to see the header button, or skip.
 
 **Send me a screenshot of the window with the two rows and a message showing.**
+
+**Run the block below AFTER you have done the clicks above** (it needs the window to have saved and cleared once). It then saves a track on Gate Plain on purpose, so **Gate Plain is left with a track and is locked for crafting** from here on (Steps 13 and 16 rely on that).
 
 ```js
 // [GM] after the clicks above: the overlay was written and cleared; a player cannot read it (GM only); the Player's copy of Gate Plain learns THAT a track exists once one is saved (checked in Step 13).
@@ -360,7 +367,7 @@ await (async () => {
 
 Click on blank space inside the Hub. Press **Tab**: the first ring lands on **Display**. On the **Research** tab Tab to a card, a skill, **One day more**, and the study's **Put the study aside**: **Enter** opens the confirm with the ring on **Keep**; Enter on Keep closes it. Then open **Display**, choose **175%** and drag the window to its minimum width (about 300px). **What you should see (look at the screen; the browser hides focus rings while the console has the focus):** every control you land on shows a clear ring; the two panes stack; the study card, the lead cards, "What you know", the gold lines and the "Not open to you yet" sentence wrap and never overlap; badges (Study, Queued) are never split; nothing is cut off at the right edge.
 
-**Send me a screenshot of the Research tab and of the Formulae tab with Gate Plain picked, at that size.**
+**Send me a screenshot of the Research tab and of the Formulae tab with Gate Ore B picked (not Gate Plain: it is locked after Step 12), at that size.**
 
 ```js
 await (async () => {
@@ -378,11 +385,11 @@ await (async () => {
 
 ## Step 15 [GM]: log out (or close the GM tab) now
 
-Close the GM window so that **no GM is connected**. Do not run CLEANUP yet. (Leave the Player window open.)
+**First**, in the Player window, open the **Research** tab and press **Start researching** on **Gate Letter** while the GM is still connected, so there is an active **Study: Gate Letter** for the next step. **Then** close the GM window so that **no GM is connected**. Do not run CLEANUP yet. (Leave the Player window open.)
 
 ## Step 16 [Player]: each action says what it was trying to do
 
-**What to do:** open the **Compendium** tab, **Materials**, **Gate Plain** and press **Share with the party**: the line is "**Couldn't share this: The GM isn't connected right now, so this can't be done yet.**" Then open the **Research** tab, press **Start researching** on **Gate Letter**: "**Couldn't start researching: The GM isn't connected right now, so this can't be done yet.**" Then on a study press **Put the study aside** and **Confirm**: "**Couldn't put this aside: ...**" (the same reason). Finally, on a study, pick Crafting and press **Queue 1 check**: this one WORKS ("1 check queued ..."), because a player writes their own research queue; the GM will resolve it later. Nothing says "Couldn't queue the craft" except a real craft.
+**What to do** (the GM window stays closed): open the **Compendium** tab, **Materials**, **Gate Plain** and press **Share with the party**: the line is "**Couldn't share this: The GM isn't connected right now, so this can't be done yet.**" Then open the **Research** tab and press **Start researching** on **Gate Plain** (it is a lead since Step 12 gave it a track): "**Couldn't start researching: The GM isn't connected right now, so this can't be done yet.**" Then click **Study: Gate Letter** (started in Step 15), press **Put the study aside** and **Confirm**: "**Couldn't put this aside: ...**" (the same reason). Finally, on that study, pick Crafting and press **Queue 1 check**: this one WORKS ("1 check queued ..."), because a player writes their own research queue; the GM will resolve it later. Nothing says "Couldn't queue the craft" except a real craft.
 
 ```js
 await (async () => {

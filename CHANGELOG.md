@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.20.1
+
+Fixes from gate 19 in real Foundry.
+
+- **Picking up a put-aside study did not resume it.** Cause: the pick-up wrote the study back WITHOUT the `paused` key, but Foundry merges an update into the stored flag, so the old `paused: true` survived (the Hub said "Research started" while the study stayed paused, hidden from Active projects and still offered as a lead). It now writes `paused: false`. Why the tests missed it: the test fake REPLACED a flag with the new value where Foundry merges, so the missing key really disappeared there. The fake now merges objects (arrays replace, `ForcedDeletion` removes), for both `update` and `setFlag`; two test set-ups that had relied on replacing were corrected, and a test pins the fake's behaviour. The pick-up is tested for a material, a note and a higher formula version (a paused version study now has a lead too; before, nothing could pick it up).
+- **Wording.** A lead for a study that has progress says "You've started studying Gate Page. Pick it up again whenever you like." (no numbers); "haven't studied it yet" is only for items never started.
+- **Discovery tracks window layout.** List on the LEFT, editor on the RIGHT (stacked when narrow); a search box, filter chips (Materials, Notes, Higher versions, Has a track, No track), collapsible groups with a count each ("20 of 206" while filtered); Save, Discard and Use the definition's track sit outside the scrolling part so they stay on screen; the intro has its own header and is no longer clipped; the number box, drop-downs and search box use the Hub's parchment look, focus ring and 44px height whatever Foundry does to plain fields. All earlier messages are unchanged. The layout harness has six editor scenes (300 items among them), the field targets are now checked too, and three new layout mutations (fields under 44px, groups squeezed flat, an intro cut off) fail as they should.
+- **Polish.** With no workshop in the party's town the craft preview says "There's no workshop here to craft in."; the order of previewCraft's errors is unchanged (the study reason stays first).
+- **Gate 19 text.** Step 11 reads the ledger and fails clearly if `paused` is still true; Step 12 is run after the clicks and says it leaves Gate Plain with a track; Step 14 picks Gate Ore B; Step 15 starts Gate Letter while the GM is still connected; Step 16 uses Gate Plain's lead for "Couldn't start researching" and the Gate Letter study for Put aside and Queue 1 check; the header says the planted Compendium entries and the started Gate Page study are fixtures. The recorder probe also accepts a status line that is already showing.
+- Tests: 1065 in all (the layout matrix is now 5670 states, 0 problems). No manifest change except the version: force-reload both windows (Ctrl+Shift+R).
+
 ## 0.20.0
 
 Stage 11c: the discovery chain, item classes, gold values and two leftovers. (`docs/11c-discovery-addendum.md` records the decision that replaced 11b's per-recipe effect knowledge.)

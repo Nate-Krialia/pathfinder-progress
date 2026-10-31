@@ -177,9 +177,34 @@
 @media (prefers-reduced-motion: no-preference) { .pfp-hub button.pfp-btn { transition: border-color 0.12s ease, background-color 0.12s ease; } }
 @media (prefers-reduced-motion: reduce) { .pfp-hub *, .pfp-hub *::before, .pfp-hub *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
-/* Discovery tracks window (Stage 11c, GM only): the milestone rows wrap and never overlap */
+/* Discovery tracks window (Stage 11c, GM only): the list on the left, the editor on the right (stacked when narrow), Save/Discard always on screen */
+.pfp-hub.pfp-editor { height: 100%; min-height: 0; }
+.pfp-hub .pfp-editor-head { display: block; }
+.pfp-hub .pfp-editor-body { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+.pfp-hub .pfp-editor-body > .pfp-pane { min-height: 0; min-width: 0; }
+.pfp-hub .pfp-editor-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 0.6em; }
+.pfp-hub .pfp-editor-actions { flex: 0 0 auto; padding-top: 0.4em; border-top: 1px solid var(--pfp-border); }
+.pfp-hub[data-layout="narrow"] .pfp-editor-body { grid-template-rows: none; }
+.pfp-hub[data-layout="narrow"] .pfp-editor-list .pfp-editor-scroll { flex: 0 1 auto; max-height: 18em; }
+.pfp-hub[data-layout="narrow"] .pfp-editor-detail .pfp-editor-scroll { flex: 0 1 auto; }
+.pfp-hub .pfp-editor-group h3 { margin: 0; }
 .pfp-hub .pfp-milestones { list-style: none; margin: 0.5rem 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-.pfp-hub .pfp-milestone { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid var(--pfp-line, currentColor); }
-.pfp-hub .pfp-milestone label { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
-.pfp-hub .pfp-milestone input, .pfp-hub .pfp-milestone select { min-height: 44px; max-width: 100%; box-sizing: border-box; }
-.pfp-hub .pfp-milestone input[type="number"] { width: 6rem; }
+.pfp-hub .pfp-milestone { display: flex; flex-wrap: wrap; gap: 0.5em 0.75em; align-items: center; padding: 0.4em 0; border-bottom: 1px solid var(--pfp-border); }
+.pfp-hub .pfp-milestone label, .pfp-hub .pfp-search { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; }
+.pfp-hub .pfp-search { flex-direction: column; align-items: stretch; }
+/* Fields look like the rest of the Hub (parchment card, border, the same focus ring) and are 44px tall, whatever Foundry does to plain inputs. */
+.pfp-hub input, .pfp-hub select {
+  box-sizing: border-box !important; height: auto !important; min-height: var(--pfp-target) !important; max-width: 100% !important; margin: 0 !important; padding: 0.3em 0.6em !important;
+  font: inherit !important; font-size: 1em !important; line-height: 1.35 !important; color: var(--pfp-text) !important; background: var(--pfp-card) !important;
+  border: 2px solid var(--pfp-border) !important; border-radius: 0.4em !important; box-shadow: none !important;
+}
+.pfp-hub input[type="number"] { width: 6em !important; }
+.pfp-hub input[type="search"] { width: 100% !important; }
+.pfp-hub select { min-width: 8em !important; }
+.pfp-hub input:hover, .pfp-hub select:hover { border-color: var(--pfp-accent) !important; }
+.pfp-hub.pfp-editor > * { flex-shrink: 0; }
+.pfp-hub.pfp-editor > .pfp-editor-body { flex: 1 1 auto; }
+.pfp-hub .pfp-editor-scroll > * { flex: 0 0 auto; }
+.pfp-hub .pfp-editor-body > .pfp-pane > * { flex-shrink: 0; }
+.pfp-hub .pfp-editor-body > .pfp-pane > .pfp-editor-scroll { flex: 1 1 auto; flex-shrink: 1; }
+.pfp-hub .pfp-editor-list > .pfp-row, .pfp-hub .pfp-editor-list .pfp-search { max-width: 100%; }

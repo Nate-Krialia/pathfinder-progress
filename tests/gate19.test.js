@@ -123,8 +123,9 @@ test("GATE 19: every code step runs, in order, and the click-through steps are p
     seen(/Put aside\? Your progress is kept\./);
     await click("confirm-aside");
     await wait(30);
-    seen(/Gate Page[\s\S]*Pick the study up again/);
+    seen(/Gate Page[\s\S]*You've started studying Gate Page\. Pick it up again whenever you like\.[\s\S]*Pick the study up again/);
     await click("follow-lead", '[data-lead="item:note:g7-page"]');
+    seen(/Study: Gate Page[\s\S]*Getting somewhere/);
     await expectPass(11, testUser);
     // Step 12: the Discovery tracks window (GM), played on the strict fake
     const Editor = buildEditor();
@@ -159,13 +160,15 @@ test("GATE 19: every code step runs, in order, and the click-through steps are p
     await wait(20);
     await expectPass(14, testUser);
     // Steps 15-16: no GM connected
+    await click("switch-tab", '[data-tab="research"]');
+    await click("follow-lead", '[data-lead="item:note:g7-letter"]');          // Step 15: while the GM is still connected
     env.noGM = true;
     await click("switch-tab", '[data-tab="compendium"]');
     await click("select-entry", '[data-entry="g7-plain"]');
     await click("share-entry");
     await click("switch-tab", '[data-tab="research"]');
-    await click("follow-lead", '[data-lead="item:note:g7-letter"]');
-    await click("select-project", '[data-project="study:note:g7-page"]');
+    await click("follow-lead", '[data-lead="item:material:g7-plain"]');       // Gate Plain has a track since Step 12
+    await click("select-project", '[data-project="study:note:g7-letter"]');
     await click("put-aside");
     await click("confirm-aside");
     await click("set-skill", '[data-skill="crafting"]');

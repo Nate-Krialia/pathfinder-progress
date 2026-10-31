@@ -189,6 +189,7 @@ export const S = {
   leadStarted: name => `Research started: ${name}.`,
   leadHidden: "(A note from the GM that can't be shown here.)",
   leadItem: W.leadItem,
+  leadResume: W.leadResume,
   leadNote: W.leadNote,
   leadStartAgain: "Pick the study up again",
 

@@ -132,7 +132,7 @@ function makeActor(name, { copper = 0, owners = [] } = {}) {
     // `actor.echo = { delay }` (see enableEcho) makes the fake do that: non-GM clients read a copy that is refreshed `delay` ms after a write, and the
     // `updateActor` hook fires on the player's client then.
     getFlag: (scope, key) => (scope === M ? clone((actor.echo && !game.user?.isGM ? actor.echo.seen : flags)[key]) : undefined),
-    async setFlag(scope, key, value) { flags[key] = clone(value); actor.echo?.write([key]); },
+    async setFlag(scope, key, value) { applyPath(flags, key, value); actor.echo?.write([key]); },   // (setFlag is an update: it merges objects like update does)
     async update(data) {
       await latency();
       tick("actor.update");
@@ -141,8 +141,8 @@ function makeActor(name, { copper = 0, owners = [] } = {}) {
         if (path.startsWith(`flags.${M}.`)) {
           const key = path.slice(`flags.${M}.`.length);
           // Real Foundry takes a deep path ("flags.<module>.compendium.materials.x"): the fake does too (a plain key still replaces the flag).
-          if (key.includes(".")) applyPath(flags, key, value);
-          else if (value instanceof FakeForcedDeletion) delete flags[key]; else flags[key] = clone(value);
+          // Real Foundry MERGES an object into the one already stored (arrays and plain values replace); a key left out of the update survives unless ForcedDeletion removes it.
+          applyPath(flags, key, value);
         } else applyPath(actor, path, value);
       }
     },
@@ -337,7 +337,8 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
   if (startBook?.experiments) {
     const { experiments, ...rest } = startBook; void experiments;
     const empty = !Object.keys(rest.materials).length && !Object.keys(rest.creatures).length && !Object.keys(rest.regions).length;
-    await ann.update({ [`flags.${M}.compendium`]: empty ? new FakeForcedDeletion() : rest });
+    // (an update MERGES, so dropping the experiments needs an explicit deletion, as in real Foundry)
+    await ann.update(empty ? { [`flags.${M}.compendium`]: new FakeForcedDeletion() } : { [`flags.${M}.compendium.experiments`]: new FakeForcedDeletion() });
   }
   env.ops = 0;
   const { setCraftReductions } = await import("../scripts/queue/work.js");

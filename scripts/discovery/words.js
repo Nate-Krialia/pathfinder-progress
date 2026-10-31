@@ -7,6 +7,7 @@ export const W = {
   studyGoal: name => `Studying ${name}.`,
   studyName: name => `Study: ${name}`,
   leadItem: name => `You carry ${name} and haven't studied it yet.`,
+  leadResume: name => `You've started studying ${name}. Pick it up again whenever you like.`,
   leadNote: name => `You hold ${name} and haven't studied it yet.`,
   leadVersion: tag => `What you have learned about ${tag} materials shows how to make a better version.`,
   learnedProperties: (name, tag, theme) => `You've learned what ${name} is good for${tag ? `: ${tag}, a theme of ${theme}` : ""}.`,

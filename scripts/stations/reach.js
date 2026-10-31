@@ -100,7 +100,7 @@ export function selectStation({ verdicts, recipe, requestedId }) {
     return { ok: false, errors: [`several stations are usable: ${list}; choose one with station: "<id>"`] };
   }
 
-  if (verdicts.length === 0) return { ok: false, errors: ["no stations are defined"] };
+  if (verdicts.length === 0) return { ok: false, errors: ["There's no workshop here to craft in."] };
   const why = verdicts.map(v => `${v.station.name}: ${v.reason}`).join("; ");
   return { ok: false, errors: [`no usable ${recipe.stationCategory} station (tier ${recipe.stationTierMin}+): ${why}`] };
 }
