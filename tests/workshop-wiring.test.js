@@ -280,6 +280,17 @@ test("DESIGN: researching a blueprint is an ordinary research project; finishing
   clean();
 });
 
+test("BUILD: rejecting a build is a whisper to the owner and the GM, never public (the blueprint's name is private)", async () => {
+  const w = await builderWorld();
+  const action = await build(w.annUser, w.ann);
+  env.chat.length = 0;
+  await as(w.gm, () => api().queue.reject(w.ann, action.id));
+  assert.ok(env.chat.length >= 1 && env.chat.every(m => Array.isArray(m.whisper) && m.whisper.length > 0), "no public message");
+  assert.deepEqual([...env.chat[0].whisper].sort(), [w.annUser.id, w.gm.id].sort());
+  assert.match(env.chat[0].content, /Build: Camp Forge/);
+  clean();
+});
+
 test("BUILD: queueing takes the materials AND gold now and reserves the days; it BLOCKS End downtime; cancelling returns everything once", async () => {
   const w = await builderWorld();
   const before = measure(w.ann);

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.19.2
+
+Gate 18 on 0.19.1 in real Foundry, with a recorder watching the status line.
+
+- **"Working on it..." is gone again** (added in 0.19.1). It was based on a wrong diagnosis: in the real window the relay answers in about 25 to 75 ms (the recorder saw "" then the result line within that), and the Hub clears a result line by design after about 10 seconds (`HUB.statusMs`). The gate blocks for steps 5 and 9 had been run after those 10 seconds. The gate 17 "heard once" test is back to its original expectation. Kept from 0.19.1 because it was proven: the focus request that waits for the first draw that has its control (the Start researching bug), Put aside focusing the window root, the echo model in the strict fake (`enableEcho`, `tests/hub-echo.test.js`), and the whisper for a rejected share.
+- **The gate cannot be too slow any more.** The Step 3 helper installs a recorder (a MutationObserver on the page) that logs every distinct text of the status line with the time, survives the Hub being closed and reopened, and is replaced when the helper is run again. `p.said(regex)` reads it. Steps 5, 8, 9, 10, 17 and 20 use `p.said`; `p.live()` stays only for "the line went away" checks. The "run the block right after the click" sentences are gone: the blocks can be run any time. The helper checks the recorder with a throwaway line. The gate test makes the line time out on screen before it runs a block, and checks the recorder across a close and reopen.
+- **Step 23 (keyboard).** The focus-ring code check is gone (the browser hides rings while the console has focus); it is a look-at-the-screen item. The "focus is on a control inside the Hub" check stays. The helper's "two projects / one lead" checks moved to Step 4 so re-running the helper later does not fail.
+- **Every queue rejection is a whisper** (not only a share): research, craft, explore, gather, commission and build, to the character's owners and the GM, never public (`returnQueued` in `scripts/queue/store.js`; the public note function is deleted). Tests check the recipients per kind; making one kind public again fails its test.
+- **Public gather summary:** "Charges left: N" is removed (it undid the 11b addendum's rule that players are not sent node charges). "The node is now depleted." stays. A test checks that no gather message (public or whisper) carries a charge count.
+- Tests: 1005 in all (the 0.19.1 slow-reply tests are removed; 10 new: the per-kind rejection whispers, build, gather charges, the recorder). No manifest change except the version: no server restart; force-reload both windows (Ctrl+Shift+R).
+
 ## 0.19.1
 
 Two bugs from gate 18 in real Foundry.

@@ -150,21 +150,23 @@ test("a corpse ladder that breaks the rules is refused", () => {
 const NAMES = { iron: "Iron", silver: "Silver" };
 const node = { name: "Iron Vein" };
 
-test("the summary lists what was gathered and the charges left", () => {
+test("the summary lists what was gathered and never a charge count (the 11b addendum keeps node charges from players)", () => {
   const result = { passed: true, gains: [{ materialId: "iron", quantity: 3 }, { materialId: "silver", quantity: 1 }], chargesAfter: 2, stateAfter: "active" };
   const text = formatGatherSummary({ gathererName: "Aelwyn", node, skillName: "Athletics", result, materialNames: NAMES });
   assert.match(text, /Aelwyn.*gathers from.*Iron Vein.*\(Athletics\).*Success/);
   assert.match(text, /Gathered: 3 Iron, 1 Silver\./);
-  assert.match(text, /Charges left: 2\./);
+  assert.doesNotMatch(text, /charge/i);
+  assert.doesNotMatch(text, /\b2\b/, "the 2 charges left are not printed");
 });
 
 test("a failure and a depleting gather read correctly", () => {
   const failure = { passed: false, gains: [], chargesAfter: 1, stateAfter: "active" };
-  assert.match(formatGatherSummary({ gathererName: "A", node, skillName: "Athletics", result: failure, materialNames: NAMES }), /Failure.*Nothing was gathered\..*Charges left: 1\./);
+  assert.match(formatGatherSummary({ gathererName: "A", node, skillName: "Athletics", result: failure, materialNames: NAMES }), /Failure.*Nothing was gathered\./);
+  assert.doesNotMatch(formatGatherSummary({ gathererName: "A", node, skillName: "Athletics", result: failure, materialNames: NAMES }), /charge/i);
   const last = { passed: true, gains: [{ materialId: "iron", quantity: 1 }], chargesAfter: 0, stateAfter: "depleted" };
   const text = formatGatherSummary({ gathererName: "A", node, skillName: "Athletics", result: last, materialNames: NAMES });
   assert.match(text, /The node is now depleted\./);
-  assert.doesNotMatch(text, /Charges left/);
+  assert.doesNotMatch(text, /charges? left/i);
 });
 
 test("the summary never reveals hidden rolls or the rungs that were tried", () => {

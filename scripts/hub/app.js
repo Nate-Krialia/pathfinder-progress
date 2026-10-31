@@ -274,7 +274,6 @@ export function build() {
       const model = hubModel(facts, this.hubState);
       const button = model.body.detail?.buttons?.queue;
       if (!request || !button || button.disabled) return;      // an aria-disabled button never gets here; this is the belt to that brace
-      this.#announce({ text: S.working, kind: "working" });
       try {
         const recipe = facts.recipes[request.recipe];
         const action = await this.api.queue.submit(this.actor, "craft", { recipe: request.recipe, selection: request.selection, stationId: request.stationId });
@@ -289,7 +288,6 @@ export function build() {
       const { facts } = this.#compose();
       const request = researchRequest(facts, this.hubState);
       if (!request) return;                                      // an aria-disabled button never gets here; this is the belt to that brace
-      this.#announce({ text: S.working, kind: "working" });
       try {
         const action = await this.api.queue.submit(this.actor, "research", { projectId: request.projectId, skill: request.skill }, request.days);
         this.#announce({ text: S.researchQueued(request.days, request.name, action?.daysReserved ?? request.days), kind: "queued", actionId: action?.id ?? null, seen: false });
@@ -303,7 +301,6 @@ export function build() {
       const project = facts.projects.find(p => p.id === this.hubState.projectId) ?? (facts.projects.length === 1 ? facts.projects[0] : null);
       this.hubState = { ...this.hubState, confirmAside: false };
       if (!project) { this.redraw(); return; }
-      this.#announce({ text: S.working, kind: "working" });
       try {
         await this.api.research.putAside(this.actor, project.id);
         this.hubState = { ...this.hubState, projectId: null };
@@ -315,7 +312,6 @@ export function build() {
     }
 
     async #followLead(leadId) {
-      this.#announce({ text: S.working, kind: "working" });
       try {
         const project = await this.api.research.follow(this.actor, leadId);
         this.hubState = { ...this.hubState, projectId: project.id, skill: null, checkDays: 1, confirmAside: false };
@@ -330,7 +326,6 @@ export function build() {
       const { facts } = this.#compose();
       const request = shareRequest(facts, this.hubState);
       if (!request) return;
-      this.#announce({ text: S.working, kind: "working" });
       try {
         const action = await this.api.queue.submit(this.actor, "share", { kind: request.kind, key: request.key });
         this.#announce({ text: S.shareQueued(request.name), kind: "queued", actionId: action?.id ?? null, seen: false });
@@ -345,8 +340,7 @@ export function build() {
         const rows = this.api.queue.list([this.actor]);
         const row = rows.find(r => r.action.id === actionId);
         const label = row?.label ?? "";
-        this.#announce({ text: S.working, kind: "working" });
-        await this.api.queue.cancel(this.actor, actionId);
+          await this.api.queue.cancel(this.actor, actionId);
         this.#announce({ text: row?.action.type === "share" ? S.shareCancelled(row.action.params?.name ?? label) : S.queueCancelled(label), kind: "cancelled" });
       } catch (error) {
         this.#announce({ text: S.queueFailed(error.message), kind: "error" });

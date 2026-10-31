@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { as, env, getApi, getUsers, makeActor, measure, quietly, snapshot, world } from "./fake-world.js";
 import { build } from "../scripts/hub/app.js";
+import { HUB } from "../scripts/config.js";
 import { build as buildReview } from "../scripts/queue/review-app.js";
 import { installFakeApplication } from "./fake-application.js";
 import { chatLeaks } from "./helpers.js";
@@ -91,8 +92,12 @@ test("GATE 18: every code step runs, in order, and the click-through steps are p
     await click("set-skill", '[data-skill="crafting"]');
     await click("days-up"); await click("days-up");
     seen(/3 days \(3 checks\)/);
+    HUB.statusMs = 60;                 // the real line lasts 10 s; here it is gone long before the block runs, as when the tester is slow
     await click("queue-research");
-    await expectPass(5, testUser);
+    await wait(250);
+    assert.equal(app.element.querySelector(".pfp-live").textContent, "", "the line has timed out on screen");
+    await expectPass(5, testUser);     // ... and the block still passes: it reads the recorder
+    HUB.statusMs = 10000;
     // Step 6: the GM resolves, with queued fake rolls (the real one rolls PF2e)
     const roll = (degree, total, natural) => ({ options: { degreeOfSuccess: degree }, total, dice: [{ faces: 20, results: [{ result: natural, active: true }] }] });
     scholar.rolls.push(roll(3, 31, 19), roll(2, 22, 11), roll(1, 9, 4));
@@ -181,8 +186,7 @@ test("GATE 18: every code step runs, in order, and the click-through steps are p
     await expectPass(22, testUser);
     seen(/Gate Wolf[\s\S]*Only you can read this\./);
 
-    // Group C: keyboard, and the narrow layout. jsdom has no layout engine or stylesheet, so the ring and the geometry are stubbed here; the real values are what the person checks.
-    globalThis.getComputedStyle = () => ({ outlineStyle: "solid", outlineWidth: "2px" });
+    // Group C: keyboard, and the narrow layout. jsdom has no layout engine or stylesheet, so the geometry is stubbed here; the real values (and the focus ring, which is a look-at-the-screen item) are what the person checks.
     await as(testUser, () => app.element.querySelector('[data-action="toggle-display"]').focus());
     await expectPass(23, testUser);
     const root = app.element.querySelector(".pfp-hub");
@@ -193,11 +197,24 @@ test("GATE 18: every code step runs, in order, and the click-through steps are p
     frame.getBoundingClientRect = () => ({ width: 300 });
     await wait(20);
     await expectPass(24, testUser);
-    delete globalThis.getComputedStyle;
     assert.deepEqual(chatLeaks(env.chat), [], "no chat message carries a DC or a roll");
+    // the recorder survives the Hub being closed and opened again, and a re-run of the helper replaces it
+    const recorder = globalThis.__p6rec;
+    assert.ok(globalThis.__p6.said(/^Research started: Gate Lantern\.$/), "the recorder kept the earlier lines");
+    await as(testUser, () => app.close());
+    await as(testUser, async () => { app = new Hub(api, scholar); await app.render({ force: true }); });
+    const probe = Object.assign(document.createElement("div"), { className: "pfp-live", textContent: "after reopen" });
+    document.body.append(probe);
+    await wait(30);
+    assert.ok(globalThis.__p6.said(/^after reopen$/), "and it still records after the reopen");
+    probe.remove();
+    await expectPass(3, testUser);
+    assert.notEqual(globalThis.__p6rec, recorder, "re-running the helper installs a new recorder");
+    assert.equal(globalThis.__p6.said(/Research started/), false, "which starts empty");
     const cleanup = await runBlock(25, gm);
     assert.deepEqual(cleanup, { problems: [], actorsLeft: 0, downtimeOpen: false, testUsersCharacter: null, sharedLeft: 0, audit: [] });
     await as(testUser, () => app.close());
+    globalThis.__p6rec?.observer.disconnect();
   });
   for (const name of ["Gate Scholar", "Gate Friend"]) assert.equal(game.actors.getName(name), undefined, name);
   assert.deepEqual(env.values.downtime, {});
@@ -228,7 +245,7 @@ test("GATE 18: SETUP refuses to run against real data, and runs twice; CLEANUP w
     await runBlock(2, gm);
     assert.equal((await runBlock(2, gm)).already, "set up");
     await as(testUser, () => getApi().definitions.refresh());
-    assert.equal(await runBlock(3, testUser), "ALL PASS");
+    { const lines = []; const saved = console.log; console.log = (...a) => lines.push(a.join(" ")); try { assert.equal(await runBlock(3, testUser), "ALL PASS", lines.join("\n")); } finally { console.log = saved; } }
     assert.deepEqual((await runBlock(25, gm)).problems, []);
     assert.deepEqual((await runBlock(25, gm)).problems, []);
   });

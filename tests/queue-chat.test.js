@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rejectAll } from "../scripts/queue/store.js";
-import { M, as, env, getApi, getUsers, world } from "./fake-world.js";
+import { DAGGER, M, SEL, addNode, as, craft, env, gatherCall, getApi, getUsers, world } from "./fake-world.js";
 
 const api = () => getApi();
 const WOLF = { key: "gate-wolf", name: "Gate Wolf", type: "beast", firstAt: 1, yields: [] };
@@ -42,4 +42,41 @@ test("SHARE REJECT with chat off posts nothing, and force-ending the period (rej
   await as(w.gm, () => rejectAll({ chat: true }));            // chat requested: still only a whisper
   assert.deepEqual(publicMessages(), []);
   assert.ok(!publicMessages().some(m => /Gate Wolf/.test(m.content ?? "")));
+});
+
+// EVERY kind of rejection is a whisper (v0.19.2): the text names private things (a research project, a blueprint, a patron, a region).
+const submitAs = (w, type, params, days) => as(w.annUser, () => api().queue.submit(w.ann, type, params, days));
+const KINDS = {
+  research: { name: "Longsword", queue: async w => { await as(w.gm, () => api().startProject({ actor: w.ann, recipe: "longsword-basic" })).catch(() => {}); return submitAs(w, "research", { projectId: "unlock-longsword-basic", skill: "crafting" }, 1); } },
+  craft: { name: "Spider Fang Dagger|Dagger", queue: w => craft(w) },
+  explore: { name: "Oak Wood", queue: async w => { await as(w.gm, () => api().tagScene(w.table, "oak-wood")); await as(w.gm, () => api().placeAnchors(8, { scene: w.table })); return submitAs(w, "explore", { region: "oak-wood", skill: "survival" }, 2); } },
+  gather: { name: "Herb Patch", queue: async w => { const { token } = await addNode(w.table, { nodeType: "herb", tier: 1, charges: 3 }); return gatherCall(w.annUser, w.ann, token, w.table); } },
+  commission: { name: "Commission", queue: w => submitAs(w, "commission", { step: "request", crafter: "Bob", recipe: DAGGER, access: "loan", selection: SEL, payout: 12 }, 0) }
+};
+for (const [kind, spec] of Object.entries(KINDS)) {
+  test(`REJECT ${kind}: the note is a whisper to the owners and the GM, never public, and chat:false posts nothing`, async () => {
+    const w = await world({ downtime: 12 });
+    const action = await spec.queue(w);
+    env.chat.length = 0;
+    await as(w.gm, () => api().queue.reject(w.ann, action.id));                       // the queue window's call: chat on by default
+    assert.deepEqual(publicMessages(), [], `a rejected ${kind} was posted publicly`);
+    assert.equal(env.chat.length, 1, "one whisper");
+    assert.deepEqual([...env.chat[0].whisper].sort(), [w.annUser.id, getUsers().gm.id].sort(), "the character's owners plus the GM, nobody else");
+    assert.match(env.chat[0].content, new RegExp(spec.name));
+    const again = await spec.queue(w);
+    env.chat.length = 0;
+    await as(w.gm, () => api().queue.reject(w.ann, again.id, { chat: false }));
+    assert.deepEqual(env.chat, []);
+  });
+}
+
+test("GATHER summary: no chat message (public or whisper) carries a charge count, resolved from the queue or called directly", async () => {
+  const w = await world({ downtime: 12 });
+  const { token } = await addNode(w.table, { nodeType: "herb", tier: 1, charges: 3 });
+  const action = await gatherCall(w.annUser, w.ann, token, w.table);
+  env.chat.length = 0;
+  await as(w.gm, () => api().queue.resolve(w.ann, action.id, { degree: "success", chat: true }));
+  assert.ok(env.chat.length >= 1, "the gather was announced");
+  assert.ok(env.chat.every(m => !/charge/i.test(m.content ?? "")), env.chat.map(m => m.content).join(" | "));
+  assert.deepEqual(publicMessages().filter(m => /charge/i.test(m.content ?? "")), []);
 });

@@ -100,27 +100,3 @@ flows("a line still clears when something ELSE changes the queue afterwards (the
   await settle();
   assert.equal(live(), "", "the line goes when the queue changes from elsewhere");
 });
-
-// The reply of a relayed call comes back AFTER the update echo of its write (the strip already shows the new state): the window must not look idle meanwhile.
-for (const [name, setup, steps] of [
-  ["queue research", withProject, async (w, ui) => { await ui.press("set-skill", '[data-skill="crafting"]'); return () => ui.press("queue-research"); }],
-  ["cancel queued", async w => { await withProject(w); const action = await as(w.annUser, async () => { await api().queue.submit(w.ann, "research", { projectId: "unlock-longsword-basic", skill: "crafting" }, 1); return api().queue.list([w.ann])[0].action; }); return action; }, async (w, ui, action) => () => ui.press("cancel-queued")]
-]) {
-  test(`ECHO slow reply: ${name}: the line is never blank while the relay is still answering`, async () => {
-    const w = await player();
-    const made = await setup(w);
-    const ui = await openWithEcho(w, 20);
-    const realSubmit = api().queue.submit, realCancel = api().queue.cancel;
-    api().queue.submit = async (...args) => { const result = await realSubmit(...args); await wait(400); return result; };
-    api().queue.cancel = async (...args) => { const result = await realCancel(...args); await wait(400); return result; };
-    try {
-      const go = await steps(w, ui, made);
-      await go();
-      await wait(HUB.liveDebounceMs + 100);       // the echo has come and the window redrew, the reply has not
-      assert.ok(ui.echo.delivered > 0);
-      assert.notEqual(ui.live(), "", "the window said nothing while it was working");
-      await wait(500);
-      assert.match(ui.live(), name === "queue research" ? /^1 check queued/ : /^Cancelled: Research/);
-    } finally { api().queue.submit = realSubmit; api().queue.cancel = realCancel; await ui.finish(); }
-  });
-}

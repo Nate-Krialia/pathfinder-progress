@@ -106,7 +106,6 @@ export const S = {
   reasonNotKnown: "You haven't learned this formula yet.",
   reasonPreview: message => message,
   queued: (recipe, days) => `Craft queued: ${recipe}. ${days === 1 ? "1 day" : `${days} days`} reserved.`,
-  working: "Working on it...",
   queueFailed: message => `Couldn't queue the craft: ${message}`,
   loadingNote: "Loading",
 

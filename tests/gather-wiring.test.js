@@ -150,7 +150,7 @@ test("the chat summary lists the haul and nothing about the hidden rolls", async
   const text = env.chat[0].content;
   assert.match(text, /gathers from.*Iron Vein.*\(Athletics\).*Success/);
   assert.match(text, /Gathered: 4 Iron, 1 Silver, 1 Starmetal\./);
-  assert.match(text, /Charges left: 2\./);
+  assert.doesNotMatch(text, /charge/i, "no charge count in public chat");
   assert.doesNotMatch(text, /\b15\b|\b21\b|hidden/i);
 });
 

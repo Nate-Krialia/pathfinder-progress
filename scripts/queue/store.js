@@ -167,9 +167,13 @@ async function returnQueued(actor, actionId, { chat, verb }) {
     if (work.isWorkType(action.type)) {
       await work.note([`${action.type} ${verb}: ${described.label} for ${actor.name}`, text, action.daysReserved ? `${action.daysReserved} day(s) refunded` : ""].filter(Boolean).join("; "));
     }
-    // A share is private until the GM approves it: its rejection is whispered to the owners and the GM, never posted publicly (v0.19.1).
-    if (chat && action.type === "share") await whisper(resultRecipients(actor), `<p><strong>${esc(actor.name)}</strong>: the GM did not share "${esc(action.params?.name ?? described.label)}" with the party. It stays private.</p>`);
-    else if (chat) await postNote(actor, `<p><strong>${esc(actor.name)}</strong>: the GM returned "${esc(described.label)}". ${action.daysReserved} day(s) refunded.${text ? ` ${esc(text)}.` : ""}</p>`);
+    // Never public (v0.19.2): the text names private things (a research project, a blueprint, a patron, a region, a discovery). It goes to the character's owners and the GM.
+    if (chat) {
+      const who = `<strong>${esc(actor.name)}</strong>`;
+      await whisper(resultRecipients(actor), action.type === "share"
+        ? `<p>${who}: the GM did not share "${esc(action.params?.name ?? described.label)}" with the party. It stays private.</p>`
+        : `<p>${who}: the GM returned "${esc(described.label)}". ${action.daysReserved} day(s) refunded.${text ? ` ${esc(text)}.` : ""}</p>`);
+    }
     return { refunded: action.daysReserved, ...(text ? { returned: text } : {}) };
   });
 }
@@ -353,13 +357,5 @@ export async function resolveAll(api, { chat = true, degree } = {}) {
   const byKey = new Map(rows.map(r => [`${r.actorId}/${r.action.id}`, r]));
   batch.results = batch.results.map(r => ({ ...r, actorName: byKey.get(`${r.actorId}/${r.actionId}`)?.actorName, label: byKey.get(`${r.actorId}/${r.actionId}`)?.label }));
   return batch;
-}
-
-async function postNote(actor, content) {
-  try {
-    await ChatMessage.create({ speaker: ChatMessage.getSpeaker({ actor }), content });
-  } catch (error) {
-    console.error(`${MODULE_ID} | the queue change is saved, but the chat message failed`, error);
-  }
 }
 

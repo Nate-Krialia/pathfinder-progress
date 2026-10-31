@@ -6,6 +6,6 @@ export function formatGatherSummary({ gathererName, node, skillName, result, mat
   } else {
     lines.push("Nothing was gathered.");
   }
-  lines.push(result.stateAfter === "depleted" ? "The node is now depleted." : `Charges left: ${result.chargesAfter}.`);
+  if (result.stateAfter === "depleted") lines.push("The node is now depleted.");     // a charge COUNT is never printed: players are not sent node charges (docs/11b-hub-addendum.md)
   return lines.join("<br>");
 }

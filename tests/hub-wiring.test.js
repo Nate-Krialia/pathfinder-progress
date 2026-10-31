@@ -591,9 +591,7 @@ test("STATUS: 'Craft queued' goes when its action is resolved while the window i
     assert.match(live.textContent, /^Craft queued: /);
     assert.match(app.element.querySelector(".pfp-main").textContent, /1 queued/);
     for (let i = 0; i < 3; i++) { app.redraw(); await wait(2); }
-    // (v0.19.1) the click first says "Working on it..." and then the result: two different lines, each heard once; redraws add nothing
-    assert.equal(announced.filter(Boolean).length, 2, "redraws with the same line do not re-announce it");
-    assert.deepEqual(announced.filter(Boolean).map(t => t.replace(/: .*/, "")), ["Working on it...", "Craft queued"]);
+    assert.equal(announced.filter(Boolean).length, 1, "redraws with the same line do not re-announce it");
     // the GM resolves it while the window is open; the live-update path redraws
     const action = api().queue.list([w.ann])[0].action;
     await as(w.gm, () => api().queue.resolve(w.ann, action.id, { degree: "success", chat: false }));
@@ -602,7 +600,7 @@ test("STATUS: 'Craft queued' goes when its action is resolved while the window i
     assert.match(app.element.querySelector(".pfp-main").textContent, /Nothing queued/, "the status strip says nothing is queued");
     assert.equal(live.textContent, "", "so the line under it is gone too: the window no longer contradicts itself");
     assert.deepEqual(app.announcements, []);
-    assert.equal(announced.filter(Boolean).length, 2, "clearing added nothing: no further announcement");
+    assert.equal(announced.filter(Boolean).length, 1, "clearing added nothing: no second announcement");
     await app.close();
   });
 });
