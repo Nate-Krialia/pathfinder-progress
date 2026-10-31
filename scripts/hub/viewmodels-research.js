@@ -21,6 +21,8 @@ export function selectedProjectId(facts, state) {
 
 /** Step boxes up to HUB.research.maxStepBoxes; a native bar beyond that. Always with the words "Progress n of m". */
 export function progressModel(project) {
+  // A study (Stage 11c) shows a plain stage and no numbers: its thresholds are the GM's.
+  if (project.kind === "study") return { study: true, stage: project.stage ?? 0, text: S.stageWords[project.stage ?? 0] ?? S.stageWords[0], boxes: null, value: null, max: null };
   const useBoxes = project.threshold <= HUB.research.maxStepBoxes;
   return {
     value: project.progress, max: project.threshold, text: S.stepsText(project.progress, project.threshold),
@@ -36,6 +38,10 @@ const checkRow = entry => {
 
 export function leadCards(facts) {
   return facts.leads.map(lead => {
+    if (lead.source === "item") {
+      const text = lead.itemKind === "note" ? S.leadNote(lead.name) : S.leadItem(lead.name);
+      return { key: `lead:${lead.id}`, id: lead.id, name: safeText(lead.name, S.leadHidden), note: safeText(text, S.leadHidden), button: { text: lead.paused ? S.leadStartAgain : S.leadStart, disabled: false, why: null } };
+    }
     const used = facts.projects.some(p => p.recipeId === lead.recipeId) || facts.formulas.some(f => f.recipeId === lead.recipeId);
     return {
       key: `lead:${lead.id}`, id: lead.id, name: safeText(lead.name, S.leadHidden), note: lead.note ? safeText(lead.note, S.leadHidden) : "",
@@ -73,7 +79,8 @@ export function researchTab(facts, state) {
   else if (queued) reason = S.reasonAlreadyQueued;
   else if (free < 1) reason = S.reasonNoFreeDays;
   const isFormula = project.kind === "unlockFormula";
-  const confirmOpen = Boolean(state.confirmAside) && isFormula && !queued;
+  const isStudy = project.kind === "study";
+  const confirmOpen = Boolean(state.confirmAside) && (isFormula || isStudy) && !queued;
   return {
     list,
     detail: {
@@ -85,8 +92,8 @@ export function researchTab(facts, state) {
       days: { label: S.daysLabel2, value: n, text: S.daysText(n), down: { text: S.daysDown, disabled: n <= 1 }, up: { text: S.daysUp, disabled: n >= free }, note: S.daysNote },
       queue: { text: S.queueChecks(n), disabled: reason !== null, reason, checks: n, skill: chosen },
       queuedNote: queued ? { text: S.queuedNote(queued.days, queued.days), actionId: queued.actionId, cancel: S.cancelQueued } : null,
-      aside: isFormula
-        ? { kind: "formula", button: { text: S.asideButton, disabled: Boolean(queued), why: queued ? S.asideWhyQueued : null }, confirm: confirmOpen ? { text: S.asideConfirmText, confirm: S.asideConfirm, keep: S.asideKeep } : null }
+      aside: isFormula || isStudy
+        ? { kind: isStudy ? "study" : "formula", button: { text: isStudy ? S.asideStudyButton : S.asideButton, disabled: Boolean(queued), why: queued ? S.asideWhyQueued : null }, confirm: confirmOpen ? { text: isStudy ? S.asideStudyConfirmText : S.asideConfirmText, confirm: S.asideConfirm, keep: S.asideKeep } : null }
         : { kind: "workshop", note: S.asideWorkshop },
       checks: { heading: S.recentChecks, rows: project.log.slice(-HUB.research.recentChecks).reverse().map(checkRow), empty: project.log.length === 0 ? S.noChecks : null }
     }

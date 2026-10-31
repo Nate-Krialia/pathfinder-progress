@@ -15,7 +15,7 @@
  *   definitions: "ready" | "loading"
  * state: { tab, filter, recipeId, picks: { slot: materialId }, stationId, showQueue, showDisplay, showSwitch, layout, display }
  */
-import { HUB } from "../config.js";
+import { DISCOVERY, HUB } from "../config.js";
 import { S } from "./strings.js";
 import { normalizeDisplay } from "./display.js";
 import { slotRoles } from "../data/roles.js";
@@ -115,7 +115,7 @@ function unitsNeeded(recipe, picks, materialId) {
 function optionsFor(facts, recipe, slot, picks) {
   const met = new Set(facts.met);
   return Object.keys(facts.inventory)
-    .filter(id => facts.inventory[id] > 0 && met.has(id) && facts.materials[id] && facts.materials[id].tier >= slot.tierFloor)
+    .filter(id => facts.inventory[id] > 0 && met.has(id) && facts.materials[id] && facts.materials[id].tier >= slot.tierFloor && facts.open?.[id] !== false)
     .map(id => facts.materials[id])
     .sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name))
     .map(material => {
@@ -126,6 +126,7 @@ function optionsFor(facts, recipe, slot, picks) {
       const effects = effectLines(material.name, fact, recipe);
       return {
         id: material.id, name: material.name, tier: material.tier, tierText: S.tierText(material.tier),
+        worth: Number.isFinite(material.value) ? S.worthEach(material.value) : null,
         stock: { have, need, short, text: short ? S.stockShort(need, have) : S.stockOk(need, have), word: short ? S.stockShortWord : "" },
         effect: effects ? { known: true, effects } : { known: false, text: S.effectUnknown },
         selected: picks[slot.name] === material.id
@@ -133,15 +134,25 @@ function optionsFor(facts, recipe, slot, picks) {
     });
 }
 
+/** Materials the character carries that would fit the slot but are not open to crafting yet (a study they have not done): named, with a plain reason. */
+function lockedFor(facts, slot) {
+  const met = new Set(facts.met);
+  return Object.keys(facts.inventory)
+    .filter(id => facts.inventory[id] > 0 && met.has(id) && facts.materials[id] && facts.materials[id].tier >= slot.tierFloor && facts.open?.[id] === false)
+    .map(id => facts.materials[id].name).sort();
+}
+
 export function slotPane(facts, recipe, picks) {
   return recipe.slots.map(slot => {
     const options = optionsFor(facts, recipe, slot, picks);
+    const locked = lockedFor(facts, slot);
     const chosen = picks[slot.name] ? facts.materials[picks[slot.name]] ?? null : null;
     return {
       name: slot.name, label: cap(slot.name), roleLine: slotRoleLine(recipe, slot), qty: slot.qty,
       chosen: chosen ? { id: chosen.id, name: chosen.name } : null,
       statusText: chosen ? S.slotChosen(chosen.name) : S.slotEmpty, clear: S.clearSlot,
-      options, noOptions: options.length === 0 ? S.slotNoOptions : null
+      options, noOptions: options.length === 0 && locked.length === 0 ? S.slotNoOptions : null,
+      locked: locked.length ? S.slotLocked(locked) : null
     };
   });
 }
@@ -187,11 +198,18 @@ export function outcomeBox(facts, recipe, picks, stationId) {
   else if (!preview.ok) result = { state: "problem", text: preview.errors[0] ?? S.outcomePickAll, problems: preview.errors };
   else if (plan.result?.known) result = { state: "known", text: S.outcomeResultKnown(plan.result.baseTier, recipe.name) };
   else result = { state: "unknown", text: S.outcomeResultUnknown };
+  // Gold (honest costs): what the materials are worth, what a shop would roughly charge, what that saves after the station fee. Only discovered materials get here.
+  const worthParts = recipe.slots.filter(sl => picks[sl.name] && facts.materials[picks[sl.name]] && Number.isFinite(facts.materials[picks[sl.name]].value));
+  const lockedPick = recipe.slots.some(sl => picks[sl.name] && facts.open?.[picks[sl.name]] === false);
+  const worth = !lockedPick && worthParts.length && worthParts.length === recipe.slots.filter(sl => picks[sl.name]).length ? worthParts.reduce((sum, sl) => sum + sl.qty * facts.materials[picks[sl.name]].value, 0) : null;
+  const shop = worth === null ? null : Math.round(worth * DISCOVERY.shopMarkup);
+  const fee = chosenStation ? chosenStation.fee : 0;
   const used = plan ? plan.uses.map(u => S.outcomeMaterialLine(u.units, u.materialName)) : recipe.slots.filter(s => picks[s.name] && facts.materials[picks[s.name]]).map(s => S.outcomeMaterialLine(s.qty, facts.materials[picks[s.name]].name));
   return {
     heading: S.outcomeHeading, result, effects: lines,
     fee: chosenStation ? S.outcomeFee(chosenStation.fee, chosenStation.name) : null,
     days: S.outcomeDays(days), materialsHeading: S.outcomeMaterials, materials: used,
+    gold: worth === null ? null : { worth: S.outcomeWorth(worth), shop: S.outcomeShop(shop), save: shop - fee > 0 ? S.outcomeSave(shop - fee) : null },
     failureNote: S.failureNote, costNote: S.costNote
   };
 }

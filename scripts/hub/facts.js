@@ -32,7 +32,7 @@ const attempt = (what, fn, fallback) => {
 
 export function readFacts(api, actor, state) {
   const characters = ownedCharacters().map(a => ({ id: a.id, name: a.name }));
-  if (!actor) return { actor: null, characters, projects: [], leads: [], queuedResearch: [], shares: [], compendium: null, queue: [], formulas: [], researching: [], recipes: {}, materials: {}, inventory: {}, met: [], learned: {}, stations: [], preview: null, days: { free: 0, reserved: 0 }, gp: 0, downtime: { open: false, participant: false }, location: { name: null, stations: [] }, definitions: "ready" };
+  if (!actor) return { actor: null, characters, projects: [], leads: [], queuedResearch: [], shares: [], compendium: null, materialInfo: {}, open: {}, queue: [], formulas: [], researching: [], recipes: {}, materials: {}, inventory: {}, met: [], learned: {}, stations: [], preview: null, days: { free: 0, reserved: 0 }, gp: 0, downtime: { open: false, participant: false }, location: { name: null, stations: [] }, definitions: "ready" };
 
   const defs = api.definitions;
   const period = attempt("the downtime period", () => api.downtime.state(), { open: false, participants: {} });
@@ -55,6 +55,8 @@ export function readFacts(api, actor, state) {
   const materials = {};
   for (const id of Object.keys(inventory)) { const material = defs?.material.get(id); if (material) materials[id] = material; }
   const met = Object.keys(materials).filter(id => attempt("the Compendium", () => api.compendium.hasMaterial(actor, id), false));
+  // Materials with a study the character has not done are not open to crafting (a plain yes/no per material).
+  const open = Object.fromEntries(Object.keys(materials).map(id => [id, attempt("what you have studied", () => api.discovery.propertiesOpen(actor, id), true)]));
 
   const town = attempt("the party location", () => game.settings.get(MODULE_ID, STATION_KEYS.partyLocationSetting), "") || null;
   const reachable = attempt("the workshops", () => api.stationsFor(actor), []).filter(s => s.reachable);
@@ -70,7 +72,7 @@ export function readFacts(api, actor, state) {
     }));
     for (const slot of recipe.slots) {
       for (const id of met) {
-        if ((inventory[id] ?? 0) > 0 && materials[id].tier >= slot.tierFloor) learned[learnedKey(recipe.id, slot.name, id)] = attempt("what you have learned", () => api.compendium.knownEffect(actor, recipe.id, slot.name, id), { known: false });
+        if ((inventory[id] ?? 0) > 0 && materials[id].tier >= slot.tierFloor) learned[learnedKey(recipe.id, slot.name, id)] = attempt("what you have learned", () => api.compendium.knownEffect(actor, recipe, slot.name, id), { known: false });
       }
     }
     if (allSlotsPicked(recipe, state.picks)) {
@@ -85,20 +87,31 @@ export function readFacts(api, actor, state) {
     const info = attempt("a project", () => api.projectInfo(actor, p.id), null);
     const pr = info?.project;
     if (!pr) return null;
+    const study = pr.kind === "study";
     return {
-      id: pr.id, goalName: pr.goalName, kind: pr.outcome?.type ?? "unlockFormula", recipeId: pr.outcome?.recipeId ?? null, progress: pr.progress, threshold: pr.threshold,
+      id: pr.id, goalName: pr.goalName, kind: study ? "study" : pr.outcome?.type ?? "unlockFormula", recipeId: pr.outcome?.recipeId ?? null,
+      ...(study ? { stage: pr.stage, stageWord: pr.stageWord } : { progress: pr.progress, threshold: pr.threshold }),
       skills: (info.perSkill ?? []).map(s => ({ skill: s.skill, label: adapter.skillLabel(s.skill), modifier: s.modifier ?? null })),
       log: (pr.log ?? []).map(({ source, degree, delta, skill }) => ({ source, degree, delta, skill })),
       hint: info.hints?.[0] ?? null
     };
   }).filter(Boolean);
-  const leads = state.tab !== "research" ? [] : attempt("the leads", () => api.research.leads(actor), []).map(({ id, recipeId, name, note }) => ({ id, recipeId, name, note }));
+  const leads = state.tab !== "research" ? [] : attempt("the leads", () => api.research.leadsFor(actor), []).map(({ id, recipeId, name, note, source, itemKind, paused }) => ({ id, recipeId: recipeId ?? null, name, note: note ?? "", source: source ?? "gm", itemKind: itemKind ?? null, paused: Boolean(paused) }));
   const queuedResearch = rows.filter(r => r.action.type === "research").map(r => ({ actionId: r.action.id, projectId: r.action.params?.projectId, days: r.action.daysReserved ?? 0, skill: r.action.params?.skill ?? null }));
   const shares = rows.filter(r => r.action.type === "share").map(r => ({ actionId: r.action.id, kind: r.action.params?.kind, key: r.action.params?.key, name: r.action.params?.name }));
   const compendium = state.tab !== "compendium" ? null : attempt("the Compendium", () => api.compendium.view(actor), null);
+  // What the properties milestone teaches about each material entry: its tag and the tag's theme (only once the character knows them) or that it is not studied yet.
+  const materialInfo = {};
+  for (const entry of compendium?.entries?.materials ?? []) {
+    const def = defs?.material.get(entry.id);
+    if (!def) continue;
+    const known = attempt("what you have studied", () => api.discovery.propertiesOpen(actor, entry.id), true);
+    const tag = known && def.tag ? defs?.tag?.get(def.tag) : null;
+    materialInfo[entry.id] = { hasTrack: Boolean(def.hasTrack), known, tag: tag ? { name: tag.name, theme: tag.theme, worksWith: tag.worksWith ?? null } : null };
+  }
 
   return {
-    projects, leads, queuedResearch, shares, compendium,
+    projects, leads, queuedResearch, shares, compendium, materialInfo, open,
     actor: { id: actor.id, name: actor.name }, characters,
     downtime: { open: Boolean(period.open), participant: Boolean(period.participants?.[actor.id]) },
     days: { free: attempt("the days", () => api.days(actor), 0), reserved },

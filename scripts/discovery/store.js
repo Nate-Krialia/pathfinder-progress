@@ -69,7 +69,7 @@ export function itemLeads(api, actor) {
   const ledger = readLedger(actor);
   return heldItems(api, actor)
     .filter(item => hasTrack(api, item.kind, item.id) && (!ledger.items[item.key] || ledger.items[item.key].paused))
-    .map(item => ({ id: `item:${item.key}`, source: "item", itemKind: item.kind, itemId: item.id, name: item.name }));
+    .map(item => ({ id: `item:${item.key}`, source: "item", itemKind: item.kind, itemId: item.id, name: item.name, ...(ledger.items[item.key]?.paused ? { paused: true } : {}) }));
 }
 
 /** Studies in progress, as projects for the queue (the queue's research item takes a project id): no counts, no thresholds. */

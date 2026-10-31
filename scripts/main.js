@@ -27,6 +27,8 @@ import * as workshop from "./workshop/store.js";
 import * as leads from "./research/leads.js";
 import * as discovery from "./discovery/store.js";
 import { defaultTrack } from "./discovery/track.js";
+import { openEditor } from "./discovery/editor-app.js";
+import { installDiscoveryEntryPoints } from "./discovery/entry.js";
 import { asGM } from "./queue/work.js";
 import { UPGRADE_KINDS } from "./workshop/rules.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
@@ -57,6 +59,7 @@ Hooks.once("init", () => {
   game.settings.register(MODULE_ID, HUB.sizeSetting, { scope: "client", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   game.settings.register(MODULE_ID, HUB.displaySetting, { scope: "client", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   installEntryPoints(() => game.modules.get(MODULE_ID).api);
+  installDiscoveryEntryPoints(() => game.modules.get(MODULE_ID).api);
 
   // Downtime system
   game.settings.register(MODULE_ID, "itemPacks", {
@@ -379,6 +382,8 @@ Hooks.once("ready", async () => {
         defaultFor: (key, recipeId) => defaultTrack(recipeId, key.split(":")[0])
       },
       propertiesOpen: (actor, materialId) => discovery.propertiesOpen(api, actor, materialId),
+      /** GM: open the Discovery tracks window (optionally on one item, like "material:iron"). */
+      openEditor: key => openEditor(api, key),
       startStudy: (actor, key) => discovery.startStudy(api, actor, key),
       refreshVersionLeads: actor => discovery.refreshVersionLeads(api, actor),
       /** GM testing: put a defined note item (flag `note`) into an inventory. */

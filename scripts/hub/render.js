@@ -64,7 +64,7 @@ function optionCard(slot, o) {
   const effect = o.effect.known ? `<span class="pfp-effects">${o.effect.effects.map(e => `<span class="pfp-effect">${esc(e)}</span>`).join("")}</span>` : `<span class="pfp-unknown">${esc(o.effect.text)}</span>`;
   return `<li>${button({
     action: "pick-material", cls: "pfp-option", focus: `pick:${slot.name}:${o.id}`, pressed: o.selected, data: { slot: slot.name, material: o.id },
-    label: `<span class="pfp-option-name">${esc(o.name)}</span><span class="pfp-option-tier">${esc(o.tierText)}</span>`
+    label: `<span class="pfp-option-name">${esc(o.name)}</span><span class="pfp-option-tier">${esc(o.tierText)}</span>${o.worth ? `<span class="pfp-option-tier">${esc(o.worth)}</span>` : ""}`
       + `<span class="pfp-stock${o.stock.short ? " is-short" : ""}">${o.stock.short ? `<strong>${esc(o.stock.word)}.</strong> ` : ""}${esc(o.stock.text)}</span>${effect}`
       + `${o.selected ? `<span class="pfp-badges"><span class="pfp-badge">${esc(S.selectedWord)}</span></span>` : ""}`
   })}</li>`;
@@ -73,7 +73,7 @@ function optionCard(slot, o) {
 function slotBlock(slot) {
   return `<fieldset class="pfp-slot"><legend>${esc(slot.label)}</legend><p class="pfp-role">${esc(slot.roleLine)}</p>
   <p class="pfp-slot-status${slot.chosen ? "" : " is-empty"}">${esc(slot.statusText)}${slot.chosen ? "" : ""}</p>
-  ${slot.noOptions ? `<p class="pfp-empty">${esc(slot.noOptions)}</p>` : `<ul class="pfp-options">${slot.options.map(o => optionCard(slot, o)).join("")}</ul>`}
+  ${slot.noOptions ? `<p class="pfp-empty">${esc(slot.noOptions)}</p>` : `<ul class="pfp-options">${slot.options.map(o => optionCard(slot, o)).join("")}</ul>`}${slot.locked ? `<p class="pfp-why">${esc(slot.locked)}</p>` : ""}
   ${slot.chosen ? button({ action: "clear-slot", label: esc(slot.clear), focus: `clear:${slot.name}`, data: { slot: slot.name } }) : ""}</fieldset>`;
 }
 
@@ -81,7 +81,7 @@ function outcome(o) {
   const effects = o.effects.map(e => (e.known ? e.effects.map(line => `<li>${esc(line)}</li>`).join("") : `<li class="pfp-unknown">${esc(e.text)}</li>`)).join("");
   return `<section class="pfp-outcome" aria-label="${esc(o.heading)}"><h3>${esc(o.heading)}</h3>
   <p class="pfp-result is-${o.result.state}">${esc(o.result.text)}</p>${effects ? `<ul class="pfp-effects">${effects}</ul>` : ""}
-  <ul class="pfp-facts">${o.fee ? `<li>${esc(o.fee)}</li>` : ""}<li>${esc(o.days)}</li></ul>
+  <ul class="pfp-facts">${o.fee ? `<li>${esc(o.fee)}</li>` : ""}<li>${esc(o.days)}</li>${o.gold ? `<li>${esc(o.gold.worth)}</li><li>${esc(o.gold.shop)}</li>${o.gold.save ? `<li>${esc(o.gold.save)}</li>` : ""}` : ""}</ul>
   ${o.materials.length ? `<p class="pfp-subhead">${esc(o.materialsHeading)}</p><ul class="pfp-facts">${o.materials.map(m => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
   <p class="pfp-note">${esc(o.costNote)}</p><p class="pfp-note">${esc(o.failureNote)}</p></section>`;
 }
@@ -113,6 +113,7 @@ function detailPane(body) {
 
 // Research tab -------------------------------------------------------------------------------------------------------------------------------
 function stepsHtml(progress) {
+  if (progress.study) return `<span class="pfp-steps-row"><span class="pfp-steps-text">${esc(progress.text)}</span></span>`;
   const steps = progress.boxes
     ? `<span class="pfp-steps" aria-hidden="true">${progress.boxes.map(b => `<span class="pfp-step${b.done ? " is-done" : ""}"></span>`).join("")}</span>`
     : `<progress value="${progress.value}" max="${progress.max}" aria-label="${esc(progress.text)}"></progress>`;

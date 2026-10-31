@@ -73,11 +73,24 @@ const LONG_LEAD = { ...LEAD, id: "lead-long", name: "The Gate Lantern of the Sev
 const manyMaterials = Array.from({ length: 40 }, (_, i) => ({ id: `gate-m${i}`, name: i % 7 === 0 ? `Gate Moonglass of the Unbroken Horizon Wanderers ${i}` : `Gate Material ${i}`, tier: 1 + (i % 5), firstAt: i, places: [{ key: `p${i}`, label: i % 3 === 0 ? "Gate Town of the Seven Northern Marches and Beyond" : "Gate Field" }], rungs: [{ nodeType: "gate-bush", tier: 1, rung: "base" }, { nodeType: "gate-bush", tier: 1, rung: "higher" }], shared: false, usedIn: [{ recipeId: "r1", name: "The Exceedingly Long Named Gate Blade of Wandering Heroes" }, { recipeId: "r2", name: "Gate Vest" }] }));
 const longExperiment = { recipeId: "gate-blade", name: "The Exceedingly Long Named Gate Blade of Wandering Heroes", source: "both", baseline: BOOK_ENTRIES.experiments[0].baseline, known: Array.from({ length: 9 }, (_, i) => ({ slot: i % 2 ? "edge" : "blade", materialId: `m${i}`, material: `Gate Supercalifragilisticexpialidocious-${i}`, tier: 2, effects: i % 2 ? { specialAbility: { title: "Unbelievably Long Special Ability Title", text: "Does a thing that takes a great many words to describe properly, wrapping across several lines.", on: "criticalHit" } } : STEEL_EFFECT, source: i % 3 ? "crafted" : "shared" })) };
 const bookWith = (entries, own = entries) => makeBook({ entries: { ...BOOK_ENTRIES, ...entries }, own: { ...makeBook().own, ...own } });
+// The discovery chain (Stage 11c): studies with a plain stage, item leads with long names, "What you know", gold lines and a locked material.
+const STUDY = { id: "study:material:gate-ore", goalName: "Study: Gate Ore of the Unbroken Horizon Wanderers and Their Faithful Companions", kind: "study", recipeId: null, stage: 1, stageWord: "Getting somewhere", skills: [{ skill: "crafting", label: "Crafting", modifier: 7 }, { skill: "nature", label: "Nature", modifier: 3 }, { skill: "arcana", label: "Arcana", modifier: null }], log: [], hint: null };
+const ITEM_LEADS = [
+  { id: "item:material:gate-moon", recipeId: null, name: "Gate Moonglass of the Unbroken Horizon Wanderers", note: "", source: "item", itemKind: "material", paused: false },
+  { id: "item:note:gate-page", recipeId: null, name: "Torn Page of the Seven Northern Marches", note: "", source: "item", itemKind: "note", paused: false },
+  { id: "item:material:gate-paused", recipeId: null, name: "Gate Ember", note: "", source: "item", itemKind: "material", paused: true },
+  { id: "lead-v2", recipeId: "gate-blade2", name: "Gate Blade II", note: "What you have learned about Gate ore materials shows how to make a better version.", source: "version", itemKind: null, paused: false }
+];
 const R = { ...Object.fromEntries([["researchEmpty", { facts: researchFacts({ projects: [], leads: [] }), state: researchState() }]]) };
 
 export const SCENES = {
   ...R,
   researchOne: { facts: researchFacts({ projects: [PROJECT], leads: [LEAD] }), state: researchState({ skill: "crafting", checkDays: 2 }) },
+  researchStudy: { facts: researchFacts({ projects: [STUDY, PROJECT], leads: ITEM_LEADS, days: { free: 9, reserved: 0 } }), state: researchState({ projectId: STUDY.id, skill: "nature", checkDays: 2 }) },
+  researchStudyConfirm: { facts: researchFacts({ projects: [STUDY], leads: ITEM_LEADS.slice(0, 1) }), state: researchState({ projectId: STUDY.id, confirmAside: true }) },
+  researchStudyNarrow: { facts: researchFacts({ projects: [STUDY, { ...STUDY, id: "study:material:gate-b", goalName: "Study: Gate Ore B", stage: 2, stageWord: "Nearly there" }], leads: ITEM_LEADS }), state: researchState({ projectId: STUDY.id, showQueue: true }) },
+  compendiumKnow: { facts: compendiumFacts({ compendium: bookWith({ materials: manyMaterials }), materialInfo: { "gate-m0": { hasTrack: true, known: true, tag: { name: "Mitflit parts of the Unbroken Horizon Wanderers", theme: "cowardice and a great many other long-winded fears", worksWith: "frightened and other conditions that take a lot of words" } }, "gate-m1": { hasTrack: true, known: false, tag: null } } }), state: compendiumState({ entryKey: "gate-m0" }) },
+  compendiumUnstudied: { facts: compendiumFacts({ compendium: bookWith({ materials: manyMaterials }), materialInfo: { "gate-m1": { hasTrack: true, known: false, tag: null } } }), state: compendiumState({ entryKey: "gate-m1" }) },
   researchMany: { facts: researchFacts({ projects: [LONG_PROJECT, BIG_PROJECT, PROJECT, UPGRADE], leads: [LONG_LEAD, LEAD], days: { free: 9, reserved: 0 } }), state: researchState({ projectId: "unlock-long", skill: "arcana", checkDays: 3 }) },
   researchQueued: { facts: researchFacts({ projects: [PROJECT, UPGRADE], queuedResearch: [{ actionId: "a1", projectId: PROJECT.id, days: 2, skill: "crafting" }], days: { free: 4, reserved: 2 }, queue: [{ id: "a1", label: "Research: Gate Draught", days: 2 }] }), state: researchState({ projectId: PROJECT.id, showQueue: true }) },
   researchConfirm: { facts: researchFacts({ projects: [PROJECT], leads: [] }), state: researchState({ confirmAside: true }) },
@@ -92,6 +105,8 @@ export const SCENES = {
   compendiumEmpty: { facts: compendiumFacts({ compendium: makeBook({ entries: { materials: [], creatures: [], regions: [], experiments: [] }, own: { materials: [], creatures: [], regions: [], experiments: [] } }) }), state: compendiumState({ category: "creatures" }) },
   compendiumUnreadable: { facts: compendiumFacts({ compendium: null }), state: compendiumState() },
   compendiumNarrowList: { facts: compendiumFacts({ shares: [{ actionId: "s1", kind: "material", key: "gate-star" }] }), state: compendiumState({ category: "experiments", entryKey: "gate-blade", showDisplay: true }) },
+  gold: { facts: makeFacts({ ...base, inventory: { "gate-iron": 5, "gate-steel": 2, "gate-star": 1 }, preview: okPlan, materials: { ...base.materials, ...Object.fromEntries(Object.entries(makeFacts().materials).map(([id, m]) => [id, { ...m, value: id === "gate-star" ? 100 : 25 }])) }, open: { "gate-ember": false } }), state: makeState({ picks: { blade: "gate-steel", edge: "gate-star" } }) },
+  goldLocked: { facts: makeFacts({ ...base, inventory: { "gate-iron": 5, "gate-steel": 2, "gate-star": 1 }, open: { "gate-iron": false, "gate-star": false } }), state: makeState({ picks: { blade: "gate-steel" } }) },
   partial: { facts: makeFacts(base), state: makeState({ picks: { blade: "gate-steel" } }) },
   complete: { facts: makeFacts({ ...base, inventory: { "gate-iron": 5, "gate-steel": 2, "gate-star": 1 }, preview: okPlan }), state: makeState({ picks: { blade: "gate-steel", edge: "gate-star" } }) },
   closed: { facts: makeFacts({ ...base, downtime: { open: false, participant: false } }), state: makeState({ picks: { blade: "gate-steel", edge: "gate-star" } }) },

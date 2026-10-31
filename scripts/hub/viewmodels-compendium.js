@@ -38,9 +38,15 @@ const lines = (heading, items, empty) => ({ heading, items, empty: items.length 
 function detailOf(kind, entry, facts) {
   if (kind === "material") {
     const rungs = [...new Set(asList(entry.rungs).map(r => r.rung))].filter(r => S.rungWords[r]).map(r => S.rungWords[r]);
+    // What the properties milestone teaches (Stage 11c): the tag and its theme, in plain words. A material with a study not yet done says so.
+    const info = facts.materialInfo?.[entry.id];
+    const know = !info ? [] : info.tag
+      ? [{ heading: S.whatYouKnow, items: [S.tagLine(info.tag.name, info.tag.theme), ...(info.tag.worksWith ? [S.tagWorksWith(info.tag.worksWith)] : [])], empty: null }]
+      : info.hasTrack && !info.known ? [{ heading: S.whatYouKnow, items: [], empty: S.notStudied }] : [];
     return {
       kind, title: entry.name, meta: entry.tier === undefined || entry.tier === null ? null : S.tierLine(entry.tier),
       sections: [
+        ...know,
         lines(S.foundAt, asList(entry.places).map(p => p.label), S.foundAtNone),
         lines(S.gatheredAs, rungs, S.gatheredNone),
         lines(S.usedIn, asList(entry.usedIn).map(u => u.name), S.usedInNone)

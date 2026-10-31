@@ -56,23 +56,23 @@ export function build() {
         "set-theme"(event, target) { return this.#display({ theme: target.dataset.value }); },
         "set-font"(event, target) { return this.#display({ font: target.dataset.value }); },
         "reset-display"() { return this.#display(HUB.defaultDisplay); },
-        "queue-craft"(event, target) { return this.#queueCraft(target); },
-        "cancel-queued"(event, target) { return this.#cancel(target.dataset.actionId); },
+        "queue-craft"(event, target) { return this.#guarded("queue-craft", () => this.#queueCraft(target)); },
+        "cancel-queued"(event, target) { return this.#guarded("cancel-queued", () => this.#cancel(target.dataset.actionId), { "action-id": target.dataset.actionId }); },
         // Research
         "open-in-research"(event, target) { this.#requestFocus(`project:${target.dataset.project}`); return this.#replace(openProject(this.hubState, target.dataset.project)); },
         "select-project"(event, target) { return this.#replace(selectProject(this.hubState, target.dataset.project)); },
         "set-skill"(event, target) { return this.#replace(setSkill(this.hubState, target.dataset.skill)); },
         "days-down"() { return this.#replace(stepDays(this.hubState, -1, this.#compose().facts.days.free)); },
         "days-up"() { return this.#replace(stepDays(this.hubState, 1, this.#compose().facts.days.free)); },
-        "queue-research"() { return this.#queueResearch(); },
+        "queue-research"() { return this.#guarded("queue-research", () => this.#queueResearch()); },
         "put-aside"() { this.#requestFocus("keep-aside"); return this.#set({ confirmAside: true }); },
         "keep-aside"() { this.#requestFocus("put-aside"); return this.#set({ confirmAside: false }); },
-        "confirm-aside"() { return this.#putAside(); },
-        "follow-lead"(event, target) { return this.#followLead(target.dataset.lead); },
+        "confirm-aside"() { return this.#guarded("confirm-aside", () => this.#putAside()); },
+        "follow-lead"(event, target) { return this.#guarded("follow-lead", () => this.#followLead(target.dataset.lead), { lead: target.dataset.lead }); },
         // Compendium
         "set-category"(event, target) { return this.#replace(setCategory(this.hubState, target.dataset.category)); },
         "select-entry"(event, target) { return this.#replace(selectEntry(this.hubState, target.dataset.entry)); },
-        "share-entry"() { return this.#shareEntry(); },
+        "share-entry"() { return this.#guarded("share-entry", () => this.#shareEntry()); },
         // Placeholder: the button is aria-disabled and says why; nothing happens.
         "ask-crafter"() {}
       }
@@ -151,6 +151,7 @@ export function build() {
       this.#keyHandler = null;
     }
 
+    #inFlight = new Map();     // relayed actions that are out: key -> { action, match, visible, timers }
     #wantFocus = null;      // { key, until }: a control to focus once it is drawn ("window" = the Hub root). Set by an action whose own button is about to go away.
 
     /**
@@ -180,6 +181,8 @@ export function build() {
       this.#removeKeys();
       clearTimeout(this.#saveTimer);
       clearTimeout(this.#statusTimer);
+      for (const entry of this.#inFlight.values()) { clearTimeout(entry.showTimer); clearTimeout(entry.answerTimer); }
+      this.#inFlight.clear();
       cancelAnimationFrame(this.#paintFrame);
     }
 
@@ -204,6 +207,36 @@ export function build() {
       if (status?.kind !== "queued" || !status.actionId) return;
       if (facts.queue.some(q => q.id === status.actionId)) status.seen = true;
       else if (status.seen) this.#setStatus(null);
+    }
+
+    /**
+     * A relayed action (the GM's client does the work) is guarded from the FIRST click: a second click while the first is out does nothing. The button only LOOKS
+     * disabled after HUB.busyShowMs (the usual reply takes tens of milliseconds, so nothing flickers), and if the GM has not answered after HUB.noAnswerMs the Hub
+     * says so and frees the button. A late answer still shows its own result.
+     */
+    async #guarded(action, run, match = {}) {
+      const key = `${action}|${JSON.stringify(match)}`;
+      if (this.#inFlight.has(key)) return undefined;
+      const entry = { action, match, visible: false };
+      const release = () => {
+        clearTimeout(entry.showTimer); clearTimeout(entry.answerTimer);
+        if (this.#inFlight.get(key) === entry) { this.#inFlight.delete(key); this.#markBusy(); }
+      };
+      entry.showTimer = setTimeout(() => { entry.visible = true; this.#markBusy(); }, HUB.busyShowMs);
+      entry.answerTimer = setTimeout(() => { release(); this.#announce({ text: S.noAnswer, kind: "error" }); }, HUB.noAnswerMs);
+      this.#inFlight.set(key, entry);
+      try { return await run(); } finally { release(); }
+    }
+
+    /** Mark the buttons of the actions that are out and slow as busy (aria-disabled, so a click does nothing and the reader is told). Run after every draw. */
+    #markBusy() {
+      const main = this.element?.querySelector(".pfp-main");
+      if (!main) return;
+      for (const el of main.querySelectorAll("[data-action]")) {
+        const busy = [...this.#inFlight.values()].some(e => e.visible && e.action === el.dataset.action && Object.entries(e.match).every(([k, v]) => el.dataset[k.replace(/-(\w)/g, (_, c) => c.toUpperCase())] === v));
+        if (busy) { el.setAttribute("aria-disabled", "true"); el.setAttribute("aria-busy", "true"); }
+        else if (el.getAttribute("aria-busy") === "true") { el.removeAttribute("aria-busy"); el.removeAttribute("aria-disabled"); }
+      }
     }
 
     /** Set (or clear) the visible status line. It also clears by itself after HUB.statusMs. Clearing never re-announces: the live region only changes when the text does. */
@@ -236,6 +269,7 @@ export function build() {
         // Focus that was NOT in the Hub is never taken.
         if (hadFocus) ([...main.querySelectorAll("[data-focus-key]")].find(el => focusKey && el.dataset.focusKey === focusKey) ?? root).focus({ preventScroll: true });
       }
+      this.#markBusy();
       if (this.#wantFocus) {
         const { key, until } = this.#wantFocus;
         const wanted = key === "window" ? root : [...main.querySelectorAll("[data-focus-key]")].find(el => el.dataset.focusKey === key);
@@ -280,7 +314,7 @@ export function build() {
         this.hubState = { ...this.hubState, picks: {}, stationId: null };
         this.#announce({ text: S.queued(recipe.name, action?.daysReserved ?? request.days), kind: "queued", actionId: action?.id ?? null, seen: false });
       } catch (error) {
-        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+        this.#announce({ text: S.failed.craft(error.message), kind: "error" });
       }
     }
 
@@ -292,7 +326,7 @@ export function build() {
         const action = await this.api.queue.submit(this.actor, "research", { projectId: request.projectId, skill: request.skill }, request.days);
         this.#announce({ text: S.researchQueued(request.days, request.name, action?.daysReserved ?? request.days), kind: "queued", actionId: action?.id ?? null, seen: false });
       } catch (error) {
-        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+        this.#announce({ text: S.failed.research(error.message), kind: "error" });
       }
     }
 
@@ -305,9 +339,9 @@ export function build() {
         await this.api.research.putAside(this.actor, project.id);
         this.hubState = { ...this.hubState, projectId: null };
         this.#requestFocus("window");
-        this.#announce({ text: S.asideDone(project.goalName), kind: "aside" });
+        this.#announce({ text: (project.kind === "study" ? S.asideStudyDone : S.asideDone)(project.goalName), kind: "aside" });
       } catch (error) {
-        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+        this.#announce({ text: S.failed.aside(error.message), kind: "error" });
       }
     }
 
@@ -318,7 +352,7 @@ export function build() {
         this.#requestFocus(`project:${project.id}`);
         this.#announce({ text: S.leadStarted(project.goalName), kind: "started" });
       } catch (error) {
-        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+        this.#announce({ text: S.failed.lead(error.message), kind: "error" });
       }
     }
 
@@ -330,7 +364,7 @@ export function build() {
         const action = await this.api.queue.submit(this.actor, "share", { kind: request.kind, key: request.key });
         this.#announce({ text: S.shareQueued(request.name), kind: "queued", actionId: action?.id ?? null, seen: false });
       } catch (error) {
-        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+        this.#announce({ text: S.failed.share(error.message), kind: "error" });
       }
     }
 
@@ -343,7 +377,7 @@ export function build() {
           await this.api.queue.cancel(this.actor, actionId);
         this.#announce({ text: row?.action.type === "share" ? S.shareCancelled(row.action.params?.name ?? label) : S.queueCancelled(label), kind: "cancelled" });
       } catch (error) {
-        this.#announce({ text: S.queueFailed(error.message), kind: "error" });
+        this.#announce({ text: S.failed.cancel(error.message), kind: "error" });
       }
     }
   };

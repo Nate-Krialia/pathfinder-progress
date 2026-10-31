@@ -176,3 +176,10 @@
 
 @media (prefers-reduced-motion: no-preference) { .pfp-hub button.pfp-btn { transition: border-color 0.12s ease, background-color 0.12s ease; } }
 @media (prefers-reduced-motion: reduce) { .pfp-hub *, .pfp-hub *::before, .pfp-hub *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+
+/* Discovery tracks window (Stage 11c, GM only): the milestone rows wrap and never overlap */
+.pfp-hub .pfp-milestones { list-style: none; margin: 0.5rem 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.pfp-hub .pfp-milestone { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid var(--pfp-line, currentColor); }
+.pfp-hub .pfp-milestone label { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+.pfp-hub .pfp-milestone input, .pfp-hub .pfp-milestone select { min-height: 44px; max-width: 100%; box-sizing: border-box; }
+.pfp-hub .pfp-milestone input[type="number"] { width: 6rem; }

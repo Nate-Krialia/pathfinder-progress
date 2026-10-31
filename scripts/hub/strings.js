@@ -2,6 +2,10 @@
  * Every word the Downtime Hub shows, in plain language, in one place (Stage 11a). No DC, odds, percentage or difficulty wording:
  * a test walks every string and every function result here for those (tests/hub-viewmodels.test.js).
  */
+import { W } from "../discovery/words.js";
+
+const gp = n => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
 export const S = {
   appTitle: "Downtime",
   closeLabel: "Close",
@@ -79,6 +83,11 @@ export const S = {
   outcomeResultKnown: (tier, name) => `A tier ${tier} ${name}`,
   outcomeEffectLine: (material, effect) => `${material} ${effect}`,
   outcomeEffectUnknown: (slot, material) => `${slot.charAt(0).toUpperCase()}${slot.slice(1)}, ${material}: You haven't tried this here yet`,
+  worthEach: value => `worth ${gp(value)} gp each`,
+  outcomeWorth: value => `Materials are worth about ${gp(value)} gp.`,
+  outcomeShop: value => `Buying this in a shop would be about ${gp(value)} gp.`,
+  outcomeSave: value => `You save about ${gp(value)} gp.`,
+  slotLocked: names => `Not open to you yet: ${names.join(", ")}. You haven't studied ${names.length === 1 ? "it" : "them"} enough to craft with ${names.length === 1 ? "it" : "them"}.`,
   outcomeFee: (fee, station) => (fee === 0 ? `No station fee at ${station}` : `Station fee: ${fee} gp at ${station}`),
   outcomeDays: days => (days === 1 ? "Takes 1 day" : `Takes ${days} days`),
   outcomeMaterials: "Materials used",
@@ -107,6 +116,16 @@ export const S = {
   reasonPreview: message => message,
   queued: (recipe, days) => `Craft queued: ${recipe}. ${days === 1 ? "1 day" : `${days} days`} reserved.`,
   queueFailed: message => `Couldn't queue the craft: ${message}`,
+  // Each action says what it was trying to do (v0.20.0); the reason is the same plain sentence.
+  failed: {
+    craft: message => `Couldn't queue the craft: ${message}`,
+    research: message => `Couldn't queue the research: ${message}`,
+    share: message => `Couldn't share this: ${message}`,
+    cancel: message => `Couldn't cancel this: ${message}`,
+    aside: message => `Couldn't put this aside: ${message}`,
+    lead: message => `Couldn't start researching: ${message}`
+  },
+  noAnswer: "The GM didn't answer, try again",
   loadingNote: "Loading",
 
   // Display settings
@@ -124,8 +143,8 @@ export const S = {
   // Research tab
   researchHeading: "Active projects",
   researchNone: "No research projects yet.",
-  kindPill: { unlockFormula: "Formula", upgradeStation: "Station upgrade", designBlueprint: "Workshop design" },
-  goalLine: { unlockFormula: name => `Finishing teaches you the formula for ${name}.`, upgradeStation: () => "Finishing upgrades the workshop.", designBlueprint: name => `Finishing gives you the design for ${name}.` },
+  kindPill: { unlockFormula: "Formula", upgradeStation: "Station upgrade", designBlueprint: "Workshop design", study: "Study" },
+  goalLine: { unlockFormula: name => `Finishing teaches you the formula for ${name}.`, upgradeStation: () => "Finishing upgrades the workshop.", designBlueprint: name => `Finishing gives you the design for ${name}.`, study: () => "Studying this can teach you what it is good for, and perhaps more." },
   stepsText: (progress, needed) => `Progress ${progress} of ${needed}`,
   rollWith: "Roll with",
   modifierText: text => `Your modifier ${text}`,
@@ -149,6 +168,11 @@ export const S = {
   asideWhyQueued: "Cancel the queued checks first, then put it aside.",
   asideWorkshop: "A workshop project is put aside from the Workshop tab (coming in a later stage).",
   asideDone: name => `Put aside: ${name}. Progress was not kept.`,
+  // A study keeps its progress when it is put aside.
+  asideStudyButton: "Put the study aside",
+  asideStudyConfirmText: "Put aside? Your progress is kept.",
+  asideStudyDone: name => `Put aside: ${name}. Your progress is kept.`,
+  stageWords: W.stages,
   recentChecks: "Recent checks",
   noChecks: "No checks yet.",
   checkRow: (what, result) => `${what}: ${result}`,
@@ -164,6 +188,9 @@ export const S = {
   leadUsed: "You already started this.",
   leadStarted: name => `Research started: ${name}.`,
   leadHidden: "(A note from the GM that can't be shown here.)",
+  leadItem: W.leadItem,
+  leadNote: W.leadNote,
+  leadStartAgain: "Pick the study up again",
 
   // Compendium tab
   compendiumHeading: "Compendium",
@@ -204,7 +231,12 @@ export const S = {
   knownHeading: "What you have learned",
   knownNone: "Nothing learned beyond the basic recipe yet.",
   knownLine: (slot, material) => `${slot.charAt(0).toUpperCase()}${slot.slice(1)}, ${material}`,
-  knownVia: { crafted: "you crafted it", shared: "shared by the party" },
+  knownVia: { crafted: "you crafted it", shared: "shared by the party", class: "you learned it for every item of this kind" },
+  // Material entries: what the properties milestone teaches (the tag and its theme), and what is still unknown.
+  whatYouKnow: "What you know",
+  notStudied: "You haven't studied this yet.",
+  tagLine: (tag, theme) => `${tag}: a theme of ${theme}.`,
+  tagWorksWith: word => `It works with ${word}.`,
 
   liveRegionLabel: "Updates",
   noActions: "This part isn't ready yet."
