@@ -65,7 +65,7 @@ export const S = {
   slotRole: { basePower: noun => `sets the ${noun}'s power`, bonusDamage: () => "adds bonus damage", specialAbility: () => "gives a special ability", resistance: () => "gives resistance", spellPower: noun => `sets the ${noun}'s spell power`, spellSlots: () => "adds spell slots" },
   slotRoleCustom: role => `sets its ${role}`,
   slotRoleLine: (slotName, parts) => `${slotName.charAt(0).toUpperCase()}${slotName.slice(1)} ${parts.join(" and ")}.`,
-  categoryNoun: { weapon: "weapon", armor: "armor", robes: "robes", focus: "focus", consumable: "item" },
+  categoryNoun: { weapon: "weapon", armor: "armor", robes: "robes", focus: "focus", consumable: "item", bomb: "bomb", trinket: "trinket" },
   genericNoun: "item",
 
   // Material options

@@ -166,9 +166,9 @@ test("spellSlots add up across slots (recorded only; no PF2e mechanism yet)", ()
 });
 
 test("a recipe with no base role uses the default output", () => {
-  const role = { kind: "customRole", id: "glow", appliesTo: ["trinket"], modifies: "system.glow", effect: 1 };
+  const role = { kind: "customRole", id: "glow", appliesTo: ["gadget"], modifies: "system.glow", effect: 1 };
   const gem = { kind: "material", id: "opal", name: "Opal", tier: 1, effects: { glow: 3 } };
-  const charm = { ...RECIPE, id: "charm", category: "trinket", output: { default: UUID_2 }, slots: [{ name: "gem", drives: "glow", tierFloor: 1, qty: 1 }] };
+  const charm = { ...RECIPE, id: "charm", category: "gadget", output: { default: UUID_2 }, slots: [{ name: "gem", drives: "glow", tierFloor: 1, qty: 1 }] };
   const { registry, errors } = build(role, gem, charm);
   assert.deepEqual(errors, []);
   const { plan } = planCraft({ recipe: registry.recipe.get("charm"), registry, selection: { gem: "opal" }, stacks: [stack("o", "opal", 1)] });

@@ -11,7 +11,11 @@ export const BUILT_IN_ROLES = {
   weapon: ["basePower", "bonusDamage", "specialAbility"],
   armor: ["basePower", "resistance", "specialAbility"],
   robes: ["basePower", "resistance", "specialAbility"],
-  focus: ["spellPower", "spellSlots", "specialAbility"]
+  focus: ["spellPower", "spellSlots", "specialAbility"],
+  // Stage 11d: classes with no recipe yet. A bomb and a consumable hit or help when USED; a trinket helps while worn.
+  bomb: ["basePower", "bonusDamage", "specialAbility"],
+  consumable: ["basePower", "bonusDamage", "resistance", "specialAbility"],
+  trinket: ["basePower", "resistance", "specialAbility"]
 };
 
 export const parseTier = ref => Number(String(ref).slice(1));

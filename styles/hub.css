@@ -177,7 +177,7 @@
 @media (prefers-reduced-motion: no-preference) { .pfp-hub button.pfp-btn { transition: border-color 0.12s ease, background-color 0.12s ease; } }
 @media (prefers-reduced-motion: reduce) { .pfp-hub *, .pfp-hub *::before, .pfp-hub *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
-/* Discovery tracks window (Stage 11c, GM only): the list on the left, the editor on the right (stacked when narrow), Save/Discard always on screen */
+/* Item editor (Stage 11d, GM only): the list on the left, the editor in the middle, "what players see" on the right (stacked when narrow), Save/Discard always on screen */
 .pfp-hub.pfp-editor { height: 100%; min-height: 0; }
 .pfp-hub .pfp-editor-head { display: block; }
 .pfp-hub .pfp-editor-body { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
@@ -193,7 +193,7 @@
 .pfp-hub .pfp-milestone label, .pfp-hub .pfp-search { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; }
 .pfp-hub .pfp-search { flex-direction: column; align-items: stretch; }
 /* Fields look like the rest of the Hub (parchment card, border, the same focus ring) and are 44px tall, whatever Foundry does to plain inputs. */
-.pfp-hub input, .pfp-hub select {
+.pfp-hub input, .pfp-hub select, .pfp-hub textarea {
   box-sizing: border-box !important; height: auto !important; min-height: var(--pfp-target) !important; max-width: 100% !important; margin: 0 !important; padding: 0.3em 0.6em !important;
   font: inherit !important; font-size: 1em !important; line-height: 1.35 !important; color: var(--pfp-text) !important; background: var(--pfp-card) !important;
   border: 2px solid var(--pfp-border) !important; border-radius: 0.4em !important; box-shadow: none !important;
@@ -208,3 +208,26 @@
 .pfp-hub .pfp-editor-body > .pfp-pane > * { flex-shrink: 0; }
 .pfp-hub .pfp-editor-body > .pfp-pane > .pfp-editor-scroll { flex: 1 1 auto; flex-shrink: 1; }
 .pfp-hub .pfp-editor-list > .pfp-row, .pfp-hub .pfp-editor-list .pfp-search { max-width: 100%; }
+
+/* Item editor, 0.21.0: three panes, sections, effect blocks, tier tables, confirmations, leftovers */
+.pfp-hub .pfp-editor-three { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1.2fr); }
+.pfp-hub[data-layout="narrow"] .pfp-editor-three { grid-template-columns: minmax(0, 1fr); }
+.pfp-hub[data-layout="narrow"] .pfp-editor-preview .pfp-editor-scroll { flex: 0 1 auto; }
+.pfp-hub .pfp-editor-actions-part { flex: 0 0 auto; display: flex; flex-direction: column; gap: 0.3em; }
+.pfp-hub .pfp-section, .pfp-hub .pfp-block, .pfp-hub fieldset.pfp-tiers, .pfp-hub .pfp-editor-confirm { display: flex; flex-direction: column; gap: 0.5em; padding: 0.5em 0.7em; background: var(--pfp-card); border: 1px solid var(--pfp-border); border-radius: 0.4em; min-width: 0; margin: 0; }
+.pfp-hub .pfp-editor-confirm { border: 2px solid var(--pfp-accent); margin-top: 0.5em; }
+.pfp-hub .pfp-section h3, .pfp-hub .pfp-block h4, .pfp-hub .pfp-editor-preview h2, .pfp-hub .pfp-editor-preview h3, .pfp-hub .pfp-editor-preview h4 { margin: 0; }
+.pfp-hub .pfp-blocks, .pfp-hub .pfp-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5em; }
+.pfp-hub .pfp-lines li { overflow-wrap: anywhere; }
+.pfp-hub .pfp-wide { display: flex; flex-direction: column; gap: 0.3em; width: 100%; }
+.pfp-hub .pfp-wide input, .pfp-hub textarea { width: 100% !important; }
+.pfp-hub textarea { resize: vertical; }
+.pfp-hub .pfp-check { display: flex; align-items: center; gap: 0.4em; min-height: var(--pfp-target); }
+.pfp-hub input[type="checkbox"] { width: var(--pfp-target) !important; min-width: var(--pfp-target) !important; height: var(--pfp-target) !important; min-height: var(--pfp-target) !important; padding: 0 !important; }
+.pfp-hub .pfp-row > label { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; }
+/* Fields in the editor's sections and blocks stack their label over the control and can shrink, so a long option list never pushes a narrow window wider. */
+.pfp-hub .pfp-section .pfp-row > label, .pfp-hub .pfp-block .pfp-row > label, .pfp-hub fieldset.pfp-tiers .pfp-row > label { flex: 1 1 10em; flex-direction: column; flex-wrap: nowrap; align-items: stretch; min-width: 0; max-width: 100%; }
+.pfp-hub .pfp-section select, .pfp-hub .pfp-block select, .pfp-hub fieldset.pfp-tiers input { width: 100% !important; min-width: 0 !important; }
+.pfp-hub .pfp-leftover { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; overflow-wrap: anywhere; }
+.pfp-hub .pfp-editor-detail, .pfp-hub .pfp-editor-preview, .pfp-hub .pfp-editor-list { overflow-wrap: anywhere; }
+.pfp-hub .pfp-tiers legend { padding: 0 0.3em; }

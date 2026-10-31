@@ -66,7 +66,7 @@ export function getNoteStacks(actor) {
 export async function giveNote(actor, note) {
   const existing = getNoteStacks(actor).find(s => s.noteId === note.id);
   if (existing) return existing.item;
-  const [created] = await actor.createEmbeddedDocuments("Item", [{ name: note.name, type: "treasure", system: { quantity: 1 }, flags: { [MODULE_ID]: { [DISCOVERY.noteFlag]: { noteId: note.id } } } }]);
+  const [created] = await actor.createEmbeddedDocuments("Item", [newItemData("note", note)]);
   return created;
 }
 
@@ -263,6 +263,7 @@ export async function describeItemUuid(uuid) {
 export function expectedItemType(category) {
   if (category === "weapon") return "weapon";
   if (category === "armor" || category === "robes") return "armor";
+  if (category === "bomb" || category === "consumable") return "consumable";
   return null;
 }
 
@@ -406,6 +407,86 @@ export async function rollCraftCheck(actor, dc, options) {
   return { degree, total, dc };
 }
 
+// Material and note item data (Stage 11d). The definition is the truth; the Foundry item carries a copy of what a player SEES (name, image, description, bulk, price)
+// and a flag that points at the definition. Pure builders below; the Foundry-bound ones after them.
+
+/** A gold value as PF2e's price coins ({ gp, sp, cp }). */
+export function priceFromGp(gp) {
+  const copper = Math.max(0, Math.round((Number(gp) || 0) * 100));
+  return { ...(Math.floor(copper / 100) ? { gp: Math.floor(copper / 100) } : {}), ...(Math.floor((copper % 100) / 10) ? { sp: Math.floor((copper % 100) / 10) } : {}), ...(copper % 10 ? { cp: copper % 10 } : {}) };
+}
+/** "L" (light) is 0.1 bulk in PF2e; a number is that many bulk. */
+export const bulkNumber = bulk => (bulk === "L" ? 0.1 : bulk === undefined || bulk === null || bulk === "" ? 0 : Number(bulk));
+const plainHtml = text => (text ? text.split(/\n{2,}/).map(par => `<p>${escapeHtml(par).replace(/\n/g, "<br>")}</p>`).join("") : "");
+
+/** The cosmetic and rules-visible fields of a material or note item, from its definition. */
+export function itemFieldsFor(definition) {
+  return {
+    name: definition.name,
+    ...(definition.img ? { img: definition.img } : {}),
+    "system.description.value": plainHtml(definition.description ?? ""),
+    "system.bulk.value": bulkNumber(definition.bulk),
+    "system.price.value": priceFromGp(definition.value ?? 0)
+  };
+}
+
+/** New item data for a material (kind "material") or a note ("note"). `template` marks the world item the creator makes (deleted together with its definition). */
+export function newItemData(kind, definition, { quantity = 1, template = false } = {}) {
+  const flag = kind === "material" ? { material: { materialId: definition.id, tier: definition.tier } } : { [DISCOVERY.noteFlag]: { noteId: definition.id } };
+  const fields = itemFieldsFor(definition);
+  return {
+    name: fields.name, type: "treasure", ...(fields.img ? { img: fields.img } : {}),
+    system: { quantity, description: { value: fields["system.description.value"] }, bulk: { value: fields["system.bulk.value"] }, price: { value: fields["system.price.value"] } },
+    flags: { [MODULE_ID]: { ...flag, ...(template ? { template: true } : {}) } }
+  };
+}
+
+/** The id of the world Item folder with this name, made on first use (the creator keeps its items together). */
+export async function ensureItemFolder(name) {
+  const existing = game.folders?.find(f => f.type === "Item" && f.name === name);
+  if (existing) return existing.id;
+  const made = await Folder.create({ name, type: "Item" });
+  return made?.id ?? null;
+}
+
+/** Create the linked WORLD item for a definition (the GM drags it onto an actor, a loot actor or a chest). */
+export async function createWorldItem(kind, definition, { folder } = {}) {
+  const data = newItemData(kind, definition, { template: true });
+  if (folder) data.folder = folder;
+  return Item.create(data);
+}
+
+/** Every Item that points at a definition: world items and the items of every actor in the world. [{ item, actor|null }] */
+export function copiesOf(kind, id) {
+  const matches = item => (kind === "material" ? item.getFlag?.(MODULE_ID, "material")?.materialId === id : item.getFlag?.(MODULE_ID, DISCOVERY.noteFlag)?.noteId === id);
+  const out = [];
+  for (const item of game.items ?? []) if (matches(item)) out.push({ item, actor: null });
+  for (const actor of game.actors ?? []) for (const item of actor.items ?? []) if (matches(item)) out.push({ item, actor });
+  return out;
+}
+
+/** How many unlinked scene tokens hold a copy (their items are not reachable the same way; the editor tells the GM). */
+export function unlinkedTokenCopies(kind, id) {
+  let count = 0;
+  for (const scene of game.scenes ?? []) for (const token of scene.tokens ?? []) {
+    if (token.actorLink) continue;
+    for (const item of token.actor?.items ?? []) {
+      const hit = kind === "material" ? item.getFlag?.(MODULE_ID, "material")?.materialId === id : item.getFlag?.(MODULE_ID, DISCOVERY.noteFlag)?.noteId === id;
+      if (hit) count++;
+    }
+  }
+  return count;
+}
+
+/** Write the definition's cosmetic fields (and a material's tier flag) onto one existing copy. */
+export async function refreshCopy(item, kind, definition) {
+  const fields = itemFieldsFor(definition);
+  const update = { name: fields.name, "system.description.value": fields["system.description.value"], "system.bulk.value": fields["system.bulk.value"], "system.price.value": fields["system.price.value"] };
+  if (fields.img) update.img = fields.img;
+  if (kind === "material") update[`flags.${MODULE_ID}.material.tier`] = definition.tier;
+  await item.update(update);
+}
+
 /**
  * Add `quantity` units of a material to an actor: tops up the existing stack
  * if there is one, otherwise creates a "treasure" item carrying the flags.
@@ -416,12 +497,7 @@ export async function giveMaterial(actor, material, quantity) {
     await existing.item.update({ "system.quantity": existing.quantity + quantity });
     return existing.item;
   }
-  const [created] = await actor.createEmbeddedDocuments("Item", [{
-    name: material.name,
-    type: "treasure",
-    system: { quantity },
-    flags: { [MODULE_ID]: { material: { materialId: material.id, tier: material.tier } } }
-  }]);
+  const [created] = await actor.createEmbeddedDocuments("Item", [newItemData("material", material, { quantity })]);
   return created;
 }
 

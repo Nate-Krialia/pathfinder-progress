@@ -87,11 +87,12 @@ function makeScene(name, data = {}) {
 
 function makeItem(actor, data) {
   const item = {
-    id: newId("item"), parent: actor, name: data.name, type: data.type, system: { ...(data.system ?? {}) }, flags: clone(data.flags ?? {}),
+    id: newId("item"), parent: actor, name: data.name, img: data.img, folder: data.folder ?? null, type: data.type, system: clone(data.system ?? {}), flags: clone(data.flags ?? {}),
     getFlag: (scope, key) => clone(item.flags[scope]?.[key]),
     toObject: () => clone({ name: item.name, type: item.type, system: item.system, flags: item.flags }),
-    async update(change) { tick("item.update"); if ("system.quantity" in change) item.system.quantity = change["system.quantity"]; },
-    async delete() { tick("item.delete"); actor.items.splice(actor.items.indexOf(item), 1); }
+    // Dotted keys like real Foundry ("name", "img", "system.price.value", "flags.<module>.material.tier"); objects merge.
+    async update(change) { tick("item.update"); applyFlat(item, change); },
+    async delete() { tick("item.delete"); const list = actor ? actor.items : game.items; list.splice(list.indexOf(item), 1); }
   };
   return item;
 }
@@ -228,7 +229,7 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
   globalThis.canvas = { scene: null };
   globalThis.game = {
     get user() { return als.getStore()?.user ?? gm; },
-    users: Object.assign(collection([gm, annUser, bobUser, testUser]), { activeGM: gm }), actors: collection([]), scenes: collection([]), combats: collection([]),
+    users: Object.assign(collection([gm, annUser, bobUser, testUser]), { activeGM: gm }), actors: collection([]), items: collection([]), folders: collection([]), scenes: collection([]), combats: collection([]),
     packs: { get: id => (id === "pf2e.equipment-srd" ? { getIndex: async () => [{ name: "Dagger", _id: "AAAAAAAAAAAAAAAA" }] } : undefined), filter: () => [] }, system: { id: "pf2e", version: "8.6.1" }, version: "14.369", i18n: { localize: t => t },
     modules: { get: id => modules.get(id) ?? (modules.set(id, { id, active: true }), modules.get(id)) },
     // Like game.messages in real Foundry (verified in 14.369): EVERY message is delivered to EVERY client, a whisper included. `visible` is
@@ -250,6 +251,8 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
     PF2E: { skills: { crafting: { label: "Crafting" }, survival: { label: "Survival" }, nature: { label: "Nature" }, athletics: { label: "Athletics" } } }
   };
   globalThis.CONST = undefined;
+  globalThis.Item = { create: async data => { tick("Item.create"); const item = makeItem(null, data); game.items.push(item); return item; } };
+  globalThis.Folder = { create: async data => { tick("Folder.create"); const folder = { id: newId("folder"), name: data.name, type: data.type, async delete() { game.folders.splice(game.folders.indexOf(folder), 1); } }; game.folders.push(folder); return folder; } };
   globalThis.Actor = {
     create: async data => {
       const owners = Object.entries(data.ownership ?? {}).filter(([k, v]) => k !== "default" && v === 3).map(([k]) => k);

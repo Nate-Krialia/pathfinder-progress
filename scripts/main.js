@@ -26,9 +26,11 @@ import * as compendium from "./compendium/store.js";
 import * as workshop from "./workshop/store.js";
 import * as leads from "./research/leads.js";
 import * as discovery from "./discovery/store.js";
+import * as editorStore from "./editor/store.js";
 import { defaultTrack } from "./discovery/track.js";
-import { openEditor } from "./discovery/editor-app.js";
-import { installDiscoveryEntryPoints } from "./discovery/entry.js";
+import { openEditor } from "./editor/app.js";
+import { EDITOR_SETTING } from "./editor/setting.js";
+import { installEditorEntryPoints } from "./editor/entry.js";
 import { asGM } from "./queue/work.js";
 import { UPGRADE_KINDS } from "./workshop/rules.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
@@ -59,7 +61,7 @@ Hooks.once("init", () => {
   game.settings.register(MODULE_ID, HUB.sizeSetting, { scope: "client", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   game.settings.register(MODULE_ID, HUB.displaySetting, { scope: "client", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   installEntryPoints(() => game.modules.get(MODULE_ID).api);
-  installDiscoveryEntryPoints(() => game.modules.get(MODULE_ID).api);
+  installEditorEntryPoints(() => game.modules.get(MODULE_ID).api);
 
   // Downtime system
   game.settings.register(MODULE_ID, "itemPacks", {
@@ -155,6 +157,8 @@ Hooks.once("init", () => {
   });
 
   // The Discovery tracks window's edits (GM data, Stage 11c): { "<kind>:<id>": track }, merged over the definitions' own tracks.
+  // The item editor's world definitions (Stage 11d): new materials and notes, and patches over the packs' ones. GM data; see scripts/editor/layer.js.
+  game.settings.register(MODULE_ID, EDITOR_SETTING, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   game.settings.register(MODULE_ID, DISCOVERY.overlaySetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
 
   game.settings.register(MODULE_ID, "extraPacks", {
@@ -370,6 +374,32 @@ Hooks.once("ready", async () => {
     /** Progress, DC, your modifiers and the per-day odds. Without a project id, lists the actor's projects. */
     projectInfo: (actor, projectId) => discovery.projectInfoWithStudies(api, actor, projectId, researchStore.projectInfo),
     /**
+     * The item editor (Stage 11d, GM only): create/update/revert/retire/remove materials and notes, push their item data to every copy, track edits, leftovers.
+     * Content lives in the world setting `editorDefinitions`; see scripts/editor/store.js.
+     */
+    editor: {
+      create: (kind, fields, options) => editorStore.create(api, kind, fields, options),
+      update: (key, fields, options) => editorStore.update(api, key, fields, options),
+      revert: (key, field) => editorStore.revert(api, key, field),
+      retire: (key, retired) => editorStore.retire(api, key, retired),
+      remove: key => editorStore.remove(api, key),
+      entry: key => editorStore.entry(api, key),
+      canEdit: key => editorStore.canEdit(api, key),
+      records: () => editorStore.records(),
+      hasItem: key => editorStore.hasWorldItem(key),
+      usage: key => editorStore.usageOf(api, key),
+      impact: (key, fields) => editorStore.impactOf(api, key, fields),
+      pushCopies: key => editorStore.pushCopies(api, key),
+      makeItem: key => editorStore.makeItem(api, key),
+      setTrack: (key, track) => editorStore.setTrack(api, key, track),
+      foldOverlay: () => editorStore.foldOverlay(api),
+      leftovers: () => editorStore.leftovers(api),
+      clearLeftover: key => editorStore.clearLeftover(api, key),
+      exportRecords: keys => editorStore.exportRecords(api, keys),
+      importRecords: (bundle, options) => editorStore.importRecords(api, bundle, options),
+      slugify: editorStore.slugify
+    },
+    /**
      * The discovery chain (Stage 11c, docs/11c-discovery-addendum.md). Tracks are GM-only data: tracks.get/set/clear read and write the Discovery tracks window's
      * overlay. propertiesOpen(actor, materialId): do they know what it is good for (so may they craft with it)?
      */
@@ -382,7 +412,7 @@ Hooks.once("ready", async () => {
         defaultFor: (key, recipeId) => defaultTrack(recipeId, key.split(":")[0])
       },
       propertiesOpen: (actor, materialId) => discovery.propertiesOpen(api, actor, materialId),
-      /** GM: open the Discovery tracks window (optionally on one item, like "material:iron"). */
+      /** GM: open the item editor (optionally on one item, like "material:iron"). */
       openEditor: key => openEditor(api, key),
       startStudy: (actor, key) => discovery.startStudy(api, actor, key),
       refreshVersionLeads: actor => discovery.refreshVersionLeads(api, actor),
@@ -414,7 +444,9 @@ Hooks.once("ready", async () => {
     definitionsStatus: () => { const s = defsState(); return { status: game.user.isGM ? "ready" : s.status, message: s.message, loads: s.loads, loadedAt: s.loadedAt, orphaned: [...s.missing] }; },
     /** Reload definitions. Pass { fresh: true } to also forget cached item lookups. A player client reads no pack: it asks the GM for what its characters need. */
     async reload(options) {
-      const { registry, errors, uncraftable, resolved, contexts } = await loadAll(options);
+      const { registry, errors, uncraftable, resolved, contexts, sources, leftovers } = await loadAll(options);
+      api.baseSources = sources ?? [];        // the raw pack pages, kept so the editor can re-layer its changes without reading the packs again
+      api.editorLeftovers = leftovers ?? [];
       api.definitions = playerDefs.attachRefresh(registry);
       api.contexts = contexts;
       api.errors = [...errors, ...stations.readStations(api).errors];

@@ -41,10 +41,10 @@ test("output: a base-role recipe may not use the default key", () => {
 });
 
 test("output: a category with no base role needs exactly { default }", () => {
-  const trinket = { ...RECIPE, id: "charm", category: "trinket", slots: [{ name: "gem", drives: "glow", tierFloor: 1, qty: 1 }], output: { default: UUID } };
-  const role = { kind: "customRole", id: "glow", appliesTo: ["trinket"], modifies: "system.glow", effect: 1 };
-  assert.deepEqual(run(role, trinket).errors, []);
-  const bad = run(role, { ...trinket, output: { "1": UUID } }).errors;
+  const gadget = { ...RECIPE, id: "charm", category: "gadget", slots: [{ name: "gem", drives: "glow", tierFloor: 1, qty: 1 }], output: { default: UUID } };
+  const role = { kind: "customRole", id: "glow", appliesTo: ["gadget"], modifies: "system.glow", effect: 1 };
+  assert.deepEqual(run(role, gadget).errors, []);
+  const bad = run(role, { ...gadget, output: { "1": UUID } }).errors;
   assert.ok(bad.some(e => e.field === "output" && /"default"/.test(e.message)), dump(bad));
 });
 

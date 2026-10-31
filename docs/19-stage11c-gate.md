@@ -1,4 +1,4 @@
-# 19 Stage 11c gate (real Foundry): the discovery chain, item classes, gold values and the leftovers (v0.20.1)
+# 19 Stage 11c gate (real Foundry): the discovery chain, item classes, gold values and the leftovers (v0.21.0)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. Every step is labelled **[GM]** or **[Player]**. **[Player] steps tell you what to click; the block then checks what is on screen.** The blocks can be run at any time: the helper in Step 3 records every line the Hub's status line shows (they vanish after about 10 seconds), and the blocks read that record. Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, layout is the point.
 
@@ -10,25 +10,25 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 - **A higher formula version** (Gate Blade II) appears as a lead once its previous version is known and two different tagged materials are understood. It still has to be researched.
 - **Put aside keeps a study's progress.**
 - **Gold:** "worth N gp each", "Materials are worth about ...", "Buying this in a shop would be about ...", "You save about ...".
-- **The Discovery tracks window** (GM): edit milestones, see plain validation, save.
+- **Research tracks** (GM): set through the api here, with plain validation. (The window that edited them is now the Item editor, gate 20.)
 - **No GM connected:** each action says what it was trying to do.
 - Not shown, on purpose: the "GM didn't answer" line and the busy button (they need a GM that is connected and silent; the automated tests cover them).
 
 **Fixtures, not behaviour.** SETUP plants some things so the steps have something to look at: the Compendium entries for Gate Ore A, Gate Ore B and Gate Plain (normally an entry appears when you find the material), and the already-started Gate Page study (normally you would start it yourself). They are there so the steps can be short; they are not how the module finds or starts things.
 
-**Safety.** Throwaway things named "Gate ...": characters **Gate Scholar** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`g7-ore`, `g7-a`, `g7-b`, `g7-plain`, `g7-blade`, `g7-blade2`, `g7-lantern`, `g7-charm`, `g7-trinket`, `g7-page`, `g7-letter`, `g7-town`); they last until you reload the GM window, and SETUP registers them again. No real campaign data. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left tracks behind. CLEANUP always works and is safe to run twice.
+**Safety.** Throwaway things named "Gate ...": characters **Gate Scholar** and **Gate Friend** (both owned by the user "Test"), and in-memory fake definitions (`g7-ore`, `g7-a`, `g7-b`, `g7-plain`, `g7-blade`, `g7-blade2`, `g7-lantern`, `g7-charm`, `g7-trinket`, `g7-page`, `g7-letter`, `g7-town`); they last until you reload the GM window, and SETUP registers them again. No real campaign data. SETUP refuses to run if downtime is open, anything is queued, someone holds downtime days, a "Gate ..." actor exists that it did not make, or an earlier run left tracks behind (even after a GM reload, when the fake definitions they belong to are gone: CLEANUP still clears them). CLEANUP always works and is safe to run twice.
 
-**Restart note.** 0.20.0 adds a world setting (the tracks overlay) and a stylesheet rule, nothing else in the manifest but the version: update the module and **force-reload both windows** (Ctrl+Shift+R). If the Discovery tracks button is missing, restart the Foundry server once.
+**Restart note.** 0.20.0 adds a world setting (the tracks overlay) and a stylesheet rule, nothing else in the manifest but the version: update the module and **force-reload both windows** (Ctrl+Shift+R). The Discovery tracks button is gone in 0.21.0 (the Item editor button replaces it).
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.20.1**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.21.0**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.20.1"]` in the GM window and `["Test", false, "0.20.1"]` in the Player window.
+Expected: `["<your GM name>", true, "0.21.0"]` in the GM window and `["Test", false, "0.21.0"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 
@@ -90,7 +90,7 @@ await (async () => {
   if (api.queue.list().length) throw new Error("the queue is not empty; resolve or clear it first");
   const holders = game.actors.filter(a => (a.getFlag(M, "downtimeDays") ?? 0) > 0).map(a => a.name);
   if (holders.length) throw new Error(`these characters hold downtime days: ${holders.join(", ")}`);
-  if (Object.keys(api.discovery.tracks.overlay()).some(k => /:g7-/.test(k))) throw new Error("an earlier run left tracks in the Discovery tracks window: run CLEANUP (the last step) first");
+  if (Object.keys(api.discovery.tracks.overlay()).some(k => /:g7-/.test(k))) throw new Error("an earlier run left tracks behind (the Item editor lists them under Leftovers): run CLEANUP (the last step) first");
 
   const flags = { [M]: { gateThrowaway7: true } };
   const owned = { default: 0, [test.id]: 3 };
@@ -325,21 +325,22 @@ await (async () => {
 
 ## Group B: the GM's window, the relay, the keyboard
 
-## Step 12 [GM]: the Discovery tracks window
+## Step 12 [GM]: give Gate Plain a track (through the api)
 
-Open it from the scene controls (the open-book button next to the Review button), or run `game.modules.get("pathfinder-progress").api.discovery.openEditor()`. **What to do and see:** pick **Gate Plain** (Materials, "No track yet"); press **Add the default track**: two rows, "Steps 4 / Properties" and "Steps 8 / A formula", with the message "Pick a formula that exists." and **Save** off. Choose **Gate Trinket** in the second row: the message goes and **Save** turns on. Change the second row's steps to **4**: "must be more than the milestone before it (4)" and **Save** is off again; set it to **10**. Press **Save**: "Saved the track for Gate Plain." and the item shows "has a track" and "edited here". Press **Use the definition's track**: back to "No track yet". Also open a Gate Ore A item sheet (give yourself one if needed) to see the header button, or skip.
+**The Discovery tracks window was replaced by the Item editor in 0.21.0.** The editor is played in gate 20 (`docs/20-stage11d-gate.md`). Here Gate Plain only needs a track, so Steps 13 and 16 can check what a player sees (and that a tracked material you have not studied is locked). Nothing to click: run the block.
 
-**Send me a screenshot of the window with the two rows and a message showing.**
-
-**Run the block below AFTER you have done the clicks above** (it needs the window to have saved and cleared once). It then saves a track on Gate Plain on purpose, so **Gate Plain is left with a track and is locked for crafting** from here on (Steps 13 and 16 rely on that).
+**Gate Plain is left with a track and is locked for crafting** from here on (Steps 13 and 16 rely on that).
 
 ```js
-// [GM] after the clicks above: the overlay was written and cleared; a player cannot read it (GM only); the Player's copy of Gate Plain learns THAT a track exists once one is saved (checked in Step 13).
+// [GM] a track is set, cleared and set again through the api (the overlay); a bad track is refused in plain words; a player cannot read the overlay.
 await (async () => {
   const g = globalThis.__g7 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
-  g.check("the overlay is empty again after Use the definition's track", Object.keys(g.api.discovery.tracks.overlay()).every(k => !/g7-plain/.test(k)), JSON.stringify(g.api.discovery.tracks.overlay()));
+  g.check("Gate Plain starts with no track", !g.api.discovery.tracks.overlay()["material:g7-plain"]);
   await g.api.discovery.tracks.set("material:g7-plain", { milestones: [{ steps: 3, grants: { type: "properties" } }] });
   g.check("saving through the api writes the overlay", g.api.discovery.tracks.overlay()["material:g7-plain"]?.milestones[0].steps === 3);
+  await g.api.discovery.tracks.clear("material:g7-plain");
+  g.check("clearing removes it again", !g.api.discovery.tracks.overlay()["material:g7-plain"]);
+  await g.api.discovery.tracks.set("material:g7-plain", { milestones: [{ steps: 3, grants: { type: "properties" } }] });
   await g.api.publishDefinitions();
   g.check("a bad track is refused in plain words", await g.api.discovery.tracks.set("material:g7-plain", { milestones: [{ steps: 5, grants: { type: "properties" } }, { steps: 3, grants: { type: "formula", recipeId: "g7-charm" } }] }).then(() => false, e => /more than the milestone before it/.test(e.message)));
   return g.done();

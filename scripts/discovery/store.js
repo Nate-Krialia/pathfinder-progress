@@ -280,9 +280,12 @@ export function propertiesOpen(api, actor, materialId) {
 export async function setTrack(api, key, track) {
   requireGM("setTrack");
   const { kind, id } = parseKey(key);
-  if (!["material", "note", "recipe"].includes(kind) || !definitionOf(api, kind, id)) throw new Error(`setTrack: unknown item "${key}"`);
   const next = { ...overlay() };
-  if (track === null) delete next[key];
+  // Clearing works for any key that has an overlay entry, even when its item is gone (a pack changed, a fake definition vanished on reload): an orphaned entry must be removable.
+  if (track === null && key in next) delete next[key];
+  else if (track === null && !definitionOf(api, kind, id)) throw new Error(`setTrack: there is no track for "${key}"`);
+  else if (!["material", "note", "recipe"].includes(kind) || !definitionOf(api, kind, id)) throw new Error(`setTrack: unknown item "${key}"`);
+  else if (track === null) delete next[key];
   else {
     const problems = check(TRACK_SCHEMA, track);
     if (problems.length) throw new Error(`setTrack: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);

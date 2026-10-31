@@ -54,11 +54,14 @@ test("LAYOUT MUTATION: the checks fail when a card gets a fixed height back, a b
       "compendium text that cannot wrap": { scene: "compendiumExperiment", width: 320, textSize: 175, css: ".pfp-hub .pfp-facts li, .pfp-hub .pfp-effects li { white-space: nowrap !important; overflow-wrap: normal !important; }" },
       "a badge that wraps letters at 220": { scene: "partial", width: 220, textSize: 175, css: ".pfp-hub .pfp-badge { white-space: normal !important; word-break: break-all !important; min-width: 0 !important; max-width: 3.5em !important; }" }
     };
-    // the Discovery tracks window (0.20.1): fields that shrink, groups squeezed flat, an intro that is cut off
+    // the item editor (0.21.0): fields that shrink, groups squeezed flat, an intro that is cut off, effect blocks and a confirm box with a fixed height
     Object.assign(mutations, {
       "editor fields under 44px": { scene: "editorRows", width: 900, textSize: 100, css: ".pfp-hub input, .pfp-hub select { min-height: 20px !important; height: 20px !important; }" },
       "editor groups squeezed flat": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub .pfp-editor-scroll > * { flex: 1 1 0 !important; min-height: 0 !important; }" },
-      "an editor intro that is cut off": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub .pfp-editor-head { height: 6px !important; overflow: hidden !important; }" }
+      "an editor intro that is cut off": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub .pfp-editor-head { height: 6px !important; overflow: hidden !important; }" },
+      "effect blocks with a fixed height": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub .pfp-block { height: 2em !important; overflow: hidden !important; }" },
+      "an editor confirm box with a fixed height": { scene: "editorConfirm", width: 420, textSize: 175, css: ".pfp-hub .pfp-editor-confirm { height: 2em !important; overflow: hidden !important; }" },
+      "a preview that cannot wrap": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub .pfp-lines li, .pfp-hub .pfp-editor-preview p { white-space: nowrap !important; overflow-wrap: normal !important; }" }
     });
     for (const [label, spec] of Object.entries(mutations)) {
       const mutation = typeof spec === "string" ? { scene: label === "nowrap text" ? "longNames" : base.scene, css: spec } : spec;
@@ -100,14 +103,15 @@ test("EDITOR LAYOUT: 300 items stay usable: the list is on the left and scrolls 
     const page = await openHarness(b);
     const geometry = () => page.evaluate(() => {
       const rect = sel => { const el = document.querySelector(sel); const r = el?.getBoundingClientRect(); return el ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight } : null; };
-      return { list: rect(".pfp-editor-list"), detail: rect(".pfp-editor-detail"), listScroll: rect(".pfp-editor-list .pfp-editor-scroll"), save: rect('[data-action="save-track"]'), discard: rect('[data-action="revert-track"]'), head: rect(".pfp-editor-head"), items: document.querySelectorAll('[data-action="pick-item"]').length, viewport: window.innerHeight };
+      return { list: rect(".pfp-editor-list"), detail: rect(".pfp-editor-detail"), listScroll: rect(".pfp-editor-list .pfp-editor-scroll"), save: rect('[data-action="save"]'), discard: rect('[data-action="discard"]'), preview: rect(".pfp-editor-preview"), head: rect(".pfp-editor-head"), items: document.querySelectorAll('[data-action="pick-item"]').length, viewport: window.innerHeight };
     });
     for (const theme of ["parchment", "dark", "contrast"]) {
       const wide = await renderState(page, { scene: "editorRows", theme, width: 900, textSize: 100, hostile: "important 2.5rem" });
       assert.deepEqual(wide.problems, [], `${theme}: wide is clean`);
       const g = await geometry();
       assert.ok(g.items >= 100, `many items are listed (${g.items})`);
-      assert.ok(g.list.right <= g.detail.left + 1 && Math.abs(g.list.top - g.detail.top) < 2, "the list is on the LEFT and the editor on the RIGHT");
+      assert.ok(g.list.right <= g.detail.left + 1 && Math.abs(g.list.top - g.detail.top) < 2, "the list is on the LEFT and the editor in the MIDDLE");
+      assert.ok(g.detail.right <= g.preview.left + 1 && Math.abs(g.detail.top - g.preview.top) < 2, "what players see is on the RIGHT");
       assert.ok(g.listScroll.scrollHeight > g.listScroll.clientHeight + 100, "the long list scrolls inside its own box");
       assert.ok(g.save.bottom <= g.viewport && g.discard.bottom <= g.viewport && g.save.top >= g.detail.top, "Save and Discard are on screen without scrolling");
       assert.ok(g.head.bottom <= g.list.top + 1, "the intro sits above the panes and is not covered");
@@ -117,6 +121,7 @@ test("EDITOR LAYOUT: 300 items stay usable: the list is on the left and scrolls 
       assert.deepEqual(narrow.problems, [], `${width}px: clean`);
       const g = await geometry();
       assert.ok(g.detail.top >= g.list.bottom - 1 && Math.abs(g.list.left - g.detail.left) < 2, `${width}px: the panes stack`);
+      assert.ok(g.preview.top >= g.detail.bottom - 1 && Math.abs(g.detail.left - g.preview.left) < 2, `${width}px: the preview stacks below the editor`);
     }
   } finally { await b.close(); }
 });

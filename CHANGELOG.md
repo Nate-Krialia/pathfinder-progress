@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.21.0
+
+Stage 11d, first half: the Item editor, the Material creator and the effect builder. (`docs/11d-item-editor-addendum.md` has the decisions and a "Built as" section of interpretations; conditions, afflictions and Adjust are 0.22.0.)
+
+- **Item editor window** (GM): a list on the left (search, filter chips, collapsible groups, a Leftovers group), the editor in the middle (Basics, Discovery, Research track, Effects) and **What players see** on the right with an item-class picker. It replaces the Discovery tracks window and its scene-controls button (now a screwdriver-and-wrench); it also opens from a material or note item sheet's header. Typing in a text box refreshes only the preview and the action row, never the box or the buttons beside it.
+- **Material creator.** New material makes the definition AND a linked world Item in a Materials folder; New note makes a Plan note (short study) or a Research note (longer). Gold value also sets the PF2e price; bulk is a dropdown (L, 1, 2, ...).
+- **Effect builder.** Blocks per item class (Add damage, Grant resistance, Special ability text, plus the base-power tier; spell power on a focus) with T1 to T5 tables for dice and amounts, compiled to the role values the engine already applies, and a plain-words preview in the Hub's own wording. New classes: bomb, consumable, trinket.
+- **Content lives in the world** (setting `editorDefinitions`), layered over the packs' source text before validation. Pack edits are patches that can be taken back; nothing is written to the packs. A change that would break a definition is refused and writes nothing. Definitions that exist only in memory are kept and cannot be edited.
+- **Asks before changing what players know** (tag, effects, a tag's theme) when a character's Compendium shows it learned. **Push to copies** writes name, image, description, bulk and price onto every copy (unlinked scene tokens are counted and skipped). **Delete** is blocked while anything uses the item (the refusal says where; Retire instead). **Export / import** as plain JSON.
+- **Must-do fixes.** (1) A research track whose item no longer exists could not be cleared (`tracks.clear` refused "unknown item"); it can now, from the api and from the editor's Leftovers. (2) Gate 19's CLEANUP and SETUP refusal can clear its tracks after a GM reload with the fake definitions gone; gate 19's Step 12 now uses the api (the window it described moved to the editor).
+- Players: a material's copy carries none of the editor's fields (`img`, `description`, `bulk`, `label`, `retired`, `effectBlocks`, `recipeOverrides`).
+- Bugs the new tests found while building: a Base power tier select that appeared only on "Every class"; a focus's tier compiled to base power instead of spell power; typing replaced the button about to be clicked; a Plan note and a Research note came out the same length; the editor's registry rebuild would have dropped in-memory definitions.
+- Docs: `docs/20-stage11d-gate.md` (one gate, 21 steps, `g20-` ids; SETUP plants an orphaned track on purpose and says so; every click step's block checks the screen first); `docs/08`; `CLAUDE.md`; the 11d addendum's "Built as"; gates 17 to 19 updated for the version.
+- Tests: 1119 in all (new: editor-pure, editor-model, editor-wiring, editor-window, gate20; the old Discovery window test was replaced; the layout harness adds the editor scenes and three editor mutations, 0 problems). "trinket" is now a real category, so two tests that used it as a made-up one use "gadget".
+- No manifest change except the version: one new world setting (registered in code) and a stylesheet block. Update and force-reload both windows (Ctrl+Shift+R); no server restart.
+
 ## 0.20.1
 
 Fixes from gate 19 in real Foundry.

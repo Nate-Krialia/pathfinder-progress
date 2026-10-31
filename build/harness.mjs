@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { HUB } from "../scripts/config.js";
 import { hubModel, learnedKey } from "../scripts/hub/viewmodels.js";
 import { renderHubPage } from "../scripts/hub/render.js";
-import { editorModel, renderEditor } from "../scripts/discovery/editor-model.js";
+import { draftFor, editorModel, renderEditor } from "../scripts/editor/model.js";
 import { BENCH, BIG_PROJECT, BOOK_ENTRIES, FORGE, LEAD, PROJECT, STAR_EFFECT, STEEL_EFFECT, UPGRADE, compendiumFacts, compendiumState, makeBook, makeFacts, makeState, researchFacts, researchState } from "../tests/hub-fixtures.js";
 
 const cssUrl = pathToFileURL(new URL("../styles/hub.css", import.meta.url).pathname).href;
@@ -84,27 +84,40 @@ const ITEM_LEADS = [
 ];
 const R = { ...Object.fromEntries([["researchEmpty", { facts: researchFacts({ projects: [], leads: [] }), state: researchState() }]]) };
 
-// The Discovery tracks window (Stage 11c, GM only) with a registry big enough to need the search, the chips and the folding: 300 items, long names.
+// The item editor (Stage 11d, GM only) with a registry big enough to need the search, the chips and the folding: 300 items, long names, long ability text.
 const editorRegistry = (n = 300) => {
   const material = new Map(), note = new Map(), recipe = new Map([["gate-blade", { id: "gate-blade", name: "Gate Blade" }]]);
+  const rich = { general: { power: 2, blocks: [] }, byClass: { weapon: { power: 3, blocks: [
+    { type: "damage", dice: { byTier: { 1: "1d4", 2: "1d6", 3: "1d8", 4: "1d10", 5: "1d12" } }, damageType: "fire", persistent: true, versus: "creatures of the Unbroken Horizon and their faithful companions" },
+    { type: "resistance", damageType: "cold", value: { all: 5 } },
+    { type: "ability", title: "Mitflit Courage of the Unbroken Horizon Wanderers", text: "On a hit, the target must be unsettled by the smell of the thing, which lingers for a very long time and is described here in a very long sentence so the box has to grow and wrap.", on: "hit" }
+  ] } } };
   for (let i = 0; i < n; i++) {
     const kind = i % 5 === 0 ? "note" : i % 7 === 0 ? "recipe" : "material";
     const long = i % 11 === 0 ? ` of the Unbroken Horizon Wanderers and Their Faithful Companions ${i}` : ` ${i}`;
-    if (kind === "material") material.set(`gate-m${i}`, { id: `gate-m${i}`, name: `Gate Material${long}`, tier: 1, value: 5, tag: i % 3 === 0 ? "gate-tag" : undefined, research: i % 4 === 0 ? { milestones: [{ steps: 4, grants: { type: "properties" } }, { steps: 8, grants: { type: "formula", recipeId: "gate-blade" } }, { steps: 12, grants: { type: "formula", recipeId: "gate-blade" } }] } : undefined });
-    else if (kind === "note") note.set(`gate-n${i}`, { id: `gate-n${i}`, name: `Gate Note${long}`, recipeId: "gate-blade", research: i % 2 ? { milestones: [{ steps: 3, grants: { type: "formula" } }] } : undefined });
-    else recipe.set(`gate-r${i}`, { id: `gate-r${i}`, name: `Gate Blade Mark${long}`, version: 2 });
+    if (kind === "material") material.set(`gate-m${i}`, { id: `gate-m${i}`, kind: "material", name: `Gate Material${long}`, tier: 1 + (i % 5), value: 5, bulk: "L", tag: i % 3 === 0 ? "gate-tag" : undefined, label: i % 13 === 0 ? "Parts" : undefined, retired: i % 17 === 0 ? true : undefined, effects: { basePower: "T1" }, effectBlocks: i === 4 || i === 8 ? rich : undefined, research: i % 4 === 0 ? { milestones: [{ steps: 4, grants: { type: "properties" } }, { steps: 8, grants: { type: "formula", recipeId: "gate-blade" } }, { steps: 12, grants: { type: "formula", recipeId: "gate-blade" } }] } : undefined });
+    else if (kind === "note") note.set(`gate-n${i}`, { id: `gate-n${i}`, kind: "note", name: `Gate Note${long}`, recipeId: "gate-blade", research: i % 2 ? { milestones: [{ steps: 3, grants: { type: "formula" } }] } : undefined });
+    else recipe.set(`gate-r${i}`, { id: `gate-r${i}`, kind: "recipe", name: `Gate Blade Mark${long}`, version: 2 });
   }
   return { material, note, recipe, tag: new Map([["gate-tag", { id: "gate-tag", name: "Mitflit parts of the Unbroken Horizon", theme: "cowardice" }]]) };
 };
 const EDITOR_REGISTRY = editorRegistry();
-const editorScene = over => ({ editor: { registry: EDITOR_REGISTRY, overlay: {}, ...over } });
+const RECORDS = { "material:gate-m3": { mode: "new" }, "material:gate-m6": { mode: "patch" }, "material:gate-m4": { mode: "patch" } };
+const editorScene = (key, over = {}) => {
+  const base = key ? draftFor(EDITOR_REGISTRY, {}, key) : null;
+  const { tweak, ...rest } = over;
+  return { editor: { registry: EDITOR_REGISTRY, overlay: {}, records: RECORDS, selectedKey: key, base, draft: tweak ? tweak(base) : base, origin: key ? { origin: RECORDS[key]?.mode === "new" ? "world" : RECORDS[key] ? "edited" : "pack", editedFields: RECORDS[key]?.mode === "patch" ? ["name", "value"] : [], retired: false, hasItem: true } : null, ...rest } };
+};
 export const SCENES = {
-  editorEmpty: editorScene({}),
-  editor300: editorScene({ selectedKey: "material:gate-m4" }),
-  editorRows: editorScene({ selectedKey: "material:gate-m8", draft: [{ steps: "4", type: "properties", recipeId: "" }, { steps: "4", type: "formula", recipeId: "" }, { steps: "abc", type: "formula", recipeId: "gate-blade" }], dirty: true }),
-  editorFiltered: editorScene({ selectedKey: "note:gate-n5", filters: { search: "unbroken", kinds: ["material", "note"], track: "has" }, collapsed: ["recipe"] }),
-  editorFolded: editorScene({ selectedKey: "recipe:gate-r7", collapsed: ["material", "note"] }),
-  editorNone: editorScene({ filters: { search: "no such thing" } }),
+  editorEmpty: editorScene(null),
+  editor300: editorScene("material:gate-m4", { effectClass: "weapon" }),
+  editorRows: editorScene("material:gate-m8", { effectClass: "weapon", tweak: d => ({ ...d, fields: { ...d.fields, name: "", tier: "7" }, rows: [{ steps: "4", type: "properties", recipeId: "" }, { steps: "4", type: "formula", recipeId: "" }, { steps: "abc", type: "formula", recipeId: "gate-blade" }] }) }),
+  editorFiltered: editorScene("note:gate-n5", { filters: { search: "unbroken", kinds: ["material", "note"], track: "has", retired: true }, collapsed: ["recipe"] }),
+  editorFolded: editorScene("recipe:gate-r7", { collapsed: ["material", "note"] }),
+  editorNone: editorScene(null, { filters: { search: "no such thing" } }),
+  editorCreate: editorScene(null, { creating: { kind: "note", name: "A note with a very long name that keeps going and going to see how the form wraps in a narrow window", recipeId: "", preset: "plan" } }),
+  editorConfirm: editorScene("material:gate-m4", { effectClass: "weapon", confirm: { text: "Ann, Bob and the party's shared book already know something this changes (what it does in crafts). Save anyway?", action: "save" } }),
+  editorLeftovers: editorScene("material:gate-m4", { leftovers: Array.from({ length: 12 }, (_, i) => ({ key: `material:gate-orphan-with-a-long-name-${i}`, message: "is a research track for an item that no longer exists" })) }),
   ...R,
   researchOne: { facts: researchFacts({ projects: [PROJECT], leads: [LEAD] }), state: researchState({ skill: "crafting", checkDays: 2 }) },
   researchStudy: { facts: researchFacts({ projects: [STUDY, PROJECT], leads: ITEM_LEADS, days: { free: 9, reserved: 0 } }), state: researchState({ projectId: STUDY.id, skill: "nature", checkDays: 2 }) },
@@ -149,7 +162,8 @@ function pageChecks({ minTarget, checkWords, belowMinimum }) {
   const root = document.querySelector(".pfp-hub");
   const name = el => `${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? `.${el.className.trim().split(/\s+/)[0]}` : ""} "${(el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 36)}"`;
   const style = el => getComputedStyle(el);
-  const scrolls = el => /(auto|scroll)/.test(style(el).overflowY) || /(auto|scroll)/.test(style(el).overflowX);
+  // (A single-line text field scrolls its own value natively, so a long value is not content spilling out of it; its 44px target is still checked below.)
+  const scrolls = el => /(auto|scroll)/.test(style(el).overflowY) || /(auto|scroll)/.test(style(el).overflowX) || (el.tagName === "INPUT" && /^(text|search|number)$/.test(el.type));
   const els = [root, ...root.querySelectorAll("*")].filter(el => el.getClientRects().length);
 
   // 1. No element's content spills out of its own box (text overflowing a fixed-height card or a nowrap line).

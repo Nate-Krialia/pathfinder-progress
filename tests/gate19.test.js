@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { as, env, getApi, getUsers, makeActor, measure, quietly, snapshot, world } from "./fake-world.js";
 import { build } from "../scripts/hub/app.js";
-import { build as buildEditor } from "../scripts/discovery/editor-app.js";
 import { installFakeApplication } from "./fake-application.js";
 import { chatLeaks } from "./helpers.js";
 
@@ -39,7 +38,7 @@ test("the stage 11c gate doc: steps are labelled, click-through steps say what y
     if (/\[Player\]/.test(entry.who) && step > 3) assert.match(entry.text, /What you should see|What to do|you should see/i, `click-through step ${step} says what to see`);
   }
   const screenshots = [...GATE].filter(([, e]) => /send me a screenshot/i.test(e.text)).map(([n]) => n);
-  assert.deepEqual(screenshots, [4, 7, 12, 14], "screenshots: the Research tab, the Gate Blade formula, the editor, the narrow layout");
+  assert.deepEqual(screenshots, [4, 7, 14], "screenshots: the Research tab, the Gate Blade formula, the narrow layout");
   assert.match(gateDoc, /version must be \*\*\d+\.\d+\.\d+\*\*/);
   assert.match(gateDoc, /Force-reload BOTH windows first/);
   assert.match(MODULE_VERSION, /^\d+\.\d+\.\d+$/);
@@ -127,26 +126,7 @@ test("GATE 19: every code step runs, in order, and the click-through steps are p
     await click("follow-lead", '[data-lead="item:note:g7-page"]');
     seen(/Study: Gate Page[\s\S]*Getting somewhere/);
     await expectPass(11, testUser);
-    // Step 12: the Discovery tracks window (GM), played on the strict fake
-    const Editor = buildEditor();
-    const editor = new Editor(api, "material:g7-plain");
-    await as(gm, () => editor.render({ force: true }));
-    const eclick = async (action, where = "") => { const t = [...editor.element.querySelectorAll(`[data-action="${action}"]${where}`)].find(b => b.getAttribute("aria-disabled") !== "true"); assert.ok(t, `${action} is live`); await as(gm, async () => { t.click(); await wait(15); }); };
-    const etype = async (field, index, value) => { const input = editor.element.querySelector(`[data-field="${field}"][data-index="${index}"]`); input.value = value; await as(gm, async () => { input.dispatchEvent(new window.Event("change", { bubbles: true })); await wait(15); }); };
-    const etext = () => editor.element.textContent.replace(/\s+/g, " ");
-    assert.match(etext(), /Gate Plain[\s\S]*No track yet/);
-    await eclick("add-default");
-    assert.match(etext(), /Pick a formula that exists\./);
-    assert.equal(editor.element.querySelector('[data-action="save-track"]').getAttribute("aria-disabled"), "true");
-    await etype("recipe", 1, "g7-trinket");
-    await etype("steps", 1, "4");
-    assert.match(etext(), /must be more than the milestone before it \(4\)/);
-    await etype("steps", 1, "10");
-    await eclick("save-track");
-    assert.match(etext(), /Saved the track for Gate Plain\./);
-    await eclick("use-definition");
-    assert.match(etext(), /now uses the definition's track/);
-    await as(gm, () => editor.close());
+    // Step 12: Gate Plain gets a track through the api (the window moved to the Item editor, gate 20)
     await expectPass(12, gm);
     await redraw();
     await expectPass(13, testUser);
@@ -204,6 +184,12 @@ test("GATE 19: SETUP refuses to run against real data, and runs twice; CLEANUP w
     const before = snapshot(w);
     await quietly(async () => assert.rejects(Promise.resolve(runBlock(2, getUsers().gm)), expected, label));
     assert.equal(snapshot(w), before, `${label}: nothing changed`);
+    if (label === "leftover tracks") {
+      // MUST-DO: after a GM reload the fake definitions are gone but the tracks stay; CLEANUP still clears them (an orphaned key has no item to look up).
+      assert.equal(Object.keys(env.values.discoveryTracks).length, 1);
+      assert.deepEqual((await quietly(() => runBlock(17, getUsers().gm))).problems, [], "CLEANUP copes with a track whose item is gone");
+      assert.deepEqual(env.values.discoveryTracks, {}, "the orphaned track is cleared");
+    }
     delete globalThis.__g7;
   }
   const w = await gateWorld();

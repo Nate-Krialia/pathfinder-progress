@@ -41,8 +41,27 @@ export const BASE_ROLE_BY_CATEGORY = {
   weapon: "basePower",
   armor: "basePower",
   robes: "basePower",
-  focus: "spellPower"
+  focus: "spellPower",
+  bomb: "basePower",
+  consumable: "basePower",
+  trinket: "basePower"
 };
+
+/**
+ * Item classes (a recipe's category) and WHEN their effects apply (docs/11d-item-editor-addendum.md): a weapon's on a hit, a bomb's and a consumable's when used,
+ * an armor's, robes', focus' and trinket's while worn. The effect builder is built once per class. (0.21.0 applies damage, resistance and special-ability
+ * text, which are rules on the crafted item; the trigger table is what the condition/affliction engine of 0.22.0 will read.)
+ */
+export const ITEM_CLASSES = {
+  weapon: { label: "Weapon", trigger: "hit" },
+  bomb: { label: "Bomb", trigger: "use" },
+  consumable: { label: "Consumable", trigger: "use" },
+  armor: { label: "Armor", trigger: "worn" },
+  robes: { label: "Robes", trigger: "worn" },
+  focus: { label: "Focus", trigger: "worn" },
+  trinket: { label: "Trinket", trigger: "worn" }
+};
+export const TRIGGER_WORDS = { hit: "on a hit", use: "when used", worn: "while worn" };
 
 /** Crafting tunables (placeholders). */
 export const CRAFTING = {
@@ -124,6 +143,8 @@ export const DISCOVERY = {
   skills: ["crafting", "nature", "arcana"],
   // Where progress toward the next milestone turns "Just started" into "Getting somewhere" and "Nearly there" (fractions of the way to the next milestone).
   stageSplit: [1 / 3, 2 / 3],
+  // The two note presets (Stage 11d): a Plan note teaches its formula after a few steps of study; a Research note is a longer study.
+  notePresets: { plan: 3, research: 8 },
   overlaySetting: "discoveryTracks",   // world setting: the Discovery tracks window's edits, merged over the definitions
   noteFlag: "note",                    // item flag on a note item: { noteId }
   // A shop would charge about this multiple of a material's gold value ("buying this in a shop would be about ..."). A placeholder.

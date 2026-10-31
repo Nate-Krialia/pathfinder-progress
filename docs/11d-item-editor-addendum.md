@@ -54,3 +54,20 @@ Where this disagrees with earlier design files, THIS FILE WINS. Numbers are Stag
 - Category matching is an ASSUMPTION from the design docs (slots accept materials by category); Claude Code to confirm how materials match slots today.
 - Where editor content is stored: the working assumption is the WORLD, never the public repo.
 - Recipe editor design (next after 11d).
+
+## Built as (v0.21.0, first half): interpretations to review
+Added by Claude Code while building; the numbered answers that came with the approval win over anything here. Anything marked **check** is a reading of the brief that is worth a second look.
+- **Tier tables follow the material's own tier.** A material has ONE tier, so a T1 to T5 table for the dice or a resistance amount compiles to the row for that material's tier. The other rows are kept in the saved blocks (so changing the tier changes the result), but only one row is ever applied. **check**
+- **The power tier is a field of the effect set**, not a block: "Base power tier" compiles to `basePower`, and to `spellPower` on a focus (a focus drives spell power). "Every class" means base power.
+- **One block per type per class** (a role holds one value). A second Add damage in the same class is refused (the button turns off).
+- **Blocks the engine can apply today:** Add damage (`bonusDamage`), Grant resistance (`resistance`), Special ability text (`specialAbility`). Conditions, afflictions and Adjust are 0.22.0. Spell slots and custom roles written by hand are kept untouched ("kept as it was").
+- **Classes.** weapon, bomb, consumable, armor, robes, focus, trinket (`ITEM_CLASSES` in config, with when each applies: on a hit, when used, while worn). Bomb, consumable and trinket have no recipes yet; the role tables for them are in `data/roles.js`.
+- **Slot fit is derived,** as agreed: a material fits a slot when its tier is high enough and it has an effect for every role the slot drives. The preview says which roles it fills for the picked class. There is no category field.
+- **The preview shows the learned state** (the effect lines in the Hub's own wording, tier, worth, bulk, the roles it fills, the tag and theme once known, the three plain study stages) for the class picked at the top. It does not step through "before research / after the properties milestone / after a craft" as separate views. **check**
+- **A DC in ability text is allowed but flagged** in the preview ("players would read it on the item; the Hub hides it"), because an item's own description cannot hide it.
+- **Players-may-know confirmation** covers a material's tag, its effects (blocks, class table) and a tag's theme/name, when any character's Compendium (or the shared book) shows the material learned or its properties milestone reached.
+- **Edits of pack items are world patches** (`mode: "patch"`); nothing is ever written to the packs. Definitions that exist only in memory are left alone and cannot be edited.
+- **Deleting** is allowed only for something made in the editor and unused; a pack item can only be retired.
+- **Notes:** a Plan note is a short study (3 steps) that teaches its formula, a Research note a longer one (8 steps); both numbers are `DISCOVERY.notePresets`.
+- **Export / import** shipped in 0.21.0 (plain JSON, clashes skipped with a reason unless replace).
+- **The old Discovery tracks window is gone;** its rows, validation and layout live in the editor, and its overlay is folded in (`api.editor.foldOverlay`) with a **Leftovers** list for anything whose item no longer exists.

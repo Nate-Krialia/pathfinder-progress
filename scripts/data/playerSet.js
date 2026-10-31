@@ -54,6 +54,9 @@ export const factsKey = facts => JSON.stringify(normalizeFacts(facts));
  *   blueprint - no researchProject
  * Every other kind is sent whole. `days` is { default, byStation } for a recipe.
  */
+// Fields the item editor adds (Stage 11d): the effect builder's source and the item's presentation. A player's item already carries its own name, image and price.
+const EDITOR_ONLY_FIELDS = ["img", "description", "bulk", "label", "retired", "effectBlocks", "recipeOverrides"];
+
 export function stripForPlayer(kind, record, { days, tagKnown = false, hasTrack: trackFlag } = {}) {
   const copy = structuredClone(record);
   if (kind === "region") { delete copy.spawnTable; delete copy.explorationDC; }
@@ -61,6 +64,7 @@ export function stripForPlayer(kind, record, { days, tagKnown = false, hasTrack:
   if (kind === "material") {
     const hasTrack = trackFlag ?? Boolean(copy.research);
     delete copy.effects; delete copy.classEffects; delete copy.lossChance; delete copy.research;
+    for (const f of EDITOR_ONLY_FIELDS) delete copy[f];
     copy.hasTrack = hasTrack;
     if (!tagKnown) delete copy.tag;
   }

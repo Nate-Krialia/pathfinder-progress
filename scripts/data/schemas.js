@@ -9,7 +9,7 @@
 import { CRAFT_LEVEL_RANGE, DISCOVERY, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
 import { looksLikeUuid } from "./outputRefs.js";
 import { validateLadder } from "../gathering/ladder.js";
-import { isSkillSlug } from "../adapter/pf2e.js";
+import { DAMAGE_TYPES, isSkillSlug } from "../adapter/pf2e.js";
 import { any, arr, bool, int, num, obj, oneOf, optional, record, scalar, str, union, variant } from "./schema.js";
 export { BUILT_IN_ROLES } from "./roles.js";
 
@@ -34,6 +34,31 @@ const track = obj({
   })
 });
 
+// The effect builder's source (Stage 11d). A value that can depend on the material's tier is `{ all: v }` (one value for every tier) or `{ byTier: { 1..5: v } }` (an
+// explicit T1 to T5 table). A set holds the base-power tier a material gives and its blocks (at most one of each type per item class: a role holds one value);
+// `extra` keeps any other role (spell slots, custom roles) exactly as it was. The blocks COMPILE to the role values the craft engine already applies.
+const tierValue = of => obj({ all: optional(of), byTier: optional(record(of)) }, {
+  refine(value, path, errors) {
+    if ((value.all === undefined) === (value.byTier === undefined)) errors.push({ field: path, message: "needs either one value for every tier (all) or a table by tier (byTier), not both and not neither" });
+    if (value.byTier && [1, 2, 3, 4, 5].some(t => value.byTier[t] === undefined)) errors.push({ field: `${path}.byTier`, message: "needs an entry for each of T1 to T5" });
+  }
+});
+const effectBlock = variant("type", {
+  damage: { dice: tierValue(str({ pattern: /^[1-9]\d?d(4|6|8|10|12)$/, patternHint: 'must be dice like "1d6"' })), damageType: oneOf(DAMAGE_TYPES), persistent: optional(bool()), versus: optional(str()) },
+  resistance: { damageType: oneOf(DAMAGE_TYPES), value: tierValue(int({ min: 1, max: 50 })) },
+  ability: { title: str(), text: str(), on: optional(oneOf(["hit", "criticalHit"])) }
+});
+const effectSet = obj({ power: optional(int({ min: 1, max: 5 })), blocks: arr(effectBlock), extra: optional(record(any())) });
+const effectBlocks = obj({ general: optional(effectSet), byClass: optional(record(effectSet)) });
+const bulkValue = str({ pattern: /^(L|[1-9]\d?)$/, patternHint: 'must be "L" (light) or a whole number' });
+// A per-recipe override the editor writes on the MATERIAL side; the loader copies it onto that recipe's overrides (the recipe schema is unchanged).
+const recipeOverride = obj({ recipeId: idField(), slot: str(), block: effectBlock });
+const editorFields = {
+  // Shown on the item and in the list: the editor's own fields (never relayed to players).
+  img: optional(str()), description: optional(str()), bulk: optional(bulkValue), label: optional(str()), retired: optional(bool()),
+  effectBlocks: optional(effectBlocks), recipeOverrides: optional(arr(recipeOverride))
+};
+
 const material = obj({
   kind: kind("material"),
   id: idField(),
@@ -52,14 +77,15 @@ const material = obj({
   // How the material behaves in one ITEM CLASS (a recipe category): role -> value. Beats `effects` for that class; a recipe override beats both.
   classEffects: optional(record(record(any()))),
   // Optional research track: without one the material has no study, its tag and theme are known on pickup.
-  research: optional(track)
+  research: optional(track),
+  ...editorFields
 });
 
 // A tag: the theme a family of materials shares ("Mitflit parts: cowardice, which works with frightened").
 const tagDef = obj({ kind: kind("tag"), id: idField(), name: str(), theme: str(), worksWith: optional(str()) });
 
 // A note: a Foundry item (flag `note`) that points at a formula. With a research track it offers a lead; without one it does nothing.
-const noteDef = obj({ kind: kind("note"), id: idField(), name: str(), recipeId: idField(), research: optional(track) });
+const noteDef = obj({ kind: kind("note"), id: idField(), name: str(), recipeId: idField(), research: optional(track), img: optional(str()), description: optional(str()), bulk: optional(bulkValue), label: optional(str()), retired: optional(bool()), preset: optional(oneOf(["plan", "research"])) });
 
 const OUTPUT_KEY = /^([1-9]\d*|default)$/;
 
@@ -284,6 +310,8 @@ const nodeType = obj({
 
 export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef, nodeType, blueprint, tag: tagDef, note: noteDef };
 export const TRACK_SCHEMA = track;
+export const EFFECT_BLOCK_SCHEMA = effectBlock;
+export const EFFECT_BLOCKS_SCHEMA = effectBlocks;
 
 // What a PLAYER client holds (Stage 16, docs/10): the same kinds, but a region without its spawn table, and a node type
 // without its ladders and charges. These are strict like the others, so a stripped copy that still carried a hidden field
