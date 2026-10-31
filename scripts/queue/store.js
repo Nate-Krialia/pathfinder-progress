@@ -16,6 +16,7 @@ import * as commissions from "../commissions/store.js";
 import * as downtime from "../downtime/store.js";
 import * as exploration from "../exploration/store.js";
 import { ResearchRefused, planResearch, planUpdate, postResearchChat, rawList } from "../research/store.js";
+import { afterStudy, isStudyId, planStudy, postStudyChat, studyProjects } from "../discovery/store.js";
 import { HANDLERS, wiredTypes } from "./handlers.js";
 import { planEdit, planReject, planResolve, planSubmit } from "./reservation.js";
 import { runBatch } from "./queue.js";
@@ -73,7 +74,7 @@ export function describeAction(actor, action) {
   } catch (error) {
     return { label: `${action.type} (could not be described)`, detail: error.message, problem: `could not read this action: ${error.message}` };
   }
-  return handler.describe({ action, projects: rawList(actor, K.projectsFlag), info, gm });
+  return handler.describe({ action, projects: [...rawList(actor, K.projectsFlag), ...studyProjects(actor)], info, gm });
 }
 
 /** Does this action take downtime? Days reserved (research, explore, craft), or a commission craft step (which still costs no days). */
@@ -110,7 +111,7 @@ export async function submit(actor, type, params, days) {
   }
   const scenes = type === "explore" && game.user.isGM && region ? exploration.poolFor(region) : null;
   const submitter = type === "commission" ? commissions.submitContext(actor, params) : {};
-  const checked = handler.validateSubmit({ projects: rawList(actor, K.projectsFlag), params, days, region, scenes, ...submitter });
+  const checked = handler.validateSubmit({ projects: [...rawList(actor, K.projectsFlag), ...studyProjects(actor)], params, days, region, scenes, ...submitter });
   if (!checked.ok) throw new Error(`submit: ${checked.errors.join("; ")}`);
   // Commission steps cost no days; everything else reserves at least one.
   const reserved = handler.freeOfDays && days === 0
@@ -225,11 +226,12 @@ const RESOLVERS = {
   async research(api, actor, action, pending, { chat }) {
     const others = pending.filter(a => a.id !== action.id);
     const counter = actor.getFlag(MODULE_ID, K.daysFlag);
+    const study = isStudyId(action.params.projectId);
     let plan;
     try {
-      plan = await planResearch(api, {
-        actor, project: action.params.projectId, days: action.daysReserved, daysAvailable: action.daysReserved, skill: action.params.skill
-      });
+      plan = study
+        ? await planStudy(api, { actor, key: action.params.projectId.slice("study:".length), days: action.daysReserved, daysAvailable: action.daysReserved, skill: action.params.skill })
+        : await planResearch(api, { actor, project: action.params.projectId, days: action.daysReserved, daysAvailable: action.daysReserved, skill: action.params.skill });
     } catch (error) {
       if (!(error instanceof ResearchRefused)) throw error;
       // Can never succeed: refund everything and drop it. The total is unchanged, so no ledger change.
@@ -242,10 +244,15 @@ const RESOLVERS = {
     // A finished upgrade changes the station FIRST (under the station's lock, with an undo); if the actor's commit then fails, it is put back.
     const undoStation = plan.stationEffect ? await applyStationUpgrade(api, plan.stationEffect.stationId, plan.stationEffect) : null;
     try {
-      await commit(actor, { ...planUpdate(plan), [flagKey(QUEUE_KEYS.pendingFlag)]: others, [flagKey(K.daysFlag)]: after }, plan.changes);
+      await commit(actor, { ...(study ? plan.update : planUpdate(plan)), [flagKey(QUEUE_KEYS.pendingFlag)]: others, [flagKey(K.daysFlag)]: after }, plan.changes);
     } catch (error) {
       if (undoStation) await undoStation();
       throw error;
+    }
+    if (study) {
+      await afterStudy(api, actor, plan);
+      if (chat) await postStudyChat(api, actor, plan);
+      return { status: "resolved", daysSpent: spent, message: `${plan.entry.name}: studied for ${spent} day(s)${refunded ? `; ${refunded} day(s) refunded` : ""}` };
     }
     if (plan.result.completed && plan.result.project.outcome?.type === "unlockFormula") await emit("formulaOwned", { actor, recipeId: plan.result.project.outcome.recipeId });
     if (plan.stationEffect) await work.note(`upgrade finished: ${plan.result.project.goalName} (researched by ${actor.name})`);

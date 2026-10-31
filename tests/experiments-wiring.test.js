@@ -12,6 +12,9 @@ const api = () => getApi();
 const SEL2 = { blade: "silver", fang: "spider-fang" };
 const book = actor => actor.getFlag(M, "compendium");
 const exp = (actor, recipe = DAGGER) => book(actor)?.experiments?.[recipe];
+// Stage 11c: a successful craft teaches the material's behaviour in the recipe's ITEM CLASS (the dagger is a "weapon"), not just this recipe.
+const taught = (actor, category = "weapon") => Object.keys(book(actor)?.classes?.[category] ?? {}).sort();
+const classFact = (actor, materialId, category = "weapon") => book(actor)?.classes?.[category]?.[materialId];
 const refresh = user => as(user, () => api().definitions.refresh());
 const preview = (user, actor, selection, recipe = DAGGER, station = "oakhaven-forge") => as(user, () => api().previewCraft(actor, recipe, selection, station));
 const worldWith = async (options = {}) => {
@@ -83,11 +86,12 @@ test("A SUCCESSFUL craft teaches each slot's material; the preview knows it at o
   const w = await worldWith();
   const action = await craft(w, w.annUser, w.ann, { selection: SEL2 });
   await resolve(w.ann, action.id, { degree: "success" });
-  assert.deepEqual(Object.keys(exp(w.ann).slots).sort(), ["blade", "fang"]);
-  assert.deepEqual(exp(w.ann).slots.blade.silver.effects, { basePower: "T2" });
-  assert.equal(exp(w.ann).slots.fang["spider-fang"].effects.bonusDamage.dice, "1d4");
+  assert.deepEqual(taught(w.ann), ["silver", "spider-fang"]);
+  assert.deepEqual(classFact(w.ann, "silver").effects, { basePower: "T2" });
+  assert.equal(classFact(w.ann, "spider-fang").effects.bonusDamage.dice, "1d4");
+  assert.ok(exp(w.ann), "the recipe is listed (and can be shared) even though what was learned belongs to the class");
   const now = preview(w.annUser, w.ann, SEL2).plan;
-  assert.deepEqual(now.slots.map(s => [s.effect.known, s.effect.via]), [[true, "crafted"], [true, "crafted"]]);
+  assert.deepEqual(now.slots.map(s => [s.effect.known, s.effect.via]), [[true, "class"], [true, "class"]], "learned as the weapon class's behaviour");
   assert.deepEqual(now.result, { known: true, baseTier: 2 });
   assert.equal(now.effectsKnown, 2);
   assert.ok(events().some(t => /^resolved craft: Spider Fang Dagger for Ann/.test(t)));
@@ -107,7 +111,7 @@ test("ONLY A SUCCESS TEACHES: a failure (and a critical failure, even when mater
   for (const degree of ["success", "criticalSuccess"]) {
     const w = await worldWith();
     await resolve(w.ann, (await craft(w, w.annUser, w.ann, { selection: SEL2 })).id, { degree });
-    learned[degree] = JSON.stringify(Object.entries(exp(w.ann).slots).map(([slot, by]) => [slot, Object.entries(by).map(([id, f]) => [id, f.effects])]));
+    learned[degree] = JSON.stringify(Object.entries(book(w.ann).classes.weapon).map(([id, f]) => [id, f.effects]));
   }
   assert.equal(learned.criticalSuccess, learned.success, "a critical success teaches exactly what a success does");
 });
@@ -120,9 +124,11 @@ test("PER MATERIAL, NOT PER COMBINATION: learned in one pairing, known in anothe
   const other = preview(w.annUser, w.ann, { blade: "silver", fang: "starmetal" }).plan;
   assert.deepEqual(other.slots.map(s => [s.materialId, s.effect.known]), [["silver", true], ["starmetal", false]], "silver in the blade slot is known whatever sits in the fang slot");
   assert.deepEqual(other.result, { known: true, baseTier: 2 }, "the base slot is known, so the result tier is");
-  assert.deepEqual(as(w.annUser, () => api().compendium.knownEffect(w.ann, DAGGER, "fang", "silver")), { known: false }, "the same material in another slot");
-  assert.deepEqual(as(w.annUser, () => api().compendium.knownEffect(w.ann, "longsword-basic", "blade", "silver")), { known: false }, "the same material in another recipe");
-  assert.equal(as(w.annUser, () => api().compendium.knownEffect(w.ann, DAGGER, "blade", "silver")).known, true);
+  assert.deepEqual(as(w.annUser, () => api().compendium.knownEffect(w.ann, api().definitions.recipe.get(DAGGER), "fang", "silver")), { known: false }, "the same material in another slot");
+  const longsword = api().definitions.recipe.get("longsword-basic");
+  assert.equal(as(w.annUser, () => api().compendium.knownEffect(w.ann, longsword, "blade", "silver")).known, true, "the same item class (weapon): another recipe's blade slot is known too");
+  assert.equal(as(w.annUser, () => api().compendium.knownEffect(w.ann, longsword, "coating", "silver")).known, false, "but not where that recipe gives silver its own effect (an override is learned in that recipe)");
+  assert.equal(as(w.annUser, () => api().compendium.knownEffect(w.ann, api().definitions.recipe.get(DAGGER), "blade", "silver")).known, true);
 });
 
 test("IDEMPOTENT: crafting the same thing again changes nothing in the Compendium", async () => {
@@ -139,7 +145,7 @@ test("the GM's own direct craft teaches the crafter too (success only)", async (
   assert.equal(exp(failed.ann), undefined);
   const w = await worldWith();
   await api().craft({ actor: w.ann, recipeId: DAGGER, selection: SEL2, station: "oakhaven-forge", degree: "success" });
-  assert.deepEqual(Object.keys(exp(w.ann).slots).sort(), ["blade", "fang"]);
+  assert.deepEqual(taught(w.ann), ["silver", "spider-fang"]);
 });
 
 test("a Compendium write that fails never fails or undoes the craft it follows", async () => {
@@ -171,7 +177,7 @@ test("SHARE: an experiment share is a 0-day queue item; approving it merges the 
   assert.deepEqual(env.values.sharedCompendium?.experiments ?? {}, {}, "nothing shared while it waits");
   const batch = await api().queue.resolveAll({ chat: false });
   assert.match(batch.results[0].message, /approved: Spider Fang Dagger \(experiment\) is now shared with the party/);
-  assert.deepEqual(Object.keys(env.values.sharedCompendium.experiments[DAGGER].slots).sort(), ["blade", "fang"]);
+  assert.deepEqual(Object.keys(env.values.sharedCompendium.classes.weapon).sort(), ["silver", "spider-fang"], "the item class's facts travel with the recipe's share");
   assert.deepEqual(preview(w.bobUser, w.bob, SEL2).plan.slots.map(s => [s.effect.known, s.effect.via]), [[true, "shared"], [true, "shared"]]);
   const view = as(w.bobUser, () => api().compendium.view(w.bob)).entries.experiments.find(e => e.recipeId === DAGGER);
   assert.equal(view.source, "both", "Bob has his own baseline for it and the party's facts");
@@ -199,7 +205,7 @@ test("VIEW: the GM sees every character's experiments; a player sees only their 
   const w = await worldWith();
   await resolve(w.ann, (await craft(w, w.annUser, w.ann, { selection: SEL2 })).id, { degree: "success" });
   const gm = as(w.gm, () => api().compendium.all());
-  assert.deepEqual(gm.characters.find(c => c.name === "Ann").experiments.map(e => [e.recipeId, e.known.length]), [[DAGGER, 2]]);
+  assert.deepEqual(gm.characters.find(c => c.name === "Ann").experiments.map(e => [e.recipeId, e.known.length]), [[DAGGER, 2]], "two materials learned for the weapon class apply to the dagger's two slots");
   const bobView = as(w.bobUser, () => api().compendium.view(w.bob));
   assert.deepEqual(bobView.entries.experiments, [], "Bob knows nothing, and nothing of Ann's is shown");
   await assert.rejects(Promise.resolve().then(() => as(w.bobUser, () => api().compendium.view(w.ann))), /You can only read the Compendium of a character you own\./);
@@ -226,8 +232,8 @@ test("LOAN: crafting from a loaned formula teaches the CRAFTER, not the owner (u
     try {
       const id = await loanedCommission(w);
       await api().commissions.craft(id, { selection: SEL2, station: "oakhaven-forge", degree: "success", chat: false });
-      assert.deepEqual(Object.keys(exp(w.bob)?.slots ?? {}).sort(), ["blade", "fang"], "the crafter learns");
-      assert.equal(Boolean(exp(w.ann)?.slots), ownerLearns, ownerLearns ? "the owner learns too when the tunable is on" : "the owner learns nothing");
+      assert.deepEqual(taught(w.bob), ["silver", "spider-fang"], "the crafter learns");
+      assert.equal(taught(w.ann).length > 0, ownerLearns, ownerLearns ? "the owner learns too when the tunable is on" : "the owner learns nothing");
     } finally { EXPERIMENTS.ownerLearnsFromLoan = saved; }
   }
 });

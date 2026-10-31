@@ -275,7 +275,7 @@ await (async () => {
   p.check("the baseline (the cheapest valid materials) IS known from the start", cheap.slots.every(s => s.effect.known && s.effect.via === "baseline") && cheap.result.known && cheap.result.baseTier === 1, JSON.stringify(cheap.slots.map(s => s.effect.via)));
   const recipe = p.api.definitions.recipe.get("g4-blade");
   p.check("the Player's copy of the recipe has only what the Hub lists need", Object.keys(recipe).sort().join() === "category,days,id,kind,name,skillWhitelist,slots,stationCategory,stationTierMin", Object.keys(recipe).sort().join());
-  p.check("and the Player's copy of a material has no effects", Object.keys(p.api.definitions.material.get("g4-steel")).sort().join() === "id,kind,name,tier", Object.keys(p.api.definitions.material.get("g4-steel")).join());
+  p.check("and the Player's copy of a material has no effects", !["effects", "classEffects", "research", "lossChance"].some(k => k in p.api.definitions.material.get("g4-steel")), Object.keys(p.api.definitions.material.get("g4-steel")).join());
   return p.done();
 })();
 ```
@@ -335,10 +335,12 @@ await (async () => {
   const action = smith.getFlag(g.M, "pendingActions").find(a => a.type === "craft");
   const out = await g.api.queue.resolve(smith, action.id, { degree: "success", chat: false });
   g.check("it resolved as a success", out.status === "resolved" && /made \(success\)/.test(out.message), out.message);
-  const entry = await g.until(() => g.exp(smith)?.slots?.body?.["g4-steel"]);
-  g.check("the Compendium learned Gate Steel in the body slot", Boolean(entry) && entry.effects.basePower === "T2", JSON.stringify(entry?.effects));
-  g.check("and Gate Star in the edge slot", g.exp(smith).slots.edge?.["g4-star"]?.effects?.bonusDamage?.dice === "1d8");
-  g.check("exactly those two facts (plus the baseline) and nothing for any other combination", Object.keys(g.exp(smith).slots).sort().join() === "body,edge" && Object.keys(g.exp(smith).slots.body).join() === "g4-steel" && Object.keys(g.exp(smith).slots.edge).join() === "g4-star");
+  // Stage 11c: a successful craft teaches how the material behaves in the recipe's ITEM CLASS (a weapon), not just this recipe.
+  const classFacts = () => g.smith().getFlag(g.M, "compendium")?.classes?.weapon ?? {};
+  const entry = await g.until(() => classFacts()["g4-steel"]);
+  g.check("the Compendium learned Gate Steel for weapons", Boolean(entry) && entry.effects.basePower === "T2", JSON.stringify(entry?.effects));
+  g.check("and Gate Star's bonus damage", classFacts()["g4-star"]?.effects?.bonusDamage?.dice === "1d8");
+  g.check("exactly those two materials and nothing else", Object.keys(classFacts()).sort().join() === "g4-star,g4-steel");
   return g.done();
 })();
 ```
@@ -350,10 +352,10 @@ await (async () => {
 await (async () => {
   const p = globalThis.__p4 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
   const now = p.preview(p.smith, { body: "g4-steel", edge: "g4-star" }).plan;
-  p.check("both effects are known, learned by crafting", now.slots.every(s => s.effect.known && s.effect.via === "crafted"), JSON.stringify(now.slots.map(s => s.effect.via)));
+  p.check("both effects are known, learned by crafting", now.slots.every(s => s.effect.known && s.effect.via === "class"), JSON.stringify(now.slots.map(s => s.effect.via)));
   p.check("the result tier is known: T2 (the steel in the body slot)", JSON.stringify(now.result) === '{"known":true,"baseTier":2}', JSON.stringify(now.result));
   const mixed = p.preview(p.smith, { body: "g4-steel", edge: "g4-ember" }).plan;
-  p.check("steel in the body is known whatever sits in the edge (per material, not per combination)", mixed.slots[0].effect.known && mixed.slots[0].effect.via === "crafted", JSON.stringify(mixed.slots.map(s => s.effect.via)));
+  p.check("steel in the body is known whatever sits in the edge (per material, not per combination)", mixed.slots[0].effect.known && mixed.slots[0].effect.via === "class", JSON.stringify(mixed.slots.map(s => s.effect.via)));
   p.check("the ember in the edge is known because it is the baseline material", mixed.slots[1].effect.known && mixed.slots[1].effect.via === "baseline");
   const other = p.preview(p.smith, { body: "g4-ore", edge: "g4-steel" }).plan;
   p.check("steel in the EDGE slot is still unknown (it was learned in the body slot)", !other.slots[1].effect.known, JSON.stringify(other.slots[1].effect));
@@ -408,7 +410,7 @@ await (async () => {
   const action = smith.getFlag(g.M, "pendingActions").find(a => a.type === "share");
   const out = await g.api.queue.resolve(smith, action.id, { chat: false });
   g.check("it resolved", out.status === "resolved" && /approved: Gate Blade \(experiment\) is now shared with the party/.test(out.message), out.message);
-  g.check("the party's book holds the two learned facts", Object.keys(g.shared().experiments["g4-blade"].slots.body).join() === "g4-steel" && Object.keys(g.shared().experiments["g4-blade"].slots.edge).join() === "g4-star");
+  g.check("the party's book holds the two learned facts (for the weapon class)", Object.keys(g.shared().classes?.weapon ?? {}).sort().join() === "g4-star,g4-steel");
   g.check("and it can be queued only while it has something new to share", g.api.queue.list().filter(r => r.action.type === "share").length === 0);
   await g.api.grantFormula(friend, "g4-blade");
   await g.api.giveMaterial(friend, "g4-steel", 1);
@@ -464,7 +466,7 @@ await (async () => {
   p.check("the Gate Axe entry exists with its baseline", axe?.baseline?.baseTier === 1, JSON.stringify(axe?.baseline));
   p.check("the slot, the tier it needs and the effect are shown", axe?.baseline?.slots?.[0]?.slot === "head" && axe.baseline.slots[0].needs === "tier 1 or higher" && axe.baseline.slots[0].effects.basePower === "T1");
   p.check("the material is not named (never met)", axe?.baseline?.slots?.[0]?.material === null, JSON.stringify(axe?.baseline?.slots?.[0]));
-  p.check("nothing else is listed: nothing was learned", axe?.known?.length === 0);
+  p.check("the only effects listed come from the weapon class (shared or learned elsewhere): none was learned by crafting the Axe", (axe?.known ?? []).every(k => k.source === "class" || k.source === "shared"), JSON.stringify((axe?.known ?? []).map(k => k.source)));
   return p.done();
 })();
 ```

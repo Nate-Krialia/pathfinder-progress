@@ -23,6 +23,7 @@ import { mayUse, readStations } from "../stations/store.js";
 import { allocateFromStacks, buildDesignProject, buildUpgradeProject, checkUpgradeMaterials, planUpgrade } from "./rules.js";
 import { BLUEPRINTS_FLAG, heldDesigns, holdsDesign, withDesign } from "./targets.js";
 import { playerProject } from "../difficulty.js";
+import { isStudyId, keyOfStudy, pauseStudy } from "../discovery/store.js";
 
 let boundApi = null;
 /** Give the workshop calls the module api (definitions). */
@@ -82,6 +83,10 @@ export function startDesign(api, actor, params) {
 /** Put an active project aside: escrowed materials come back exactly as they were taken. { projectId } */
 export function putAside(api, actor, params) {
   return withLocks([actorKey(actor)], async () => {
+    // A study (Stage 11c) is paused, not abandoned: its progress is kept.
+    if (isStudyId(params?.projectId)) {
+      try { return await pauseStudy(actor, keyOfStudy(params.projectId)); } catch (error) { throw refusal(error.message); }
+    }
     const projects = rawList(actor, K.projectsFlag);
     const index = projects.findIndex(p => p?.id === params?.projectId);
     if (index < 0) throw refusal(`${actor.name} has no project "${params?.projectId}".`);

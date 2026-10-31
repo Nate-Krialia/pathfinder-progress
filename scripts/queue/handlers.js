@@ -20,7 +20,7 @@ const research = {
   validateSubmit({ projects, params }) {
     const project = findProject(projects, params?.projectId);
     if (!project) return { ok: false, errors: [`no project "${params?.projectId}" (projects: ${projects.map(p => p?.id).join(", ") || "none"})`] };
-    if (!["unlockFormula", "upgradeStation", "designBlueprint"].includes(project.outcome?.type)) return { ok: false, errors: [`a "${project.outcome?.type}" project cannot be researched`] };
+    if (!["unlockFormula", "upgradeStation", "designBlueprint", "study"].includes(project.outcome?.type)) return { ok: false, errors: [`a "${project.outcome?.type}" project cannot be researched`] };
     if (project.status !== "active") return { ok: false, errors: [`project "${project.id}" is ${project.status}, not active`] };
 
     const allowed = project.skillWhitelist ?? [];
@@ -38,6 +38,8 @@ const research = {
   describe({ action, projects, gm = true }) {
     const project = findProject(projects, action.params?.projectId);
     if (!project) return { label: `Research: ${action.params?.projectId ?? "?"}`, detail: "project not found", problem: "the project no longer exists" };
+    // A study (Stage 11c) has no counts anywhere: its thresholds are GM-only data.
+    if (project.outcome?.type === "study") return { label: `Research: ${project.goalName}`, detail: action.params.skill ?? "?", problem: project.status !== "active" ? `project is ${project.status}` : null };
     const detail = `${action.params.skill ?? "?"}, ${gm ? `DC ${project.dc}, ` : ""}progress ${project.progress}/${project.threshold}`;
     const problem = project.status !== "active" ? `project is ${project.status}` : null;
     return { label: `Research: ${project.goalName}`, detail, problem };

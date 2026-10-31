@@ -107,7 +107,27 @@ export const RESEARCH_KEYS = {
   projectsFlag: "projects",
   formulasFlag: "formulas",
   daysFlag: "downtimeDays",
-  leadsFlag: "leads"
+  leadsFlag: "leads",
+  discoveriesFlag: "discoveries"
+};
+
+/**
+ * The discovery chain (Stage 11c, docs/11c-discovery-addendum.md). A material or a note with a research TRACK is studied in milestones; the track is GM-only data.
+ * `defaultTrack` is what "Add track" starts from; it is a default, not a rule.
+ */
+export const DISCOVERY = {
+  defaultTrack: [{ steps: 4, grants: { type: "properties" } }, { steps: 8, grants: { type: "formula" } }],
+  maxMilestones: 6,
+  // The study check is rolled at the level DC for this level (by the item's tier) plus the research tier's offset (RESEARCH.tiers[tier].dcOffset).
+  levelByTier: { 1: 1, 2: 5, 3: 9, 4: 13, 5: 17 },
+  // Skills a study may roll with.
+  skills: ["crafting", "nature", "arcana"],
+  // Where progress toward the next milestone turns "Just started" into "Getting somewhere" and "Nearly there" (fractions of the way to the next milestone).
+  stageSplit: [1 / 3, 2 / 3],
+  overlaySetting: "discoveryTracks",   // world setting: the Discovery tracks window's edits, merged over the definitions
+  noteFlag: "note",                    // item flag on a note item: { noteId }
+  // A shop would charge about this multiple of a material's gold value ("buying this in a shop would be about ..."). A placeholder.
+  shopMarkup: 2
 };
 
 /** The queue (docs/08-foundry-integration.md). */

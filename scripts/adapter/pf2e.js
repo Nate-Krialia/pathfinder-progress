@@ -7,7 +7,7 @@
  *
  * Targets: Foundry 14.369, PF2e 8.6.1 (see TARGETS in ../config.js).
  */
-import { MODULE_ID, TARGETS } from "../config.js";
+import { DISCOVERY, MODULE_ID, TARGETS } from "../config.js";
 
 // Damage types ----------------------------------------------------------------
 // PF2e (Remaster) damage types. checkVersions() compares this with the live
@@ -48,6 +48,26 @@ export function isMaterialItem(item) {
 
 export function setMaterialFlags(item, { materialId, tier }) {
   return item.setFlag(MODULE_ID, "material", { materialId, tier });
+}
+
+// Notes are real Items carrying a module flag: { noteId } (Stage 11c). A note points at a formula; with a research track it offers a lead.
+/** The note flags on an item, or null if it is not a note. */
+export function getNoteFlags(item) {
+  const flags = item?.getFlag?.(MODULE_ID, DISCOVERY.noteFlag);
+  return flags?.noteId ? { noteId: flags.noteId } : null;
+}
+
+/** Every note an actor holds. */
+export function getNoteStacks(actor) {
+  return actor.items.map(item => ({ item, flags: getNoteFlags(item) })).filter(entry => entry.flags).map(({ item, flags }) => ({ item, noteId: flags.noteId }));
+}
+
+/** Put a note item (a defined note) into an actor's inventory. Holding two copies is the same as holding one. */
+export async function giveNote(actor, note) {
+  const existing = getNoteStacks(actor).find(s => s.noteId === note.id);
+  if (existing) return existing.item;
+  const [created] = await actor.createEmbeddedDocuments("Item", [{ name: note.name, type: "treasure", system: { quantity: 1 }, flags: { [MODULE_ID]: { [DISCOVERY.noteFlag]: { noteId: note.id } } } }]);
+  return created;
 }
 
 /** Every material stack an actor owns, with its quantity. */

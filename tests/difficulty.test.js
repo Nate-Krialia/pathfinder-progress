@@ -181,7 +181,7 @@ test("THE PLAYER COPY of definitions: nothing in it carries a hidden field (and 
   assert.deepEqual(Object.keys(recipe).sort(), ["category", "days", "id", "kind", "name", "skillWhitelist", "slots", "stationCategory", "stationTierMin"]);
   assert.deepEqual(Object.keys(recipe.slots[0]).sort(), ["drives", "name", "qty", "tierFloor"]);
   assert.deepEqual(recipe.days, { default: 2, byStation: { "oakhaven-forge": 2, "oakhaven-apothecary": 2 } });
-  assert.deepEqual(Object.keys(defs.material.get("iron")).sort(), ["id", "kind", "name", "tier"]);
+  assert.deepEqual(Object.keys(defs.material.get("iron")).sort(), ["hasTrack", "id", "kind", "name", "tier", "value"], "no effects, no class effects, no research track: only whether there is a study, and the gold value");
   const gm = as(w.gm, () => api().definitions);
   assert.ok(gm.recipe.get(DAGGER).craftLevel === 2 && gm.recipe.get(DAGGER).output && gm.material.get("iron").effects, "the GM's copy is untouched");
 });

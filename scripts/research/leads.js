@@ -13,6 +13,9 @@ import { assertOwner, senderOf } from "../queue/common.js";
 import { refusal } from "../queue/relay.js";
 import { findFormula } from "./formulas.js";
 import { rawList, startProject } from "./store.js";
+import { itemLeads, overlay, playerStudy, readLedger, startStudy } from "../discovery/store.js";
+import { itemKey, trackOf } from "../discovery/track.js";
+import { W } from "../discovery/words.js";
 
 let boundApi = null;
 export function bind(api) { boundApi = api; }
@@ -69,11 +72,28 @@ export async function runFollowLead(payload, context) {
   assertOwner(actor, user, "follow a lead");
   if (!boundApi) throw new Error("leads: not bound to the module api yet");
   return withLocks([actorKey(actor)], async () => {
+    // A lead that comes from an ITEM the character carries (a material or a note with a research track): the GM checks the inventory itself, the payload is only a name.
+    if (typeof payload?.leadId === "string" && payload.leadId.startsWith("item:")) {
+      const item = itemLeads(boundApi, actor).find(l => l.id === payload.leadId);
+      if (!item) throw refusal(W.noSuchLead);
+      const entry = await startStudy(boundApi, actor, payload.leadId.slice("item:".length));
+      await logWorldEvent(`study followed: ${entry.name} by ${actor.name}`);
+      return user.isGM ? entry : playerStudy(entry);
+    }
     const lead = readLeads(actor).find(l => l.id === payload?.leadId);
     if (!lead) throw refusal(`${actor.name} has no such lead any more.`);
     const problem = problemWith(actor, lead.recipeId);
     if (problem) throw refusal(`${problem} The lead is already used up.`);
     if (!boundApi.definitions?.recipe.has(lead.recipeId)) throw refusal(`This lead points at "${lead.name}", which no longer exists. Ask the GM.`);
+    // A higher version with its own research track is studied (milestones, thresholds the GM set on that version); one without goes through the ordinary project.
+    const versionKey = itemKey("recipe", lead.recipeId);
+    const hasOwnTrack = Boolean(trackOf(boundApi.definitions.recipe.get(lead.recipeId), overlay(), versionKey));
+    if (hasOwnTrack && !readLedger(actor).items[versionKey]) {
+      const entry = await startStudy(boundApi, actor, versionKey);
+      try { await actor.update({ [flagKey]: rawList(actor, K.leadsFlag).filter(l => l?.id !== lead.id) }); } catch (error) { console.error(`${MODULE_ID} | the study started, but the lead could not be removed`, error); }
+      await logWorldEvent(`lead followed: ${lead.name} by ${actor.name}`);
+      return user.isGM ? entry : playerStudy(entry);
+    }
     const project = await startProject(boundApi, { actor, recipe: lead.recipeId });
     try {
       await actor.update({ [flagKey]: rawList(actor, K.leadsFlag).filter(l => l?.id !== lead.id) });

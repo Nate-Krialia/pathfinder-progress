@@ -9,7 +9,7 @@
  *
  * Every error names the pack, the entry, and the field.
  */
-import { SINGLE_SLOT_ROLES } from "../config.js";
+import { COMMISSIONS, SINGLE_SLOT_ROLES } from "../config.js";
 import { DEFINITION_KINDS, DEFINITION_SCHEMAS, LIVE_SCHEMAS } from "./schemas.js";
 import { BUILT_IN_ROLES, baseRoleFor, parseTier, roleSpec, rolesForCategory, slotRoles } from "./roles.js";
 import { resolveMaterialEffect } from "./resolver.js";
@@ -109,6 +109,8 @@ export function loadDefinitions(sources) {
   const materialIds = new Set(materials.map(m => m.id));
   const nodeTypes = new Map(unique.filter(r => r.kind === "nodeType").map(r => [r.data.id, r.data]));
   const townIds = new Set(unique.filter(r => r.kind === "town").map(r => r.data.id));
+  const tagIds = new Set(unique.filter(r => r.kind === "tag").map(r => r.data.id));
+  const recipeIds = new Set(unique.filter(r => r.kind === "recipe").map(r => r.data.id));
 
   const bad = new Set();
   const flag = (rec, field, message) => { errors.push(mk(rec.ctx, field, message)); bad.add(rec); };
@@ -129,9 +131,33 @@ export function loadDefinitions(sources) {
         if (!spec) { flag(rec, `effects.${role}`, `is not a known role (built-in or custom): "${role}"`); continue; }
         flagAll(rec, `effects.${role}`, check(spec, value));
       }
+      // How the material behaves in one item class (a recipe category): the roles must exist for that class, with the same value shapes.
+      for (const [category, byRole] of Object.entries(d.classEffects ?? {})) {
+        const classRoles = rolesForCategory(category, customRoles);
+        for (const [role, value] of Object.entries(byRole)) {
+          if (!classRoles.has(role)) { flag(rec, `classEffects.${category}.${role}`, `is not a role of item class "${category}" (roles: ${[...classRoles].join(", ") || "none"})`); continue; }
+          flagAll(rec, `classEffects.${category}.${role}`, check(roleSpec(role, customRoles), value));
+        }
+      }
+      if (d.tag !== undefined && !tagIds.has(d.tag)) flag(rec, "tag", `refers to unknown tag "${d.tag}" (known: ${[...tagIds].join(", ") || "none"}); define it with a "tag" definition`);
+      checkTrack(rec, d.research, { flag, recipeIds, allow: "material" });
     }
 
-    if (rec.kind === "recipe") validateRecipe(rec, { customRoles, materials, materialIds, flag, flagAll });
+    if (rec.kind === "note") {
+      if (!recipeIds.has(d.recipeId)) flag(rec, "recipeId", `refers to unknown recipe "${d.recipeId}"`);
+      if (!d.research) flag(rec, "research", "a note without a research track does nothing (it never offers a lead); give it a track");
+      checkTrack(rec, d.research, { flag, recipeIds, allow: "note", fixedRecipe: d.recipeId });
+    }
+
+    if (rec.kind === "tag") { /* the schema is all there is to check */ }
+
+    if (rec.kind === "recipe") {
+      validateRecipe(rec, { customRoles, materials, materialIds, flag, flagAll });
+      if (d.requiresTag !== undefined && !tagIds.has(d.requiresTag)) flag(rec, "requiresTag", `refers to unknown tag "${d.requiresTag}"`);
+      if ((d.requiresTag !== undefined || d.requiresCount !== undefined) && (d.version ?? 1) < 2) flag(rec, "version", "must be 2 or higher for a recipe that requires tagged materials");
+      if (d.requiresCount !== undefined && d.requiresTag === undefined) flag(rec, "requiresCount", "needs requiresTag");
+      checkTrack(rec, d.research, { flag, recipeIds, allow: "recipe", fixedRecipe: d.id });
+    }
 
     if (rec.kind === "station" && !townIds.has(d.town)) {
       flag(rec, "town", `town "${d.town}" is not defined (known towns: ${[...townIds].join(", ") || "none"})`);
@@ -164,6 +190,8 @@ export function loadDefinitions(sources) {
   }
 
   const registry = Object.fromEntries(DEFINITION_KINDS.map(k => [k, new Map()]));
+  // A material's gold value defaults by tier, so every material has one (shop prices, suggested payouts).
+  for (const rec of unique) if (rec.kind === "material" && rec.data.value === undefined) rec.data.value = COMMISSIONS.valueByTier[rec.data.tier] ?? 0;
   const contexts = new Map(); // id -> { pack, entry }, so later checks can name the source
   for (const rec of unique) {
     if (bad.has(rec)) continue;
@@ -171,6 +199,21 @@ export function loadDefinitions(sources) {
     contexts.set(rec.data.id, rec.ctx);
   }
   return { registry, errors, contexts };
+}
+
+/** A research track's grants: a material's formula milestone names its recipe; a note's and a recipe's point at their own; only a material has a properties milestone. */
+function checkTrack(rec, trackSpec, { flag, recipeIds, allow, fixedRecipe }) {
+  if (!trackSpec) return;
+  trackSpec.milestones.forEach((m, i) => {
+    const at = `research.milestones[${i}].grants`;
+    if (m.grants.type === "properties" && allow !== "material") flag(rec, at, `a "properties" milestone only belongs on a material`);
+    if (m.grants.type === "formula") {
+      const recipeId = m.grants.recipeId ?? fixedRecipe;
+      if (!recipeId) flag(rec, `${at}.recipeId`, "is required: which formula this milestone teaches");
+      else if (!recipeIds.has(recipeId)) flag(rec, `${at}.recipeId`, `refers to unknown recipe "${recipeId}"`);
+      else if (fixedRecipe && m.grants.recipeId && m.grants.recipeId !== fixedRecipe) flag(rec, `${at}.recipeId`, `must be "${fixedRecipe}" (this ${allow} teaches that formula)`);
+    }
+  });
 }
 
 /** Cross-reference checks for one recipe: roles, slots, overrides and the output map. */

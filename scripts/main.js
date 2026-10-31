@@ -15,7 +15,7 @@ import * as downtime from "./downtime/store.js";
 import { installSocketHooks, socketStatus } from "./socket.js";
 import { suggestPayout } from "./commissions/commission.js";
 import { feeForTier } from "./stations/fees.js";
-import { AUDIT, COMMISSIONS, HUB, COMPENDIUM, DEFINITIONS_SYNC, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
+import { AUDIT, COMMISSIONS, DISCOVERY, HUB, COMPENDIUM, DEFINITIONS_SYNC, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
 import * as playerDefs from "./data/playerDefs.js";
 import * as events from "./events.js";
 import * as gmLog from "./gm-log.js";
@@ -25,6 +25,8 @@ import { defsState } from "./data/playerState.js";
 import * as compendium from "./compendium/store.js";
 import * as workshop from "./workshop/store.js";
 import * as leads from "./research/leads.js";
+import * as discovery from "./discovery/store.js";
+import { defaultTrack } from "./discovery/track.js";
 import { asGM } from "./queue/work.js";
 import { UPGRADE_KINDS } from "./workshop/rules.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
@@ -149,6 +151,9 @@ Hooks.once("init", () => {
     default: ""
   });
 
+  // The Discovery tracks window's edits (GM data, Stage 11c): { "<kind>:<id>": track }, merged over the definitions' own tracks.
+  game.settings.register(MODULE_ID, DISCOVERY.overlaySetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
+
   game.settings.register(MODULE_ID, "extraPacks", {
     name: "Extra definition packs",
     hint: "Comma-separated ids of extra Journal Entry compendiums to load definitions from (e.g. world.my-materials).",
@@ -221,7 +226,9 @@ Hooks.once("ready", async () => {
       all: () => compendium.all(api.definitions),
       hasMaterial: (actor, materialId) => compendium.hasMaterial(actor, materialId),
       /** Has this character learned what `materialId` gives in `slot` of `recipeId`? { known: true, effects, via } or { known: false }. */
-      knownEffect: (actor, recipeId, slot, materialId) => compendium.knownEffect(actor, recipeId, slot, materialId),
+      knownEffect: (actor, recipe, slot, materialId) => compendium.knownEffect(actor, typeof recipe === "string" ? (api.definitions?.recipe.get(recipe) ?? recipe) : recipe, slot, materialId),
+      /** GM: fold the old per-recipe facts into item classes (idempotent; the module runs it once at startup). */
+      migrateClasses: () => compendium.migrateClasses(api.definitions),
       /** GM: reveal the baseline of every OWNED formula an actor already holds (formulas gained before Stage 10d). Pass no actor for every character. */
       revealBaselines: actor => compendium.revealBaselines(api.definitions, actor)
     },
@@ -341,6 +348,15 @@ Hooks.once("ready", async () => {
     research: Object.assign(options => researchStore.research(options, api), {
       /** GM: hand a character a lead (a formula it could start researching): giveLead(actor, recipeId, note?). */
       giveLead: (actor, recipeId, note) => leads.giveLead(api, actor, recipeId, note),
+      /** Every lead a character has: the stored ones (a GM's, and higher versions earned) and the items they carry that can be studied. Owner or GM. */
+      leadsFor: actor => {
+        if (!game.user.isGM && !actor.isOwner) throw new Error("You can only read the leads of a character you own.");
+        return [...leads.readLeads(actor).map(l => ({ ...l, source: l.source ?? "gm" })), ...discovery.itemLeads(api, actor)];
+      },
+      /** The studies a character has begun (a plain stage each, never a count). */
+      studies: actor => { if (!game.user.isGM && !actor.isOwner) throw new Error("You can only read the studies of a character you own."); return Object.values(discovery.readLedger(actor).items).map(discovery.playerStudy); },
+      /** GM: spend a character's own days on a study: { actor, key: "material:iron", days, skill?, degree?, chat? }. */
+      study: options => discovery.study(options, api),
       /** The leads a character holds (the owner or a GM). */
       leads: actor => { if (!game.user.isGM && !actor.isOwner) throw new Error("You can only read the leads of a character you own."); return leads.readLeads(actor); },
       /** Player: start researching a lead (relayed to the GM client, which checks who is asking). Returns the project (without its DC for a player). */
@@ -349,7 +365,25 @@ Hooks.once("ready", async () => {
       putAside: (actor, projectId) => workshop.relayPutAside(actor, projectId)
     }),
     /** Progress, DC, your modifiers and the per-day odds. Without a project id, lists the actor's projects. */
-    projectInfo: (actor, projectId) => researchStore.projectInfo(api, actor, projectId),
+    projectInfo: (actor, projectId) => discovery.projectInfoWithStudies(api, actor, projectId, researchStore.projectInfo),
+    /**
+     * The discovery chain (Stage 11c, docs/11c-discovery-addendum.md). Tracks are GM-only data: tracks.get/set/clear read and write the Discovery tracks window's
+     * overlay. propertiesOpen(actor, materialId): do they know what it is good for (so may they craft with it)?
+     */
+    discovery: {
+      tracks: {
+        get: key => { if (!game.user.isGM) throw new Error("discovery.tracks: GM only"); return discovery.trackFor(api, key); },
+        set: (key, track) => discovery.setTrack(api, key, track),
+        clear: key => discovery.setTrack(api, key, null),
+        overlay: () => { if (!game.user.isGM) throw new Error("discovery.tracks: GM only"); return structuredClone(discovery.overlay()); },
+        defaultFor: (key, recipeId) => defaultTrack(recipeId, key.split(":")[0])
+      },
+      propertiesOpen: (actor, materialId) => discovery.propertiesOpen(api, actor, materialId),
+      startStudy: (actor, key) => discovery.startStudy(api, actor, key),
+      refreshVersionLeads: actor => discovery.refreshVersionLeads(api, actor),
+      /** GM testing: put a defined note item (flag `note`) into an inventory. */
+      giveNote: (actor, noteId) => { const note = api.definitions?.note.get(noteId); if (!note) throw new Error(`giveNote: unknown note "${noteId}"`); return adapter.giveNote(actor, note); }
+    },
     /** The hook for other progress sources. A reason is required and is logged. */
     addProgress: (actor, projectId, amount, reason, options) => researchStore.addProgress(api, actor, projectId, amount, reason, options),
     abandonProject: (actor, projectId) => researchStore.abandonProject(actor, projectId),
@@ -413,6 +447,8 @@ Hooks.once("ready", async () => {
 
   if (game.user.isGM) {
     try {
+      // Class knowledge (Stage 11c): fold older per-recipe Experiments facts into item classes once; it writes only what is new.
+      try { await compendium.migrateClasses(api.definitions); } catch (err) { console.error(`${MODULE_ID} | could not fold the Experiments into item classes`, err); }
       const added = await auditStore.bootstrap();
       if (added.length) console.log(`${MODULE_ID} | audit baseline created for: ${added.join(", ")}`);
       await announce(api);

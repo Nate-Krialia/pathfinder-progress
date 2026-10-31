@@ -17,7 +17,7 @@ import { isPartyCharacter } from "../party.js";
 import { readFormulaList } from "../research/store.js";
 import { withLock } from "../queue/lock.js";
 import { resolveSlotEffects } from "../crafting/plan.js";
-import { computeBaseline, describeExperiments, effectKnown, recordBaseline, recordExperiment } from "./experiments.js";
+import { computeBaseline, describeExperiments, effectKnown, isOverridden, migrateToClasses, recordBaseline, recordClassFact, recordExperiment, touchExperiment } from "./experiments.js";
 import {
   countBook, describeBook, emptyBook, hasMaterial as bookHasMaterial, mergeShared, recordCreature, recordCreatureYield,
   recordMaterial, recordRegion, recordRegionNodeType
@@ -170,7 +170,9 @@ export function noteCrafted(definitions, actor, recipe, uses, at = Date.now()) {
     if (!slot || !material) return next;
     const { resolved, missing } = resolveSlotEffects(recipe, slot, material);
     if (missing.length) return next;
-    return recordExperiment(next, { recipeId: recipe.id, recipeName: recipe.name, slot: slot.name, materialId: material.id, materialName: material.name, tier: material.tier, effects: resolved, at });
+    // Where the recipe gives this material its own effect, the craft teaches THAT recipe (an override); otherwise it teaches the whole item class (armor, weapon, ...).
+    if (isOverridden(recipe, slot.name, material.id)) return recordExperiment(next, { recipeId: recipe.id, recipeName: recipe.name, category: recipe.category, slot: slot.name, materialId: material.id, materialName: material.name, tier: material.tier, effects: resolved, at });
+    return recordClassFact(touchExperiment(next, { recipeId: recipe.id, recipeName: recipe.name, category: recipe.category, at }), { category: recipe.category, materialId: material.id, materialName: material.name, tier: material.tier, effects: resolved, at });
   }, book)));
 }
 
@@ -180,7 +182,7 @@ export function noteFormulaOwned(definitions, actor, recipeId, at = Date.now()) 
     const recipe = definitions?.recipe.get(recipeId);
     const baseline = recipe ? computeBaseline(recipe, definitions) : null;
     if (!recipe || !baseline) return false;
-    return mutate(actor, book => recordBaseline(book, { recipeId, recipeName: recipe.name, baseline, at }));
+    return mutate(actor, book => recordBaseline(book, { recipeId, recipeName: recipe.name, category: recipe.category, baseline, at }));
   });
 }
 
@@ -197,9 +199,29 @@ export async function revealBaselines(definitions, actor) {
   return revealed;
 }
 
-/** Has the character learned what `materialId` gives in `slot` of the recipe? Their own book, the party's, or the formula's baseline. */
-export function knownEffect(actor, recipeId, slot, materialId) {
-  return effectKnown(booksFor(actor), recipeId, slot, materialId);
+/** Has the character learned what `materialId` gives in `slot` of the recipe? Their own book, the party's, or the formula's baseline. `recipe` is the recipe (for its class) or its id. */
+export function knownEffect(actor, recipe, slot, materialId) {
+  return effectKnown(booksFor(actor), recipe, slot, materialId);
+}
+
+/**
+ * GM tool: fold the old per-recipe facts into item classes, for every character and the shared book (Stage 11c, idempotent: it writes only what is new).
+ * Returns how many books changed. The module runs it once when the GM client is ready.
+ */
+export async function migrateClasses(definitions) {
+  requireGM("compendium.migrateClasses");
+  const recipeOf = id => definitions?.recipe.get(id);
+  let changed = 0;
+  for (const actor of [...game.actors].filter(a => a.type === "character" && a.getFlag(MODULE_ID, COMPENDIUM.flag) !== undefined)) {
+    if (await mutate(actor, book => migrateToClasses(book, recipeOf))) changed++;
+  }
+  const shared = readShared();
+  const folded = migrateToClasses(shared, recipeOf);
+  if (JSON.stringify(folded) !== JSON.stringify(shared)) {
+    await withLock("compendium:shared", async () => game.settings.set(MODULE_ID, COMPENDIUM.sharedSetting, migrateToClasses(readShared(), recipeOf)));
+    changed++;
+  }
+  return changed;
 }
 
 /** What a character knows, for a preview: their own book and, for a party character, the shared one. */
@@ -231,12 +253,12 @@ export function view(definitions, actor) {
     return { ...e, source: inOwn && inShared ? "both" : inOwn ? "own" : "shared" };
   });
   const entries = toList(definitions, actor, merged, false);
-  const experiments = describeExperiments({ own, shared });
+  const experiments = describeExperiments({ own, shared, recipes: definitions?.recipe });
   return {
     actor: { id: actor.id, name: actor.name },
     entries: { materials: mark(entries.materials, "materials", "id"), creatures: mark(entries.creatures, "creatures", "key"), regions: mark(entries.regions, "regions", "id"), experiments },
-    own: { ...toList(definitions, actor, own, false), experiments: describeExperiments({ own, shared: emptyBook() }) },
-    shared: { ...toList(definitions, null, shared, true), experiments: describeExperiments({ own: emptyBook(), shared }) }
+    own: { ...toList(definitions, actor, own, false), experiments: describeExperiments({ own, shared: emptyBook(), recipes: definitions?.recipe }) },
+    shared: { ...toList(definitions, null, shared, true), experiments: describeExperiments({ own: emptyBook(), shared, recipes: definitions?.recipe }) }
   };
 }
 
@@ -245,8 +267,8 @@ export function all(definitions) {
   requireGM("compendium.all");
   const characters = [...game.actors].filter(a => a.type === "character" && a.getFlag(MODULE_ID, COMPENDIUM.flag) !== undefined);
   return {
-    characters: characters.map(actor => ({ actorId: actor.id, name: actor.name, counts: countBook(readBook(actor)), ...toList(definitions, actor, readBook(actor), false), experiments: describeExperiments({ own: readBook(actor), shared: emptyBook() }) })),
-    shared: { counts: countBook(readShared()), ...toList(definitions, null, readShared(), true), experiments: describeExperiments({ own: emptyBook(), shared: readShared() }) }
+    characters: characters.map(actor => ({ actorId: actor.id, name: actor.name, counts: countBook(readBook(actor)), ...toList(definitions, actor, readBook(actor), false), experiments: describeExperiments({ own: readBook(actor), shared: emptyBook(), recipes: definitions?.recipe }) })),
+    shared: { counts: countBook(readShared()), ...toList(definitions, null, readShared(), true), experiments: describeExperiments({ own: emptyBook(), shared: readShared(), recipes: definitions?.recipe }) }
   };
 }
 

@@ -7,7 +7,7 @@
  * so this decides what the module LOADS and SHOWS, not what a determined player could read from the console.
  *
  * facts = {
- *   actors: [{ id, formulas: [recipeId], blueprints: [blueprintId], designs: [blueprintId], materials: [materialId],
+ *   actors: [{ id, formulas: [recipeId], blueprints: [blueprintId], designs: [blueprintId], materials: [materialId], notes: [noteId], studied: [itemKey],
  *              stations: [stationId], towns: [townId] }],
  *   location: townId | null,          // where the party is
  *   sceneTags: [string],              // tags of the scenes the user's characters stand on, and the scene they are viewing
@@ -27,7 +27,7 @@ export function normalizeFacts(facts = {}) {
     actors: (facts.actors ?? []).map(a => ({
       id: String(a.id),
       formulas: unique(a.formulas ?? []), blueprints: unique(a.blueprints ?? []), designs: unique(a.designs ?? []),
-      materials: unique(a.materials ?? []), stations: unique(a.stations ?? []), towns: unique(a.towns ?? [])
+      materials: unique(a.materials ?? []), notes: unique(a.notes ?? []), studied: unique(a.studied ?? []), stations: unique(a.stations ?? []), towns: unique(a.towns ?? [])
     })).sort((a, b) => a.id.localeCompare(b.id)),
     location: facts.location || null,
     sceneTags: unique(facts.sceneTags ?? []),
@@ -44,30 +44,40 @@ export const factsKey = facts => JSON.stringify(normalizeFacts(facts));
  * The player's copy of one record (docs/11b: nothing that carries a DC, an effect or a percentage):
  *   region    - no spawnTable, no explorationDC
  *   nodeType  - no ladders, no charges
- *   material  - no effects, no lossChance
+ *   material  - no effects, no classEffects, no lossChance, no research track (only `hasTrack`, yes or no). Its `tag` stays ONLY when the character knows it
+ *               (`tagKnown`: no track, or the properties milestone reached, or already learned by crafting)
+ *   note      - id, name, hasTrack
  *   recipe    - id, name, category, baseRole, slots (name, drives, tierFloor, qty), stationCategory, stationTierMin, skillWhitelist,
- *               and `days` (worked out on the GM: craft level + station upgrades + the 1-day floor). No overrides, output, craftLevel,
- *               resultName, itemTemplate, researchProject, or per-slot lossChance.
+ *               and `days` (worked out on the GM: craft level + station upgrades + the 1-day floor), and `overrideSlots` ("slot|materialId" pairs the
+ *               recipe gives its own effect: no values). No overrides, output, craftLevel, resultName, itemTemplate, researchProject, family, version,
+ *               requiresTag, requiresCount, research, or per-slot lossChance.
  *   blueprint - no researchProject
  * Every other kind is sent whole. `days` is { default, byStation } for a recipe.
  */
-export function stripForPlayer(kind, record, { days } = {}) {
+export function stripForPlayer(kind, record, { days, tagKnown = false, hasTrack: trackFlag } = {}) {
   const copy = structuredClone(record);
   if (kind === "region") { delete copy.spawnTable; delete copy.explorationDC; }
   if (kind === "nodeType") { delete copy.ladders; delete copy.charges; }
-  if (kind === "material") { delete copy.effects; delete copy.lossChance; }
+  if (kind === "material") {
+    const hasTrack = trackFlag ?? Boolean(copy.research);
+    delete copy.effects; delete copy.classEffects; delete copy.lossChance; delete copy.research;
+    copy.hasTrack = hasTrack;
+    if (!tagKnown) delete copy.tag;
+  }
+  if (kind === "note") { const hasTrack = trackFlag ?? Boolean(copy.research); return { kind: copy.kind, id: copy.id, name: copy.name, hasTrack }; }
   if (kind === "blueprint") delete copy.researchProject;
   if (kind === "recipe") {
     const out = { kind: copy.kind, id: copy.id, name: copy.name, category: copy.category };
     if (copy.baseRole) out.baseRole = copy.baseRole;
     out.slots = copy.slots.map(s => ({ name: s.name, drives: s.drives, tierFloor: s.tierFloor, qty: s.qty }));
     Object.assign(out, { stationCategory: copy.stationCategory, stationTierMin: copy.stationTierMin, skillWhitelist: copy.skillWhitelist, days: days ?? { default: 1, byStation: {} } });
+    if (copy.overrides?.length) out.overrideSlots = [...new Set(copy.overrides.map(o => `${o.slot}|${o.materialId}`))].sort();
     return out;
   }
   return copy;
 }
 
-const KINDS_SENT = ["recipe", "blueprint", "material", "station", "town", "region", "nodeType"];
+const KINDS_SENT = ["recipe", "blueprint", "material", "note", "tag", "station", "town", "region", "nodeType"];
 
 /** The public stations a user's facts call for: those in the party's town or the towns of workshops they own or the party built, those whose saved state names them, those a project of theirs is about. */
 export function stationIdsFor(rawFacts, registry) {
@@ -82,9 +92,9 @@ export function stationIdsFor(rawFacts, registry) {
  * @returns {{ records: Array<{ kind: string, data: object }>, missingRecipes: string[], recipeIds: string[] }}
  *   missingRecipes = formulas held with no recipe in the GM's registry (a truly orphaned formula).
  */
-export function selectRecords(rawFacts, registry, { daysFor } = {}) {
+export function selectRecords(rawFacts, registry, { daysFor, tagKnownFor, hasTrackFor } = {}) {
   const facts = normalizeFacts(rawFacts);
-  const pick = (kind, ids) => ids.map(id => registry[kind]?.get(id)).filter(Boolean).map(data => ({ kind, data: stripForPlayer(kind, data, { days: kind === "recipe" ? daysFor?.(data) : undefined }) }));
+  const pick = (kind, ids) => ids.map(id => registry[kind]?.get(id)).filter(Boolean).map(data => ({ kind, data: stripForPlayer(kind, data, { days: kind === "recipe" ? daysFor?.(data) : undefined, tagKnown: kind === "material" ? Boolean(tagKnownFor?.(data)) : false, hasTrack: hasTrackFor ? hasTrackFor(kind, data) : undefined }) }));
   const all = key => unique(facts.actors.flatMap(a => a[key]));
 
   const formulaIds = all("formulas");
@@ -92,6 +102,9 @@ export function selectRecords(rawFacts, registry, { daysFor } = {}) {
   const recipes = pick("recipe", formulaIds);
   const blueprints = pick("blueprint", unique([...all("blueprints"), ...all("designs")]));
   const materials = pick("material", all("materials"));
+  const notes = pick("note", all("notes"));
+  // A tag is sent only with a material whose tag the character knows (its theme is what the properties milestone teaches).
+  const tags = pick("tag", unique(materials.map(m => m.data.tag)));
 
   // Stations: those in the town the party is in, the user's own and the party's workshops' towns, any whose saved state names the
   // user's characters, and any a project of theirs is about. Towns follow the stations, plus the places the party or a build names.
@@ -104,7 +117,7 @@ export function selectRecords(rawFacts, registry, { daysFor } = {}) {
   const regions = [...(registry.region?.values() ?? [])].filter(r => facts.sceneTags.includes(r.sceneTag)).map(data => ({ kind: "region", data: stripForPlayer("region", data) }));
   const nodeTypes = pick("nodeType", facts.nodeTypes);
 
-  return { records: [...recipes, ...blueprints, ...materials, ...stations, ...towns, ...regions, ...nodeTypes], missingRecipes, recipeIds: formulaIds };
+  return { records: [...recipes, ...blueprints, ...materials, ...notes, ...tags, ...stations, ...towns, ...regions, ...nodeTypes], missingRecipes, recipeIds: formulaIds };
 }
 
 /** An empty registry for a client that has loaded nothing yet. */

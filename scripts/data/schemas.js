@@ -6,7 +6,7 @@
  * Shapes are "indicative" in the spec; anything it leaves open is noted inline
  * and should be tightened as the owning stage is built.
  */
-import { CRAFT_LEVEL_RANGE, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
+import { CRAFT_LEVEL_RANGE, DISCOVERY, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
 import { looksLikeUuid } from "./outputRefs.js";
 import { validateLadder } from "../gathering/ladder.js";
 import { isSkillSlug } from "../adapter/pf2e.js";
@@ -19,6 +19,21 @@ const quantity = () => str({ pattern: QUANTITY_PATTERN, patternHint: 'must be a 
 const kind = name => oneOf([name]);
 
 // Definitions -----------------------------------------------------------------
+// A research TRACK (Stage 11c): milestones in the order they are reached. GM-only data: it is never sent to players (stripForPlayer).
+const milestone = obj({ steps: int({ min: 1 }), grants: variant("type", { properties: {}, formula: { recipeId: optional(idField()) } }) });
+const track = obj({
+  milestones: arr(milestone, {
+    min: 1,
+    refine(milestones, path, errors) {
+      if (milestones.length > DISCOVERY.maxMilestones) errors.push({ field: path, message: `can have at most ${DISCOVERY.maxMilestones} milestones (got ${milestones.length})` });
+      milestones.forEach((m, i) => {
+        if (i > 0 && !(m.steps > milestones[i - 1].steps)) errors.push({ field: `${path}[${i}].steps`, message: `must be more than the milestone before it (${milestones[i - 1].steps})` });
+      });
+      if (milestones.filter(m => m.grants?.type === "properties").length > 1) errors.push({ field: path, message: 'can have only one "properties" milestone' });
+    }
+  })
+});
+
 const material = obj({
   kind: kind("material"),
   id: idField(),
@@ -30,9 +45,21 @@ const material = obj({
   // Percent chance a unit is lost on a failed craft; beats the global default.
   lossChance: optional(int({ min: 0, max: 100 }))
   ,
-  // Gold value per unit, used only to suggest a commission payout (defaults by tier in config).
-  value: optional(num({ min: 0 }))
+  // Gold value per unit: what a shop would price it by and what a commission payout is suggested from. Defaults by tier (COMMISSIONS.valueByTier) at load.
+  value: optional(num({ min: 0 })),
+  // The tag carries a THEME (a "tag" definition). Reaching the properties milestone teaches the player the tag and its theme in plain words.
+  tag: optional(idField()),
+  // How the material behaves in one ITEM CLASS (a recipe category): role -> value. Beats `effects` for that class; a recipe override beats both.
+  classEffects: optional(record(record(any()))),
+  // Optional research track: without one the material has no study, its tag and theme are known on pickup.
+  research: optional(track)
 });
+
+// A tag: the theme a family of materials shares ("Mitflit parts: cowardice, which works with frightened").
+const tagDef = obj({ kind: kind("tag"), id: idField(), name: str(), theme: str(), worksWith: optional(str()) });
+
+// A note: a Foundry item (flag `note`) that points at a formula. With a research track it offers a lead; without one it does nothing.
+const noteDef = obj({ kind: kind("note"), id: idField(), name: str(), recipeId: idField(), research: optional(track) });
 
 const OUTPUT_KEY = /^([1-9]\d*|default)$/;
 
@@ -97,7 +124,14 @@ const recipe = obj({
   stationCategory: str(),
   stationTierMin: tier(TIER_RANGES.station),
   skillWhitelist: arr(str(), { min: 1 }),
-  researchProject: obj({ tier: tier(TIER_RANGES.research) }, { extra: true })
+  researchProject: obj({ tier: tier(TIER_RANGES.research) }, { extra: true }),
+  // A formula FAMILY and VERSION (Stage 11c). Version 1 is the first; a higher version needs the previous version's formula and `requiresCount` distinct
+  // materials with `requiresTag` whose properties are known (default: the version number). Material tier and formula version are separate axes.
+  family: optional(idField()),
+  version: optional(int({ min: 1 })),
+  requiresTag: optional(idField()),
+  requiresCount: optional(int({ min: 2 })),
+  research: optional(track)
 });
 
 // The fields of a region that a player's copy keeps (see PLAYER_SCHEMAS). The GM's copy adds the spawn table and the DC.
@@ -248,12 +282,18 @@ const nodeType = obj({
   }))
 });
 
-export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef, nodeType, blueprint };
+export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef, nodeType, blueprint, tag: tagDef, note: noteDef };
+export const TRACK_SCHEMA = track;
 
 // What a PLAYER client holds (Stage 16, docs/10): the same kinds, but a region without its spawn table, and a node type
 // without its ladders and charges. These are strict like the others, so a stripped copy that still carried a hidden field
 // would fail to load. Every other kind is delivered whole.
-const playerMaterial = obj({ kind: kind("material"), id: idField(), name: str(), tier: tier(TIER_RANGES.material), value: optional(num({ min: 0 })) });
+const playerMaterial = obj({
+  kind: kind("material"), id: idField(), name: str(), tier: tier(TIER_RANGES.material), value: optional(num({ min: 0 })),
+  // Whether the material has a study (a plain yes/no, never the milestones) and, once the character knows it, its tag.
+  hasTrack: optional(bool()), tag: optional(idField())
+});
+const playerNote = obj({ kind: kind("note"), id: idField(), name: str(), hasTrack: optional(bool()) });
 const playerRecipe = obj({
   kind: kind("recipe"),
   id: idField(),
@@ -265,7 +305,9 @@ const playerRecipe = obj({
   stationTierMin: tier(TIER_RANGES.station),
   skillWhitelist: arr(str(), { min: 1 }),
   // Craft days, worked out on the GM client (the craft level, the station's upgrades and the 1-day floor): by station id, and with no station.
-  days: obj({ default: int({ min: 1 }), byStation: record(int({ min: 1 })) })
+  days: obj({ default: int({ min: 1 }), byStation: record(int({ min: 1 })) }),
+  // The (slot, material) pairs this recipe gives its own effect ("slot|materialId"), with no values: class knowledge does not apply to them (Stage 11c).
+  overrideSlots: optional(arr(str()))
 });
 const playerBlueprint = obj({
   kind: kind("blueprint"),
@@ -277,7 +319,7 @@ const playerBlueprint = obj({
   gold: num({ min: 0 }),
   buildDays: int({ min: 1 })
 });
-export const PLAYER_SCHEMAS = { ...DEFINITION_SCHEMAS, region: obj(regionPlayerFields), nodeType: obj(nodeTypePlayerFields), material: playerMaterial, recipe: playerRecipe, blueprint: playerBlueprint };
+export const PLAYER_SCHEMAS = { ...DEFINITION_SCHEMAS, region: obj(regionPlayerFields), nodeType: obj(nodeTypePlayerFields), material: playerMaterial, recipe: playerRecipe, blueprint: playerBlueprint, note: playerNote };
 
 // Live records ----------------------------------------------------------------
 // A gathering node, stored in a token flag. The token is its identity.
@@ -483,13 +525,16 @@ const compBaseline = obj({
   at: int({ min: 0 }),
   slots: arr(obj({ slot: str(), tierFloor: int({ min: 1 }), materialId: idField(), effects: record(any()) }))
 });
-const compExperiment = obj({ recipeId: idField(), name: str(), firstAt: int({ min: 0 }), slots: record(record(compFact)), baseline: optional(compBaseline) });
+// Class knowledge (Stage 11c): what a material does in an ITEM CLASS (a recipe category), learned by a successful craft. role -> value.
+const compClassFact = obj({ materialId: idField(), materialName: str(), tier: optional(int({ min: 1 })), effects: record(any()), at: int({ min: 0 }) });
+const compExperiment = obj({ recipeId: idField(), name: str(), category: optional(str()), firstAt: int({ min: 0 }), slots: record(record(compFact)), baseline: optional(compBaseline) });
 const compendium = obj({
   v: int({ min: 1, max: 1 }),
   materials: record(compEntry.material),
   creatures: record(compEntry.creature),
   regions: record(compEntry.region),
-  experiments: optional(record(compExperiment))
+  experiments: optional(record(compExperiment)),
+  classes: optional(record(record(compClassFact)))
 });
 
 const pendingAction = obj({
@@ -511,9 +556,18 @@ const auditEntry = obj({
   history: arr(obj({ at: int(), text: str() }))
 });
 
-/** A lead the GM handed a character: a formula it could start researching. `name` is the recipe's name at the time (the player copy does not hold the recipe). */
-const lead = obj({ id: str(), recipeId: idField(), name: str(), note: str(), at: int({ min: 0 }) });
+// The discovery ledger (actor flag `discoveries`, Stage 11c): per studied item, the steps put in, the milestones reached and a plain stage.
+// It holds NO thresholds (those are GM-only data, read at each check). `stage` is the word shown: 0 Just started, 1 Getting somewhere, 2 Nearly there.
+const discoveryEntry = obj({
+  key: str(), kind: oneOf(["material", "note", "recipe"]), id: idField(), name: str(),
+  steps: int({ min: 0 }), reached: arr(obj({ index: int({ min: 0 }), type: oneOf(["properties", "formula"]), recipeId: optional(idField()) })), stage: int({ min: 0, max: 2 }),
+  status: oneOf(["active", "complete"]), paused: optional(bool()), startedAt: int({ min: 0 })
+});
+const discoveries = obj({ v: int({ min: 1, max: 1 }), items: record(discoveryEntry) });
 
-export const LIVE_SCHEMAS = { lead, node, project, formula, stationRecord, stationState, partyStation, commission, pendingAction, auditEntry, compendium, blueprintHold };
+/** A lead the GM handed a character: a formula it could start researching. `name` is the recipe's name at the time (the player copy does not hold the recipe). */
+const lead = obj({ id: str(), recipeId: idField(), name: str(), note: str(), at: int({ min: 0 }), source: optional(oneOf(["gm", "version"])) });
+
+export const LIVE_SCHEMAS = { discoveries, lead, node, project, formula, stationRecord, stationState, partyStation, commission, pendingAction, auditEntry, compendium, blueprintHold };
 
 export const DEFINITION_KINDS = Object.keys(DEFINITION_SCHEMAS);

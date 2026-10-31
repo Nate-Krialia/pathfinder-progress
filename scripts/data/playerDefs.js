@@ -20,6 +20,8 @@ import { factsKey, loadPlayerRecords, normalizeFacts, selectRecords, stationIdsF
 import { readStations } from "../stations/store.js";
 import { stationReductions } from "../workshop/rules.js";
 import { craftDays } from "../crafting/days.js";
+import { overlay, propertiesOpen } from "../discovery/store.js";
+import { itemKey, trackOf } from "../discovery/track.js";
 
 let boundApi = null;
 export const bind = api => { boundApi = api; };
@@ -38,8 +40,15 @@ function actorFacts(actor, sharedMaterials) {
   let stacks = [];
   try { stacks = adapter.getMaterialStacks(actor).map(s => s.materialId); } catch { /* an actor with no inventory yet */ }
   const stationRecords = list(actor.getFlag(MODULE_ID, STATION_KEYS.actorStationsFlag));
+  let notes = [];
+  try { notes = adapter.getNoteStacks(actor).map(s => s.noteId); } catch { /* an actor with no inventory yet */ }
+  // What decides which tags the GM may send (Stage 11c): the studies with a milestone reached, and the materials already crafted with.
+  const ledger = actor.getFlag(MODULE_ID, RESEARCH_KEYS.discoveriesFlag);
+  const crafted = Object.values(book?.classes ?? {}).flatMap(byMaterial => Object.keys(byMaterial)).map(id => `material:${id}`);
+  const studied = [...Object.values(ledger?.items ?? {}).filter(e => e?.reached?.length).map(e => e.key), ...crafted];
   return {
     id: actor.id,
+    notes, studied,
     formulas: ids(actor.getFlag(MODULE_ID, RESEARCH_KEYS.formulasFlag), "recipeId"),
     blueprints: ids(actor.getFlag(MODULE_ID, "blueprints"), "blueprintId"),
     designs: projects.filter(p => p.outcome?.type === "designBlueprint").map(p => p.outcome.blueprintId),
@@ -114,7 +123,11 @@ export async function runDefinitionsFor(payload, context) {
     default: craftDays(recipe, []).days,
     byStation: Object.fromEntries(stations.map(s => [s.id, craftDays(recipe, stationReductions(s)).days]))
   });
-  const { records, missingRecipes, recipeIds } = selectRecords(facts, api.definitions, { daysFor });
+  // A material's tag (and its theme) is sent only for a character who knows it (Stage 11c); whether a material HAS a track is a plain yes/no, overlay included.
+  const heldBy = facts.actors.map(a => game.actors.get(a.id)).filter(Boolean);
+  const tagKnownFor = material => heldBy.some(actor => propertiesOpen(api, actor, material.id));
+  const hasTrackFor = (kind, data) => Boolean(trackOf(data, overlay(), itemKey(kind, data.id)));
+  const { records, missingRecipes, recipeIds } = selectRecords(facts, api.definitions, { daysFor, tagKnownFor, hasTrackFor });
   return {
     records,
     missingRecipes,
@@ -124,9 +137,9 @@ export async function runDefinitionsFor(payload, context) {
 }
 
 /** A short fingerprint of the GM's registry, so the revision only changes when a definition really did. */
-export function digestOf(registry, uncraftable) {
+export function digestOf(registry, uncraftable, trackKeys = []) {
   const text = JSON.stringify([...Object.entries(registry)].sort(([a], [b]) => a.localeCompare(b)).map(([kind, map]) => [kind, [...map.values()].sort((a, b) => a.id.localeCompare(b.id))]))
-    + JSON.stringify([...(uncraftable ?? [])].sort());
+    + JSON.stringify([...(uncraftable ?? [])].sort()) + JSON.stringify([...trackKeys].sort());
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   return h.toString(36);
@@ -135,7 +148,7 @@ export function digestOf(registry, uncraftable) {
 /** GM: tell every player client the definitions may have changed. Writes the setting only if the registry really is different. */
 export async function publishDefinitions(api) {
   if (!game.user.isGM) throw new Error("publishDefinitions: GM only");
-  const digest = digestOf(api.definitions, api.uncraftable);
+  const digest = digestOf(api.definitions, api.uncraftable, Object.keys(overlay()));
   if ((game.settings.get(MODULE_ID, DEFINITIONS_SYNC.revisionSetting) ?? "") === digest) return { changed: false, revision: digest };
   await game.settings.set(MODULE_ID, DEFINITIONS_SYNC.revisionSetting, digest);
   return { changed: true, revision: digest };
@@ -216,7 +229,7 @@ export async function settled() {
 // Hooks -----------------------------------------------------------------------------------------------------------------
 const WATCHED_SETTINGS = new Set([STATION_KEYS.partyLocationSetting, STATION_KEYS.stationStateSetting, WORKSHOP.partyStationsSetting, COMPENDIUM.sharedSetting, DEFINITIONS_SYNC.revisionSetting]
   .map(key => `${MODULE_ID}.${key}`));
-const MODULE_FLAGS_THAT_MATTER = [RESEARCH_KEYS.formulasFlag, RESEARCH_KEYS.projectsFlag, QUEUE_KEYS.pendingFlag, COMPENDIUM.flag, STATION_KEYS.actorStationsFlag, STATION_KEYS.actorLocationFlag, "blueprints"];
+const MODULE_FLAGS_THAT_MATTER = [RESEARCH_KEYS.discoveriesFlag, RESEARCH_KEYS.formulasFlag, RESEARCH_KEYS.projectsFlag, QUEUE_KEYS.pendingFlag, COMPENDIUM.flag, STATION_KEYS.actorStationsFlag, STATION_KEYS.actorLocationFlag, "blueprints"];
 
 /** Player clients: the events that can change what is needed. Each only schedules a debounced check; the key decides whether to ask. */
 export function installPlayerHooks(hooks = globalThis.Hooks) {

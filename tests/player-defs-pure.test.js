@@ -121,7 +121,7 @@ test("loadPlayerRecords: a delivered set loads into a registry with every kind p
   assert.deepEqual(Object.keys(loaded).sort(), Object.keys(emptyRegistry()).sort());
   assert.equal(loaded.creatureYield.size, 0);
   assert.deepEqual(Object.keys(loadPlayerRecords(undefined).registry.recipe), []);
-  assert.deepEqual(PLAYER_KINDS.sort(), ["blueprint", "material", "nodeType", "recipe", "region", "station", "town"]);
+  assert.deepEqual(PLAYER_KINDS.sort(), ["blueprint", "material", "nodeType", "note", "recipe", "region", "station", "tag", "town"]);
 });
 
 test("facts compare equal when they mean the same: order and duplicates do not change the key, a real change does", () => {

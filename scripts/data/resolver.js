@@ -1,6 +1,6 @@
 /**
  * The ONE layered resolver: the most specific rule wins.
- * Used for material effects (recipe override > material default) and, later,
+ * Used for material effects (recipe override > material class > material default) and, later,
  * corpse yields (creature override > trait/level mapping).
  * No Foundry globals (testable in Node).
  */
@@ -22,8 +22,8 @@ export function resolveLayers(layers) {
 
 /**
  * Effect of `material` for `role` when placed in `slotName` of `recipe`.
- * A recipe override for this material+slot+role beats the material's own
- * default. An override's `role` may be omitted when its slot drives one role.
+ * A recipe override for this material+slot+role beats the material's effect for
+ * the recipe's item class (`classEffects`), which beats its general default (Stage 11c). An override's `role` may be omitted when its slot drives one role.
  */
 export function resolveMaterialEffect(material, role, recipe, slotName) {
   const slot = recipe?.slots?.find(s => s.name === slotName);
@@ -31,8 +31,10 @@ export function resolveMaterialEffect(material, role, recipe, slotName) {
   const soleRole = roles.length === 1 ? roles[0] : null;
   const override = recipe?.overrides?.find(o =>
     o.materialId === material.id && o.slot === slotName && (o.role ?? soleRole) === role);
+  // Most specific first: this recipe's override, then how the material behaves in this ITEM CLASS (the recipe's category), then its general default.
   return resolveLayers([
     { source: "recipe override", value: override?.effect },
+    { source: "material class", value: recipe?.category ? material.classEffects?.[recipe.category]?.[role] : undefined },
     { source: "material default", value: material.effects?.[role] }
   ]);
 }

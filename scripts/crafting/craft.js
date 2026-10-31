@@ -14,6 +14,8 @@ import { readFormulaList } from "../research/store.js";
 import { defsState, notLoadedText } from "../data/playerState.js";
 import { booksFor, noteCrafted } from "../compendium/store.js";
 import { effectKnown, knownResult } from "../compendium/experiments.js";
+import { propertiesOpen } from "../discovery/store.js";
+import { W } from "../discovery/words.js";
 
 const d100 = () => Math.floor(CONFIG.Dice.randomUniform() * 100) + 1;
 
@@ -68,7 +70,23 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
     formulas: readFormulaList(actor),
     crafterName: actor.name
   });
-  return prepared;
+  return studyGate(actor, selection, api, prepared) ?? prepared;
+}
+
+/**
+ * A material with a research track stays out of crafts until the character has studied it (its properties milestone), or has already crafted with it
+ * (Stage 11c). Enforced here, on whichever client previews, and again by the GM client at queue and resolve time because they call this too.
+ * @returns a failed preview, or null when every material in the selection is open to this character
+ */
+function studyGate(actor, selection, api, prepared) {
+  if (!prepared.ok) return null;
+  const errors = [];
+  for (const materialId of new Set(Object.values(selection ?? {}))) {
+    let open = true;
+    try { open = propertiesOpen(api, actor, materialId); } catch (error) { console.error(`${MODULE_ID} | could not check whether ${actor.name} has studied "${materialId}"`, error); }
+    if (!open) errors.push(W.notStudied(api.definitions?.material.get(materialId)?.name ?? materialId));
+  }
+  return errors.length ? { ok: false, errors, plan: null, stations: prepared.stations ?? { verdicts: [], chosen: null } } : null;
 }
 
 /**
@@ -86,13 +104,15 @@ function playerPreview(actor, recipe, selection, api, stationId, stacks) {
   });
   // A player client only knows the materials the character has met: a material it does not have is "you do not have it", not "unknown".
   if (!prepared.ok) return { ...prepared, errors: prepared.errors.map(e => e.replace(/unknown material "([^"]+)"/, 'you do not have "$1"')) };
+  const blocked = studyGate(actor, selection, api, prepared);
+  if (blocked) return blocked;
 
   let books;
   try { books = booksFor(actor); } catch (error) { console.error(`${MODULE_ID} | ${actor.name}'s Compendium could not be read, so no effect is shown as known`, error); books = { own: {}, shared: {} }; }
   const facts = {};
   const slots = recipe.slots.map(slot => {
     const use = prepared.plan.uses.find(u => u.slot === slot.name);
-    const fact = effectKnown(books, recipe.id, slot.name, use.materialId);
+    const fact = effectKnown(books, recipe, slot.name, use.materialId);
     facts[slot.name] = fact;
     return {
       slot: slot.name, materialId: use.materialId, materialName: use.materialName, tier: api.definitions.material.get(use.materialId)?.tier ?? null, units: use.units,
