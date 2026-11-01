@@ -110,13 +110,33 @@ test("the list: search, kind and track chips, retired hidden unless asked, origi
   assert.match(renderEditor(m), /clear-leftover/);
 });
 
-test("the creator asks for a name (and for a formula on a note) and says why it cannot create yet", () => {
-  const m = editorModel({ registry, creating: { kind: "note", name: "" } });
+test("the creator asks for a name and every required choice, each starting on a disabled placeholder, and says why it cannot create yet", () => {
+  const m = editorModel({ registry, creating: { kind: "note", name: "", recipeId: "", preset: "" } });
   assert.equal(m.detail.canCreate, false);
-  assert.equal(m.detail.problems.length, 2);
+  assert.deepEqual(m.detail.problems, ["Give it a name first.", "Pick a formula first.", "Choose a kind of note first."]);
+  const html = renderEditor(m);
+  assert.match(html, /<option value="" selected disabled>Choose a formula<\/option>/);
+  assert.match(html, /<option value="" selected disabled>Choose a kind of note<\/option>/);
+  assert.doesNotMatch(html, /<option value="[^"]+" selected>/, "no real option is pre-selected");
+  const named = editorModel({ registry, creating: { kind: "note", name: "N", recipeId: "", preset: "plan" } });
+  assert.deepEqual(named.detail.problems, ["Pick a formula first."]);
+  const [recipeId] = registry.recipe.keys();
+  assert.equal(editorModel({ registry, creating: { kind: "note", name: "N", recipeId, preset: "plan" } }).detail.canCreate, true);
+  const material = editorModel({ registry, creating: { kind: "material", name: "Gate Fang", tier: "" } });
+  assert.deepEqual(material.detail.problems, ["Choose a tier first."]);
+  assert.match(renderEditor(material), /<option value="" selected disabled>Choose a tier<\/option>/);
   const ok = editorModel({ registry, creating: { kind: "material", name: "Gate Fang", tier: 2 } });
   assert.equal(ok.detail.canCreate, true);
   assert.match(renderEditor(ok), /data-action="do-create"/);
+});
+
+test("the Persistent checkbox is a normal box inside a label row; there is no other checkbox in the editor", () => {
+  const d = edit.addBlock(draftFor(registry, {}, "material:iron"), "weapon", "damage");
+  const html = renderEditor(editorModel({ registry, selectedKey: "material:iron", base: draftFor(registry, {}, "material:iron"), draft: d, effectClass: "weapon", origin: { origin: "pack", editedFields: [], hasItem: true } }));
+  const boxes = [...html.matchAll(/<input type="checkbox"[^>]*>/g)];
+  assert.equal(boxes.length, 1);
+  assert.match(html, /<label class="pfp-check"><input type="checkbox"[^>]*aria-label="Persistent"> Persistent<\/label>/, "the words sit beside the box, inside the label");
+  assert.equal([...renderEditor(editorModel({ registry, creating: { kind: "note", name: "" } })).matchAll(/type="checkbox"/g)].length, 0);
 });
 
 test("markup: every control is labelled, every button is a plain button, text is escaped, and Save/Discard sit outside the scrolling part", () => {

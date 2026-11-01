@@ -61,11 +61,16 @@ test("LAYOUT MUTATION: the checks fail when a card gets a fixed height back, a b
       "an editor intro that is cut off": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub .pfp-editor-head { height: 6px !important; overflow: hidden !important; }" },
       "effect blocks with a fixed height": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub .pfp-block { height: 2em !important; overflow: hidden !important; }" },
       "an editor confirm box with a fixed height": { scene: "editorConfirm", width: 420, textSize: 175, css: ".pfp-hub .pfp-editor-confirm { height: 2em !important; overflow: hidden !important; }" },
+      // v0.21.1: the narrow editor (the 0.21.0 matrix drew narrow windows with an auto height, so nothing could be squeezed), the filter chips, overlapping controls, the checkbox
+      "an editor pane squeezed in a narrow window": { scene: "editor300", width: 400, height: 600, textSize: 100, css: ".pfp-hub.pfp-editor[data-layout=\"narrow\"] > .pfp-editor-body > .pfp-pane { flex: 0 1 auto !important; max-height: 6em !important; overflow: hidden !important; }" },
+      "filter chips that overflow their pane": { scene: "editor300", width: 400, height: 900, textSize: 175, css: ".pfp-hub .pfp-editor-list { height: 6em !important; overflow: visible !important; }" },
+      "controls that overlap": { scene: "editor300", width: 400, height: 900, textSize: 100, css: ".pfp-hub .pfp-editor-list .pfp-row > button { margin-right: -2em !important; }" },
+      "an oversized checkbox": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub input[type=\"checkbox\"] { width: 44px !important; height: 44px !important; }" },
       "a preview that cannot wrap": { scene: "editor300", width: 900, textSize: 100, css: ".pfp-hub .pfp-lines li, .pfp-hub .pfp-editor-preview p { white-space: nowrap !important; overflow-wrap: normal !important; }" }
     });
     for (const [label, spec] of Object.entries(mutations)) {
       const mutation = typeof spec === "string" ? { scene: label === "nowrap text" ? "longNames" : base.scene, css: spec } : spec;
-      const { problems } = await renderState(page, { ...base, scene: mutation.scene, width: mutation.width ?? base.width, textSize: mutation.textSize ?? base.textSize, extraCss: mutation.css });
+      const { problems } = await renderState(page, { ...base, scene: mutation.scene, width: mutation.width ?? base.width, textSize: mutation.textSize ?? base.textSize, height: mutation.height, extraCss: mutation.css });
       assert.ok(problems.length > 0, `${label}: the checks must fail`);
     }
     for (const [scene, width, textSize] of [["partial", 280, 175], ["panels", 280, 175]]) assert.deepEqual((await renderState(page, { scene, width, textSize })).problems, [], `${scene} at ${width}px ${textSize}% is clean before the mutations`);
@@ -115,6 +120,12 @@ test("EDITOR LAYOUT: 300 items stay usable: the list is on the left and scrolls 
       assert.ok(g.listScroll.scrollHeight > g.listScroll.clientHeight + 100, "the long list scrolls inside its own box");
       assert.ok(g.save.bottom <= g.viewport && g.discard.bottom <= g.viewport && g.save.top >= g.detail.top, "Save and Discard are on screen without scrolling");
       assert.ok(g.head.bottom <= g.list.top + 1, "the intro sits above the panes and is not covered");
+    }
+    // v0.21.1: a narrow window about 400px wide is ONE scrolling column, in a tall window AND a short one, at 100% and 175% text: no pane squeezed, the filter row inside its pane,
+    // no control over another (the page checks do that for every state; this loop draws the editor scenes at the sizes Nate found broken).
+    for (const scene of ["editor300", "editorRows", "editorConfirm", "editorLeftovers", "editorCreate"]) for (const theme of ["parchment", "contrast"]) for (const [width, height] of [[400, 900], [400, 420], [320, 900], [320, 420]]) for (const textSize of [100, 175]) {
+      const narrow = await renderState(page, { scene, theme, width, height, textSize, hostile: "important 2.5rem" });
+      assert.deepEqual(narrow.problems, [], `${scene} ${theme} ${width}x${height} ${textSize}%`);
     }
     for (const width of [320, 280, 220]) {
       const narrow = await renderState(page, { scene: "editor300", width, textSize: 175, hostile: "important 2.5rem" });

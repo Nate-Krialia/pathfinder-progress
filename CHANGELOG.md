@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.21.1
+
+Fix round after gate 20 in real Foundry.
+
+- **The preview shows the three stages** it was designed with (0.21.0 built one): *Just picked up* (name, tier, worth, bulk; the tag and theme only for an item with no research track; a tracked item says it has not been studied), *After studying* (the tag and its theme; with no study it says "No study: known on pickup."), *After a successful craft in this class* (the effect lines for the class picked). Real buttons with words and `aria-pressed`. Each stage is built from `stripForPlayer` and the Hub's own Compendium view-model, so it cannot show an effect before the craft stage or a step count, threshold or DC at any stage (leak scan and mutation checks per stage). The class picker only shows on the craft stage; the "fills slots" line moved behind it too.
+- **Narrow layout was unusable.** Below 700px the window is now ONE scrolling column: panes take their natural height, the list keeps a capped box with its own scroll, and its chips wrap inside the pane (the old CSS squeezed the editor to a sliver and pushed "Show retired" out of the list pane in a fixed-height window). **What the 0.21.0 matrix missed:** it drew narrow windows with an auto height (so nothing could be squeezed), exempted every scrolling box from the overflow check (a squeezed pane that scrolled looked fine) and measured no minimum pane height, no filter-row containment and no control overlap. The harness now draws narrow editor windows (320 and 400px, 100% and 175% text) in a tall and a short window and checks all three; with the old CSS it reports 337 problems, with the fix none.
+- **The Persistent checkbox** is a normal-sized box with its label beside it; the whole label row (44px) is the tap target. It is the only checkbox in the editor. The harness measures a checkbox by its label row and flags an oversized box.
+- **New note / New material forms** start on a disabled placeholder ("Choose a formula", "Choose a kind of note", "Choose a tier"), keep Create off until each is chosen and say why ("Pick a formula first.").
+- Found while building: creating a **tag** in the editor was rejected (it got note-only fields); fixed, and a tag a material still names cannot be deleted.
+- Gate 20: Steps 1 to 21 keep their numbers, what they do and what they check, and are now short bullets; new Steps 22 to 27 (fixtures, the three stages, the narrow layout, the checkbox, the formula placeholder, CLEANUP again). SETUP is unchanged. CLAUDE.md has the standing bullet format rule and the test checks it.
+- Tests: 1134 in all (new: editor-preview, more in editor-model, editor-window, editor-wiring, gate20 with a second test for the new steps; the layout matrix has four new editor mutations, 0 problems).
+- No manifest change except the version: force-reload both windows (Ctrl+Shift+R); no server restart.
+
 ## 0.21.0
 
 Stage 11d, first half: the Item editor, the Material creator and the effect builder. (`docs/11d-item-editor-addendum.md` has the decisions and a "Built as" section of interpretations; conditions, afflictions and Adjust are 0.22.0.)

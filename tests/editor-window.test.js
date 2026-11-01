@@ -157,7 +157,7 @@ test("WINDOW: make a material, then a note; both get items; the list and the edi
 test("WINDOW: Push to copies asks first and reports the count; Delete asks first and, when in use, says where and offers Retire", async () => {
   const { w, text, click, el } = await windowFor();
   await click("new-material");
-  await as(w.gm, async () => { const input = el().querySelector('[data-field="create"][data-name="name"]'); input.value = "Gate Silk"; input.dispatchEvent(new window.Event("change", { bubbles: true })); await wait(25); });
+  await as(w.gm, async () => { for (const [name, value] of [["name", "Gate Silk"], ["tier", "1"]]) { const input = el().querySelector(`[data-field="create"][data-name="${name}"]`); input.value = value; input.dispatchEvent(new window.Event("change", { bubbles: true })); await wait(25); } });
   await click("do-create");
   await api().giveMaterial(w.ann, "gate-silk", 1);
   await click("push-copies");
@@ -199,4 +199,40 @@ test("WINDOW: a player cannot open it, and Tab, Enter and Space stay inside the 
   }
   assert.deepEqual(outer, ["Escape"], "only Escape reaches Foundry");
   await as(w.gm, () => app.close());
+});
+
+test("WINDOW: a new note starts on 'Choose a formula', Create stays off until one is chosen, and the reason says so", async () => {
+  const { click, set, text, el } = await windowFor();
+  await click("new-note");
+  const select = el().querySelector('[data-field="create"][data-name="recipeId"]');
+  assert.equal(select.value, "", "no formula is pre-selected");
+  assert.equal(select.selectedOptions[0].textContent, "Choose a formula");
+  assert.equal(select.selectedOptions[0].disabled, true);
+  await set('[data-field="create"][data-name="name"]', "A note");
+  await set('[data-field="create"][data-name="preset"]', "plan");
+  assert.equal(el().querySelector('[data-action="do-create"]').getAttribute("aria-disabled"), "true");
+  assert.match(text(), /Pick a formula first\./);
+  await set('[data-field="create"][data-name="recipeId"]', [...api().definitions.recipe.keys()][0]);
+  assert.doesNotMatch(text(), /Pick a formula first\./);
+  assert.equal(el().querySelector('[data-action="do-create"]').getAttribute("aria-disabled"), null);
+  await click("new-material");
+  assert.equal(el().querySelector('[data-field="create"][data-name="tier"]').selectedOptions[0].textContent, "Choose a tier");
+  assert.match(text(), /Choose a tier first\./);
+});
+
+test("WINDOW: the stage buttons switch what the preview shows; effects only appear on the craft stage", async () => {
+  const { click, el } = await windowFor("material:spider-fang");
+  const preview = () => el().querySelector('[data-part="preview"]').textContent.replace(/\s+/g, " ");
+  assert.match(preview(), /Spider Fang adds \+1d4 poison damage/);
+  assert.ok(el().querySelector('[data-field="preview-class"]'));
+  await click("preview-stage", '[data-stage="picked"]');
+  assert.equal(el().querySelector('[data-stage="picked"]').getAttribute("aria-pressed"), "true");
+  assert.doesNotMatch(preview(), /poison damage/);
+  assert.match(preview(), /No effects yet: a player learns what it does by crafting with it\./);
+  assert.equal(el().querySelector('[data-field="preview-class"]'), null, "the class picker belongs to the craft stage");
+  await click("preview-stage", '[data-stage="studied"]');
+  assert.match(preview(), /No study: known on pickup\./);
+  assert.doesNotMatch(preview(), /poison damage/);
+  await click("preview-stage", '[data-stage="crafted"]');
+  assert.match(preview(), /poison damage/);
 });

@@ -208,3 +208,16 @@ test("IN-MEMORY definitions (a gate's fixtures) survive an editor save, and cann
   await assert.rejects(gm(w, () => api().editor.update("material:g20-fake", { name: "X" })), /exists only in memory/);
   assert.deepEqual(Object.keys(saved().records), ["material:iron"], "no orphan edit was written");
 });
+
+test("TAGS: a tag can be created with only its own fields, and cannot be deleted while a material uses it", async () => {
+  const w = await editorWorld();
+  const tag = await gm(w, () => api().editor.create("tag", { name: "Gate G20 Ore", theme: "cowardice", worksWith: "frightened" }));
+  assert.equal(tag.key, "tag:gate-g20-ore");
+  assert.deepEqual(Object.keys(saved().records["tag:gate-g20-ore"].fields).sort(), ["name", "theme", "worksWith"]);
+  assert.equal(tag.item, null, "a tag has no item");
+  await gm(w, () => api().editor.create("material", { name: "Gate G20 Tagged", tier: 1, tag: "gate-g20-ore" }));
+  assert.deepEqual(api().editor.usage("tag:gate-g20-ore").tagged, ["Gate G20 Tagged"]);
+  await assert.rejects(gm(w, () => api().editor.remove("tag:gate-g20-ore")), /still in use/);
+  await gm(w, () => api().editor.remove("material:gate-g20-tagged"));
+  assert.equal(await gm(w, () => api().editor.remove("tag:gate-g20-ore")), true);
+});

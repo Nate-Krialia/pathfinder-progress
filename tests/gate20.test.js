@@ -30,21 +30,107 @@ const gateWorld = async () => {
   getApi().editorLeftovers = [];
   return w;
 };
+
+/** Steps 22 to 26 (new in 0.21.1), played by real clicks on the real editor window. `d` carries the page helpers of the test that calls it. */
+async function playNewSteps(d) {
+  const { click, set, text, el, pick, expectPass, seen, gm } = d;
+  const preview = () => el().querySelector('[data-part="preview"]').textContent.replace(/\s+/g, " ");
+  const stage = id => click("preview-stage", `[data-stage="${id}"]`);
+  await expectPass(22);
+  // Step 23: the three stages
+  await set('[data-field="search"]', "stage", "input");
+  await pick("material:gate-g20-study-stage");
+  await stage("picked");
+  assert.match(preview(), /Tier 2/);
+  assert.match(preview(), /Worth 25 gp each/);
+  assert.match(preview(), /Bulk L/);
+  assert.match(preview(), /You haven't studied this yet\./);
+  assert.doesNotMatch(preview(), /cowardice|1d6|Gate Sting/);
+  assert.match(preview(), /No effects yet: a player learns what it does by crafting with it\./);
+  assert.equal(el().querySelector('[data-field="preview-class"]'), null);
+  await stage("studied");
+  assert.match(preview(), /Gate G20 Ore: a theme of cowardice\./);
+  assert.match(preview(), /It works with frightened\./);
+  assert.doesNotMatch(preview(), /1d6|Gate Sting/);
+  await stage("crafted");
+  assert.ok(el().querySelector('[data-field="preview-class"]'));
+  assert.match(preview(), /Gate G20 Study Stage adds \+1d6 fire damage/);
+  assert.match(preview(), /gives Gate Sting: The sting lingers\./);
+  assert.match(preview(), /sets the weapon's power \(tier 1\)/);
+  await set('[data-field="preview-class"]', "armor");
+  assert.doesNotMatch(preview(), /1d6|Gate Sting/);
+  assert.match(preview(), /sets the armor's power \(tier 1\)/);
+  await set('[data-field="preview-class"]', "weapon");
+  await pick("material:gate-g20-plain-stage");
+  await stage("picked");
+  assert.match(preview(), /Gate G20 Ore: a theme of cowardice\./);
+  assert.doesNotMatch(preview(), /haven't studied|1d6/);
+  await stage("studied");
+  assert.match(preview(), /No study: known on pickup\./);
+  assert.doesNotMatch(preview(), /cowardice/);
+  await stage("crafted");
+  await expectPass(23);
+  // Step 24: narrow (the geometry is stubbed in jsdom; the checks that need real boxes are the harness's job and the person's eyes)
+  await pick("material:gate-g20-study-stage");
+  for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 400);
+  await wait(30);
+  await expectPass(24);
+  // Step 25: the Persistent checkbox
+  for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 1000);
+  await wait(30);
+  await set('[data-field="search"]', "", "input");
+  await pick("material:gate-g20-fang");
+  await click("effect-class", '[data-cls="weapon"]');
+  const word = el().querySelector("label.pfp-check");
+  assert.ok(word && /Persistent/.test(word.textContent), "the word Persistent is in the label");
+  await as(gm, async () => { word.click(); await wait(30); });
+  assert.equal(el().querySelector('input[type="checkbox"]').checked, true, "clicking the word ticks the box");
+  assert.ok([...el().querySelectorAll('[data-action="save"]')].some(b => b.getAttribute("aria-disabled") !== "true"), "Save turns on");
+  await as(gm, async () => { el().querySelector("label.pfp-check").click(); await wait(30); });
+  assert.equal(el().querySelector('input[type="checkbox"]').checked, false);
+  await as(gm, async () => { el().querySelector("label.pfp-check").click(); await wait(30); });
+  await click("discard");
+  await expectPass(25);
+  // Step 26: the New note formula placeholder
+  await click("new-note");
+  await set('[data-field="create"][data-name="name"]', "Gate G20 Placeholder");
+  seen(/Pick a formula first\./);
+  await expectPass(26);
+  await set('[data-field="create"][data-name="preset"]', "plan");
+  await set('[data-field="create"][data-name="recipeId"]', [...getApi().definitions.recipe.keys()][0]);
+  assert.equal(el().querySelector('[data-action="do-create"]').getAttribute("aria-disabled"), null, "Create turns on once a formula is chosen");
+  await click("cancel-create");
+  assert.equal(getApi().definitions.note.has("gate-g20-placeholder"), false, "Cancel creates nothing");
+  await click("new-material");
+  assert.equal(el().querySelector('[data-field="create"][data-name="tier"]').selectedOptions[0].textContent, "Choose a tier");
+  seen(/Choose a tier first\./);
+  await click("cancel-create");
+  void text;
+}
+
 const clean = () => ({ records: Object.keys(getApi().editor.records()).length, items: game.items.length, folders: game.folders.length, overlay: Object.keys(env.values.discoveryTracks ?? {}).length });
 
 test("the stage 11d gate doc: steps are labelled, click-through steps say what you should see, screenshots are asked for only where layout matters", () => {
-  assert.deepEqual([...GATE.keys()], Array.from({ length: 21 }, (_, i) => i + 1));
+  assert.deepEqual([...GATE.keys()], Array.from({ length: 27 }, (_, i) => i + 1));
   for (const [step, entry] of GATE) {
     assert.match(entry.who, /^\[(GM|Player)\]( and \[(GM|Player)\])?\s*$/, `step ${step} says who runs it`);
     assert.ok(entry.code, `step ${step} has a code block`);
     assert.equal((entry.text.match(/```js/g) ?? []).length, 1, `step ${step} has ONE code block`);
     if (!/no clicks|Nothing to click/i.test(entry.text) && step > 2 && step !== 21) assert.match(entry.text, /What to do and see|What you should see|What to do/i, `click-through step ${step} says what to see`);
+    // The standing format (CLAUDE.md): "What to do and see" is a short bullet list, one action per bullet; what to see is its own bullet starting "You should see:".
+    const section = entry.text.split("```js")[0];
+    const bullets = section.split("\n").filter(l => /^- /.test(l));
+    assert.ok(bullets.length >= 2, `step ${step} lists its instructions as bullets`);
+    assert.ok(bullets.every(b => b.length <= 700), `step ${step}: every bullet is short (one action)`);
+    assert.doesNotMatch(section.replace(/^- .*$/gm, ""), /\n[A-Z][^\n]{200,}/, `step ${step} has no long paragraph of instructions outside the bullets`);
+    if (!/Nothing to click/i.test(section) && step !== 1 && step !== 2) assert.ok(bullets.some(b => /^- (You should see|Look at .*You should see|Run the block)/.test(b) || /You should see:/.test(b)), `step ${step} has a "You should see:" bullet`);
   }
-  assert.deepEqual([...GATE].filter(([, e]) => /send me a screenshot/i.test(e.text)).map(([n]) => n), [3, 20], "screenshots: the whole window with its three panes, and the narrow layout");
+  assert.deepEqual([...GATE].filter(([, e]) => /send me a screenshot/i.test(e.text)).map(([n]) => n), [3, 20, 24], "screenshots: the whole window with its three panes, and the narrow layout (twice)");
   assert.match(gateDoc, new RegExp(`version must be \\*\\*${MODULE_VERSION.replace(/\./g, "\\.")}\\*\\*`));
   assert.match(gateDoc, /Force-reload BOTH windows first/);
-  assert.match(gateDoc, /\(v0\.21\.0\)/);
-  for (const must of [/What SETUP plants/, /orphaned research track/, /material:g20-orphan/, /preflight/i, /Leftovers/, /Push to copies/, /Plan note/, /Research note/, /already knows something this changes/, /Take back my edits/, /Show retired/, /still in use/]) assert.match(gateDoc, must);
+  assert.match(gateDoc, /\(v0\.21\.1\)/);
+  for (const must of [/What SETUP plants/, /orphaned research track/, /material:g20-orphan/, /preflight/i, /Leftovers/, /Push to copies/, /Plan note/, /Research note/, /already knows something this changes/, /Take back my edits/, /Show retired/, /still in use/, /Just picked up/, /After studying/, /After a successful craft in this class/, /Choose a formula/, /Pick a formula first\./, /Persistent/, /about \*\*400px wide\*\*/, /New in 0\.21\.1/]) assert.match(gateDoc, must);
+  assert.equal(GATE.get(27).code, GATE.get(21).code, "Step 27 is the same CLEANUP block as Step 21");
   assert.doesNotMatch(gateDoc.replace(/DC\b[^\n]*never/gi, ""), /\bDC \d|odds of|\d+% chance/i, "the gate text itself never talks about difficulty to the player");
 });
 
@@ -230,7 +316,9 @@ test("GATE 20: every step runs in order, and the click steps are played by real 
     for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 300);
     await wait(30);
     await expectPass(20);
-    // Step 21: CLEANUP
+    // Steps 22-26 (new in 0.21.1)
+    await playNewSteps({ click, set, text, el, pick, expectPass, seen, gm });
+    // Step 21: CLEANUP (last, as in a full run)
     const cleanup = await runBlock(21, gm);
     assert.deepEqual(cleanup, { problems: [], actorsLeft: 0, recordsLeft: 0, itemsLeft: 0, tracksLeft: 0, audit: [] });
   });
@@ -285,4 +373,42 @@ test("GATE 20: SETUP refuses to run on top of an earlier run or real data, and r
   });
   assert.deepEqual(clean(), { records: 0, items: 0, folders: 0, overlay: 0 });
   assert.equal(game.actors.getName("Gate G20 Scholar"), undefined);
+});
+
+test("GATE 20 (new in 0.21.1): after a fresh SETUP, Steps 22 to 26 run on their own and Step 27 leaves the world clean", async () => {
+  await gateWorld();
+  const api = getApi();
+  const { gm } = getUsers();
+  const logged = console.log;
+  const expectPass = async step => {
+    const sink = [];
+    console.log = (...args) => sink.push(args.map(String).join(" "));
+    try { assert.equal(await runBlock(step, gm), "ALL PASS", `step ${step} did not report ALL PASS:\n${sink.join("\n").split("\n").filter(l => l.startsWith("FAIL")).join("\n")}`); } finally { console.log = logged; }
+  };
+  installFakeApplication();
+  let app;
+  const el = () => app.element;
+  const text = () => el().textContent.replace(/\s+/g, " ");
+  const click = async (action, where = "") => {
+    const target = [...el().querySelectorAll(`[data-action="${action}"]${where}`)].find(b => b.getAttribute("aria-disabled") !== "true");
+    assert.ok(target, `a live ${action}${where} button is on the page`);
+    await as(gm, async () => { target.click(); await wait(30); });
+  };
+  const set = async (selector, value, event = "change") => {
+    const input = el().querySelector(selector);
+    assert.ok(input, `${selector} is on the page`);
+    input.value = value;
+    await as(gm, async () => { input.dispatchEvent(new window.Event(event, { bubbles: true })); await wait(30); });
+  };
+  await quietly(async () => {
+    await runBlock(2, gm);
+    // Gate G20 Fang is made by Step 4 in a full run; the new steps only need one to look at the checkbox, so the test makes it the way Step 4 does.
+    await as(gm, () => api.editor.create("material", { name: "Gate G20 Fang", tier: 2, effectBlocks: { general: { blocks: [] }, byClass: { weapon: { blocks: [{ type: "damage", dice: { all: "1d6" }, damageType: "fire" }] } } } }));
+    await as(gm, async () => { app = api.discovery.openEditor(); await wait(30); });
+    await playNewSteps({ click, set, text, el, pick: key => click("pick-item", `[data-key="${key}"]`), expectPass, seen: pattern => assert.match(text(), pattern), gm });
+    const cleanup = await runBlock(27, gm);
+    assert.deepEqual(cleanup, { problems: [], actorsLeft: 0, recordsLeft: 0, itemsLeft: 0, tracksLeft: 0, audit: [] });
+  });
+  assert.deepEqual(clean(), { records: 0, items: 0, folders: 0, overlay: 0 }, "Step 27 leaves nothing: no tag, no material, no item, no folder");
+  assert.equal(api.definitions.tag.has("gate-g20-ore"), false);
 });

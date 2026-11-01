@@ -157,7 +157,7 @@ export const SCENES = {
  * belowMinimum: the window is narrower than HUB.minSize.width (it cannot be dragged there; the harness draws it anyway as a stress test): an unsplittable badge
  * may then be wider than the box it sits in, so only the badge, overlap, position and target checks apply.
  */
-function pageChecks({ minTarget, checkWords, belowMinimum }) {
+function pageChecks({ minTarget, checkWords, belowMinimum, minEditorPane }) {
   const problems = [];
   const root = document.querySelector(".pfp-hub");
   const name = el => `${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? `.${el.className.trim().split(/\s+/)[0]}` : ""} "${(el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 36)}"`;
@@ -187,9 +187,42 @@ function pageChecks({ minTarget, checkWords, belowMinimum }) {
   // 2b. Nothing in the Hub is positioned absolutely or fixed: badges, pills and bars stay in the flow, so they cannot print over a neighbour.
   for (const el of els) if (/(absolute|fixed)/.test(style(el).position)) problems.push(`positioned ${style(el).position} (it can cover a neighbour): ${name(el)}`);
   // 3. Every control is a big enough target.
-  for (const el of root.querySelectorAll("[data-action], input, select")) {
-    const r = el.getBoundingClientRect();
+  for (const el of root.querySelectorAll("[data-action], input, select, textarea")) {
+    // A checkbox or radio keeps a normal-sized native box; its tap target is the whole label row around it.
+    const r = (/^(checkbox|radio)$/.test(el.type) && el.closest("label") ? el.closest("label") : el).getBoundingClientRect();
+    // ...and that native box stays a normal size (about the height of a line of text), not an enlarged one.
+    if (/^(checkbox|radio)$/.test(el.type) && el.getBoundingClientRect().width > parseFloat(getComputedStyle(el).fontSize) * 1.6) problems.push(`a ${el.type} box is oversized (${el.getBoundingClientRect().width.toFixed(0)}px): ${name(el.closest("label") ?? el)}`);
     if (r.height < minTarget - 0.5 || r.width < minTarget - 0.5) problems.push(`target ${r.width.toFixed(0)}x${r.height.toFixed(0)} is under ${minTarget}px: ${name(el)}`);
+  }
+  // 3b. The Item editor (v0.21.1). The 0.21.0 matrix drew narrow windows with an AUTO height (nothing could be squeezed) and exempted every scrolling box from the overflow
+  //     check (a pane squeezed to a sliver still "scrolled"), and nothing measured a minimum pane height, whether the filter row stayed inside its pane, or control overlap.
+  if (root.classList.contains("pfp-editor")) {
+    const inside = (el, box) => { const r = el.getBoundingClientRect(), b = box.getBoundingClientRect(); return r.left >= b.left - 1 && r.right <= b.right + 1 && r.top >= b.top - 1 && r.bottom <= b.bottom + 1; };
+    const list = root.querySelector(".pfp-editor-list"), detail = root.querySelector(".pfp-editor-detail");
+    // (b) every control of the filter row (the search box and the chips) is fully inside the list pane.
+    if (list) for (const el of list.querySelectorAll(".pfp-search input, .pfp-row > button")) if (el.getClientRects().length && !inside(el, list)) problems.push(`the list pane's filter row runs outside its pane: ${name(el)}`);
+    // (a) in the narrow layout an item that is picked gets a usable editor: its pane is not squeezed, and its content is all in the column (no little scrolling box inside).
+    if (root.dataset.layout === "narrow" && detail?.querySelector(".pfp-section")) {
+      const h = detail.getBoundingClientRect().height;
+      const box = detail.querySelector(".pfp-editor-scroll");
+      // Squeezed = smaller than the usable minimum while its content needs more (a pane with little to show, like a formula version's track, is naturally short).
+      const needs = (box?.scrollHeight ?? 0) + (detail.querySelector(".pfp-editor-actions-part")?.getBoundingClientRect().height ?? 0);
+      if (needs >= minEditorPane && h < minEditorPane) problems.push(`the editor pane is squeezed to ${h.toFixed(0)}px (under ${minEditorPane}px)`);
+      if (box && box.scrollHeight > box.clientHeight + 1) problems.push(`the editor's content scrolls inside a ${box.clientHeight}px box instead of showing in the window's column`);
+    }
+    // (c) no control overlaps another control, wherever they sit in the tree.
+    // (Only the part of a control that is on screen counts: the rest is scrolled out of sight inside a scrolling box and cannot overlap anything.)
+    const visibleRect = el => {
+      let { left, right, top, bottom } = el.getBoundingClientRect();
+      for (let p = el.parentElement; p && p !== root; p = p.parentElement) {
+        if (!scrolls(p)) continue;
+        const b = p.getBoundingClientRect();
+        left = Math.max(left, b.left); right = Math.min(right, b.right); top = Math.max(top, b.top); bottom = Math.min(bottom, b.bottom);
+      }
+      return right - left > 0 && bottom - top > 0 ? { left, right, top, bottom } : null;
+    };
+    const controls = [...root.querySelectorAll("[data-action], input, select, textarea")].filter(el => el.getClientRects().length).map(el => [el, visibleRect(el)]).filter(([, r]) => r);
+    for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) if (overlap(controls[i][1], controls[j][1])) problems.push(`controls overlap: ${name(controls[i][0])} / ${name(controls[j][0])}`);
   }
   // 4. Nothing is cut off at the right edge, and the page itself does not scroll sideways.
   const vw = document.documentElement.clientWidth;
@@ -261,7 +294,7 @@ export async function renderState(page, { scene, theme = "parchment", textSize =
     document.body.innerHTML = `<div class="application window-app theme-dark" style="width:100%;${frameHeight ? `height:${frameHeight}px` : ""}"><section class="window-content">${html}</section></div>`;
   }, { html, hostileCss: hostile ? HOSTILE[hostile] : "", extraCss, frameHeight });
   await page.evaluate(() => document.fonts.ready);
-  const problems = await page.evaluate(pageChecks, { minTarget: HUB.minTarget ?? 44, checkWords: width >= 280, belowMinimum: width < HUB.minSize.width });
+  const problems = await page.evaluate(pageChecks, { minTarget: HUB.minTarget ?? 44, checkWords: width >= 280, belowMinimum: width < HUB.minSize.width, minEditorPane: 280 });
   if (shot) await page.screenshot({ path: shot, fullPage: layout === "narrow" });
   return { problems, layout };
 }

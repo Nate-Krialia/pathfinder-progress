@@ -15,6 +15,8 @@ import { isDifficultyText } from "../difficulty.js";
 import { itemKey, parseKey, trackOf } from "../discovery/track.js";
 import { BLOCK_LABELS, BLOCK_TYPES, TIERS, classRoles, powerRole, collapse, decompileRecord, describeRoles, fitsRoles, flat, newBlock, setProblems, spread, valueAt } from "./blocks.js";
 import { rowEdit, rowProblems, rowsOf, trackOfRows } from "./rows.js";
+import { NO_STUDY, STAGES as PREVIEW_STAGES, STAGE_LABELS, stageOf } from "./preview.js";
+import { S } from "../hub/strings.js";
 
 export const E = {
   title: "Item editor",
@@ -55,8 +57,8 @@ export const E = {
   nothingYet: "Nothing set for this class yet.",
   save: "Save", discard: "Discard changes", revert: "Take back my edits", retire: "Retire", unretire: "Bring back", delete: "Delete", pushCopies: "Push to copies", makeItem: "Make an item",
   unsaved: "You have unsaved changes.", saved: name => `Saved ${name}.`, nothingToSave: "Nothing to save.",
-  create: "Create", cancel: "Cancel", creatingMaterial: "New material", creatingNote: "New note",
-  preview: "What players see", previewClass: "Item class", previewIn: "In a", previewNothing: "Players would see no effect from this yet.",
+  create: "Create", cancel: "Cancel", chooseTier: "Choose a tier", chooseFormula: "Choose a formula", chooseKind: "Choose a kind of note", creatingMaterial: "New material", creatingNote: "New note",
+  preview: "What players see", previewStage: "Stage", previewNoEffectsYet: "No effects yet: a player learns what it does by crafting with it.", previewClass: "Item class", previewIn: "In a", previewNothing: "Players would see no effect from this yet.",
   previewWorth: gp => `Worth ${gp} gp each`, previewBulk: bulk => `Bulk ${bulk}`, previewTier: tier => `Tier ${tier}`,
   previewFits: roles => `Fills slots that need: ${roles.join(", ")}`, previewFitsNone: "Fills no slots yet.",
   previewStudy: `Study: ${W.stages.join(" → ")}`, previewNoStudy: "No study: known and usable on pickup.",
@@ -206,25 +208,29 @@ export function defaultPreviewClass(blocks) {
   return CLASS_IDS[0];
 }
 
-/** "What players see" for the draft, in one item class. */
-export function previewOf(registry, draft, itemClass) {
+/**
+ * "What players see" for the draft: one of three stages (just picked up, after studying, after a successful craft) and, for the craft stage, one item class.
+ * A material's stage comes from scripts/editor/preview.js (stripForPlayer + the Hub's own Compendium view-model); a note has no stages.
+ */
+export function previewOf(registry, draft, itemClass, stage = "crafted") {
   const f = draft.fields;
   const name = String(f.name || "this item").trim();
   const classes = CLASS_IDS.map(id => ({ id, label: ITEM_CLASSES[id].label, selected: id === itemClass }));
-  const out = { title: E.preview, classes, name, lines: [], facts: [], sheet: String(f.description ?? "").trim(), study: draft.rows.length ? E.previewStudy : E.previewNoStudy };
+  const out = { title: E.preview, classes, name, lines: [], facts: [], know: null, note: null, sheet: String(f.description ?? "").trim(), stages: null, stage: null, showClasses: false };
   if (draft.kind === "material") {
-    const tier = Number(f.tier) || 1;
-    const roles = classRoles(draft.blocks, itemClass, tier);
-    out.lines = describeRoles(name, roles, itemClass);
+    const st = PREVIEW_STAGES.includes(stage) ? stage : "crafted";
+    const view = stageOf(registry, draft, st, itemClass);
+    out.stage = st;
+    out.stages = PREVIEW_STAGES.map(id => ({ id, label: STAGE_LABELS[id], selected: id === st }));
+    out.showClasses = st === "crafted";
+    out.name = view.title;
+    out.facts = [view.meta, ...view.facts];
+    out.know = view.know;
+    out.note = view.note;
+    out.lines = view.effects;
     // Players read the ability text on the item itself; a DC or odds in it is shown to them there (the Hub hides such wording, an item sheet cannot).
-    if (out.lines.some(isDifficultyText)) out.warning = E.previewDifficulty;
-    out.facts.push(E.previewTier(tier));
-    if (String(f.value ?? "").trim() !== "" && Number(f.value) >= 0) out.facts.push(E.previewWorth(Number(f.value)));
-    out.facts.push(E.previewBulk(f.bulk || "L"));
-    const fits = fitsRoles(draft.blocks, itemClass).map(r => E.roleWords[r] ?? r);
-    out.fits = fits.length ? E.previewFits(fits) : E.previewFitsNone;
-    const tag = registry.tag?.get(f.tag);
-    out.tagLine = tag ? E.tagTheme(tag.name, tag.theme) : E.noTagLine;
+    if (st === "crafted" && view.effects.some(isDifficultyText)) out.warning = E.previewDifficulty;
+    if (st === "crafted") out.fits = view.fits ? E.previewFits(view.fits.map(r => E.roleWords[r] ?? r)) : E.previewFitsNone;
   } else if (draft.kind === "note") {
     const recipe = registry.recipe.get(f.recipeId);
     out.facts.push(recipe ? `Teaches ${recipe.name} once studied.` : "Teaches nothing yet: pick a formula.");
@@ -235,6 +241,8 @@ export function previewOf(registry, draft, itemClass) {
 
 // The window's model -----------------------------------------------------------------------------------------------------
 const opts = (values, selected) => values.map(([value, label]) => ({ value: String(value), label, selected: String(value) === String(selected) }));
+/** A required choice starts on a disabled placeholder, never on the first real option (a silent default let a wrong formula through). */
+const required = (placeholder, values, selected) => [{ value: "", label: placeholder, selected: String(selected ?? "") === "", disabled: true }, ...opts(values, selected)];
 
 function effectsModel(draft, effectClass, problems) {
   const tier = Number(draft.fields.tier) || 1;
@@ -270,11 +278,11 @@ function tierField(field, tier) {
 /**
  * @param {object} input
  *   registry, overlay, records (the editor store's records), leftovers, selectedKey, draft, base, message, filters, collapsed, layout, display,
- *   effectClass (the Effects tab), previewClass (null = the default), creating ({ kind, name, tier, recipeId, preset } or null), confirm ({ text, action } or null),
+ *   effectClass (the Effects tab), previewClass (null = the default), previewStage (picked | studied | crafted), creating ({ kind, name, tier, recipeId, preset } or null), confirm ({ text, action } or null),
  *   origin ({ origin, editedFields, retired, hasItem } for the selected item)
  */
 export function editorModel(input) {
-  const { registry, overlay = {}, records = {}, leftovers = [], selectedKey = null, draft = null, base = null, message = "", filters = {}, collapsed = [], layout = "wide", display, effectClass = "general", previewClass = null, creating = null, confirm = null, origin = null } = input;
+  const { registry, overlay = {}, records = {}, leftovers = [], selectedKey = null, draft = null, base = null, message = "", filters = {}, collapsed = [], layout = "wide", display, effectClass = "general", previewClass = null, previewStage = "crafted", creating = null, confirm = null, origin = null } = input;
   const all = listItems(registry, overlay, records);
   const shown = filterItems(all, filters);
   const hidden = new Set(collapsed);
@@ -335,7 +343,7 @@ export function editorModel(input) {
     }
   };
   const cls = previewClass && CLASS_IDS.includes(previewClass) ? previewClass : defaultPreviewClass(draft.blocks);
-  return { ...base0, detail, preview: draft.kind === "recipe" ? null : previewOf(registry, draft, cls) };
+  return { ...base0, detail, preview: draft.kind === "recipe" ? null : previewOf(registry, draft, cls, previewStage) };
 }
 
 const whyList = list => (list.length > 3 ? [...list.slice(0, 3), `…and ${list.length - 3} more.`] : list);
@@ -345,12 +353,14 @@ function creatorModel(creating, registry) {
   const recipeChoices = [...registry.recipe.values()].map(r => [r.id, r.name]).sort((a, b) => a[1].localeCompare(b[1]));
   const problems = [];
   if (!String(creating.name ?? "").trim()) problems.push("Give it a name first.");
-  if (!isMaterial && !registry.recipe.has(creating.recipeId)) problems.push("Pick the formula this note teaches.");
+  if (isMaterial && !/^[1-5]$/.test(String(creating.tier ?? ""))) problems.push("Choose a tier first.");
+  if (!isMaterial && !registry.recipe.has(creating.recipeId)) problems.push("Pick a formula first.");
+  if (!isMaterial && !NOTE_PRESETS.includes(creating.preset)) problems.push("Choose a kind of note first.");
   return {
     kind: "create", itemKind: creating.kind, heading: isMaterial ? E.creatingMaterial : E.creatingNote, name: creating.name ?? "",
-    tier: isMaterial ? opts(TIERS.map(t => [t, `Tier ${t}`]), creating.tier ?? 1) : null,
-    recipe: isMaterial ? null : opts([["", E.formulaPick], ...recipeChoices], creating.recipeId ?? ""),
-    preset: isMaterial ? null : opts(NOTE_PRESETS.map(p => [p, E.presets[p]]), creating.preset ?? "research"),
+    tier: isMaterial ? required(E.chooseTier, TIERS.map(t => [t, `Tier ${t}`]), creating.tier) : null,
+    recipe: isMaterial ? null : required(E.chooseFormula, recipeChoices, creating.recipeId),
+    preset: isMaterial ? null : required(E.chooseKind, NOTE_PRESETS.map(p => [p, E.presets[p]]), creating.preset),
     problems, canCreate: problems.length === 0
   };
 }
@@ -360,7 +370,7 @@ const esc = text => String(text ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", 
 const attrs = data => Object.entries(data).filter(([, v]) => v !== undefined).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("");
 const button = ({ action, label, data = {}, disabled = false, pressed, expanded, extra = "" }) =>
   `<button type="button" class="pfp-btn${disabled ? " is-disabled" : ""}${extra}" data-action="${action}"${attrs(data)}${pressed === undefined ? "" : ` aria-pressed="${pressed}"`}${expanded === undefined ? "" : ` aria-expanded="${expanded}"`}${disabled ? ' aria-disabled="true"' : ""}>${esc(label)}</button>`;
-const select = (label, options, data, id) => `<label>${esc(label)} <select data-field="${data.field}"${attrs(Object.fromEntries(Object.entries(data).filter(([k]) => k !== "field")))} aria-label="${esc(id ?? label)}">${options.map(o => `<option value="${esc(o.value)}"${o.selected ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>`;
+const select = (label, options, data, id) => `<label>${esc(label)} <select data-field="${data.field}"${attrs(Object.fromEntries(Object.entries(data).filter(([k]) => k !== "field")))} aria-label="${esc(id ?? label)}">${options.map(o => `<option value="${esc(o.value)}"${o.selected ? " selected" : ""}${o.disabled ? " disabled" : ""}>${esc(o.label)}</option>`).join("")}</select></label>`;
 const input = (label, value, data, { type = "text", min, step, wide = false } = {}) => `<label${wide ? ' class="pfp-wide"' : ""}>${esc(label)} <input type="${type}"${min !== undefined ? ` min="${min}"` : ""}${step ? ` step="${step}"` : ""} data-field="${data.field}"${attrs(Object.fromEntries(Object.entries(data).filter(([k]) => k !== "field")))} value="${esc(value)}" aria-label="${esc(label)}"></label>`;
 const area = (label, value, data, rows = 2) => `<label class="pfp-wide">${esc(label)} <textarea rows="${rows}" data-field="${data.field}"${attrs(Object.fromEntries(Object.entries(data).filter(([k]) => k !== "field")))} aria-label="${esc(label)}">${esc(value)}</textarea></label>`;
 const why = items => items.map(p => `<p class="pfp-why" role="alert">${esc(p)}</p>`).join("");
@@ -426,10 +436,15 @@ function renderDetail(d, confirmHtml = "") {
 
 function renderPreview(p) {
   if (!p) return "";
-  const picker = `<label>${esc(E.previewClass)} <select data-field="preview-class" aria-label="${esc(E.previewClass)}">${p.classes.map(c => `<option value="${esc(c.id)}"${c.selected ? " selected" : ""}>${esc(c.label)}</option>`).join("")}</select></label>`;
-  return `<h2>${esc(p.title)}</h2>${picker}<h3>${esc(p.name)}</h3>${p.facts.map(f => `<p class="pfp-note">${esc(f)}</p>`).join("")}
-    ${p.lines.length ? `<ul class="pfp-lines">${p.lines.map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : `<p class="pfp-empty">${esc(E.previewNothing)}</p>`}
-    ${p.warning ? `<p class="pfp-why" role="status">${esc(p.warning)}</p>` : ""}${p.fits ? `<p class="pfp-note">${esc(p.fits)}</p>` : ""}${p.tagLine ? `<p class="pfp-note">${esc(p.tagLine)}</p>` : ""}<p class="pfp-note">${esc(p.study)}</p>
+  const stages = p.stages ? `<div class="pfp-row" role="group" aria-label="${esc(E.previewStage)}">${p.stages.map(st => button({ action: "preview-stage", label: st.label, pressed: st.selected, data: { stage: st.id } })).join("")}</div>` : "";
+  const picker = p.showClasses || !p.stages ? `<label>${esc(E.previewClass)} <select data-field="preview-class" aria-label="${esc(E.previewClass)}">${p.classes.map(c => `<option value="${esc(c.id)}"${c.selected ? " selected" : ""}>${esc(c.label)}</option>`).join("")}</select></label>` : "";
+  const know = p.know ? `<h4>${esc(S.whatYouKnow)}</h4>${p.know.items.length ? `<ul class="pfp-lines">${p.know.items.map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}${p.know.empty ? `<p class="pfp-empty">${esc(p.know.empty)}</p>` : ""}` : "";
+  const effects = p.stage === null || p.stage === "crafted"
+    ? (p.lines.length ? `<ul class="pfp-lines">${p.lines.map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : `<p class="pfp-empty">${esc(E.previewNothing)}</p>`)
+    : `<p class="pfp-empty">${esc(E.previewNoEffectsYet)}</p>`;
+  return `<h2>${esc(p.title)}</h2>${stages}${picker}<h3>${esc(p.name)}</h3>${p.facts.map(f => `<p class="pfp-note">${esc(f)}</p>`).join("")}${know}${p.note ? `<p class="pfp-note">${esc(p.note)}</p>` : ""}
+    ${p.stage === "studied" && p.note === NO_STUDY ? "" : effects}
+    ${p.warning ? `<p class="pfp-why" role="status">${esc(p.warning)}</p>` : ""}${p.fits ? `<p class="pfp-note">${esc(p.fits)}</p>` : ""}
     ${p.sheet ? `<h4>${esc(E.previewSheet)}</h4><p class="pfp-note">${esc(p.sheet)}</p>` : ""}`;
 }
 

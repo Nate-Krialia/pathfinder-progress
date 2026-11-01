@@ -30,6 +30,7 @@ export function build() {
         "pick-item"(event, target) { return this.#pick(target.dataset.key); },
         "toggle-chip"(event, target) { return this.#chip(target.dataset.chip); },
         "toggle-group"(event, target) { return this.#group(target.dataset.kind); },
+        "preview-stage"(event, target) { this.previewStage = target.dataset.stage; return this.render(); },
         "effect-class"(event, target) { this.effectClass = target.dataset.cls; return this.render(); },
         "add-block"(event, target) { return this.#change(d => edit.addBlock(d, target.dataset.cls, target.dataset.type)); },
         "remove-block"(event, target) { return this.#change(d => edit.removeBlock(d, target.dataset.cls, target.dataset.type)); },
@@ -67,6 +68,7 @@ export function build() {
       this.layout = "wide";
       this.effectClass = "general";
       this.previewClass = null;
+      this.previewStage = "crafted";
       this.creating = null;
       this.confirm = null;
     }
@@ -94,7 +96,7 @@ export function build() {
     }
     #group(kind) { this.collapsed = this.collapsed.includes(kind) ? this.collapsed.filter(k => k !== kind) : [...this.collapsed, kind]; return this.render(); }
     #ask(text, action, data = {}) { this.confirm = { text, action, ...data }; return this.render(); }
-    #startCreate(kind) { this.creating = { kind, name: "", tier: 1, recipeId: "", preset: "research" }; this.selectedKey = null; this.draft = null; this.confirm = null; this.message = ""; return this.render(); }
+    #startCreate(kind) { this.creating = { kind, name: "", tier: "", recipeId: "", preset: "" }; this.selectedKey = null; this.draft = null; this.confirm = null; this.message = ""; return this.render(); }
 
     /** Run a backend call, show its result line (or its plain-words refusal), and redraw. */
     async #run(fn) {
@@ -136,7 +138,7 @@ export function build() {
           catch (error) {
             const u = error.details?.usage;
             if (!u) throw error;
-            const where = [u.copies.length ? `held as ${u.copies.map(c2 => `${c2.count} in ${c2.where}`).join(", ")}` : null, u.recipes.length ? `a recipe override in ${u.recipes.join(", ")}` : null, u.nodes.length ? `gathered at ${u.nodes.join(", ")}` : null, u.yields.length ? `a yield of ${u.yields.join(", ")}` : null].filter(Boolean);
+            const where = [u.copies.length ? `held as ${u.copies.map(c2 => `${c2.count} in ${c2.where}`).join(", ")}` : null, u.recipes.length ? `a recipe override in ${u.recipes.join(", ")}` : null, u.nodes.length ? `gathered at ${u.nodes.join(", ")}` : null, u.yields.length ? `a yield of ${u.yields.join(", ")}` : null, u.tagged?.length ? `the tag of ${u.tagged.join(", ")}` : null].filter(Boolean);
             throw new Error(`It is still in use (${where.join("; ")}), so it was not deleted. Retire it instead and it disappears from the lists.`);
           }
         });
@@ -197,7 +199,7 @@ export function build() {
       const base = this.#base();
       return editorModel({
         registry: this.#registry(), overlay: this.#overlay(), records, leftovers: this.api.editor.leftovers(), selectedKey: this.selectedKey, draft: this.draft ?? base, base,
-        message: this.message, filters: this.filters, collapsed: this.collapsed, layout: this.layout, effectClass: this.effectClass, previewClass: this.previewClass,
+        message: this.message, filters: this.filters, collapsed: this.collapsed, layout: this.layout, effectClass: this.effectClass, previewClass: this.previewClass, previewStage: this.previewStage,
         creating: this.creating, confirm: this.confirm,
         origin: entry ? { origin: entry.origin === "world" ? "world" : entry.origin === "pack" ? "pack" : "edited", editedFields: entry.editedFields, retired: entry.retired, hasItem: this.api.editor.hasItem?.(this.selectedKey) ?? true } : null
       });

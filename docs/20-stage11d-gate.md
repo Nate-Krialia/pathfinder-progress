@@ -1,13 +1,15 @@
-# 20 Stage 11d gate (real Foundry): the Item editor, the Material creator and the effect builder (v0.21.0)
+# 20 Stage 11d gate (real Foundry): the Item editor, the Material creator and the effect builder (v0.21.1)
 
-Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. Every step is labelled **[GM]** or **[Player]**. **Click steps tell you what to click; the block then checks what is on screen and in the world.** Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, layout is the point.
+Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. Every step is labelled **[GM]** or **[Player]**. **Click steps tell you what to click; the block then checks what is on screen and in the world.** Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, layout is the point. **Each step's instructions are a short bullet list, one action per bullet, in the order you do them; what you should see is its own bullet starting "You should see:".**
 
 `tests/gate20.test.js` plays every step against the real `main.js` in a fake Foundry with a real DOM and the strict ApplicationV2 stand-in (it clicks what the steps tell you to click, then runs the block). What it cannot show: the real window, fonts, focus rings, real PF2e item sheets and prices, the real Tab key, file downloads, or the file picker.
 
 **Before each click step, the block checks the screen first** ("preflight"): is the Item editor open, is the item the step is about picked, is the right Effects tab showing? If not, the block stops with a plain sentence saying what to open or pick, instead of reporting a confusing failure. Run it again after you fix the screen.
 
+**New in 0.21.1: Steps 22 to 27.** They make their own items, so after a fresh SETUP (Step 2) you can run just Steps 22 to 27 and finish with Step 27 (CLEANUP again). Steps 1 to 21 are unchanged in what they do and check (their instructions are now short bullets; Step 21's CLEANUP also removes tags last). For a full run do 1 to 20, then 22 to 26, then CLEANUP (Step 21 or Step 27: the same block). The new steps cover: the three preview stages (Steps 22 and 23), the narrow layout (Step 24), the Persistent checkbox (Step 25) and the New note formula placeholder (Step 26).
+
 **What the gate shows** (the 11d decisions, `docs/11d-item-editor-addendum.md` and the answers that came with the approval):
-- **The window.** A list on the left (search, filter chips, collapsible groups, a Leftovers group), the editor in the middle (Basics, Discovery, Research track, Effects) and **What players see** on the right, which follows the item class you pick at the top of it.
+- **The window.** A list on the left (search, filter chips, collapsible groups, a Leftovers group), the editor in the middle (Basics, Discovery, Research track, Effects) and **What players see** on the right, which shows three stages (Just picked up, After studying, After a successful craft in this class) and, for the craft stage, the item class you pick at the top of it.
 - **The Material creator.** New material makes the definition AND a linked world item in a Materials folder; New note makes a Plan note or a Research note.
 - **The effect builder.** Blocks per item class (Add damage, Grant resistance, Special ability text, plus the base-power tier), with a T1 to T5 table for the dice and the amount. The classes now include bomb, consumable and trinket. The plain-words line is the Hub's own wording.
 - **Changing what players may know asks first.** Gold value also sets the PF2e price; bulk is a dropdown (L, 1, 2, ...).
@@ -18,23 +20,30 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 **What SETUP plants, so you know what is not an accident.** SETUP says it in its result too. It plants: **(1)** one deliberately **orphaned research track**, `material:g20-orphan` (a track for an item that does not exist; Step 18 removes it through the editor's Leftovers, and CLEANUP removes it if you never get there); **(2)** one **in-memory** material, **Gate G20 Memory** (`g20-memory`; it is not in the packs, so the editor must leave it alone and refuse to edit it, and it is gone when you reload the GM window); **(3)** the character **Gate G20 Scholar**, owned by the user "Test". Everything else is made by you, through the editor, in the steps.
 
+**SETUP is unchanged in 0.21.1** (it still plants exactly the three things above). Step 22 plants three more, through the editor's api, and says so: the tag **Gate G20 Ore**, and the materials **Gate G20 Plain Stage** (no research track) and **Gate G20 Study Stage** (a research track), all with the same weapon effects and no DC in any text.
+
 **Safety.** Throwaway things named "Gate G20 ...", ids starting `gate-g20-` / `g20-`. They are real world data while the gate runs (the editor writes to the world setting `editorDefinitions` and to the world's Items, and may create a **Materials** and a **Notes** folder if you have none), and CLEANUP removes every one. No real campaign data is changed: the only edit of an existing item (Steps 12 and 13) is a world patch on a material from the packs, which is taken back in the next step. SETUP refuses to run if an earlier run left something behind (an editor record or world item named like a gate one, or a leftover `g20-` track) or if a "Gate G20 ..." actor exists that it did not make. CLEANUP always works and is safe to run twice, even after reloading the GM window (the fake definitions and the planted orphan are gone from memory but the orphan's track is still saved: CLEANUP clears it anyway).
 
-**Restart note.** 0.21.0 adds one world setting (`editorDefinitions`, registered in code), a stylesheet rule block and the editor's scripts. The manifest changes only in its version: update the module and **force-reload both windows** (Ctrl+Shift+R). No server restart is needed. The scene-controls button is now the screwdriver-and-wrench one ("Item editor"); the old open-book "Discovery tracks" button is gone.
+**Restart note.** 0.21.1 changes the stylesheet and the editor's scripts and nothing in the manifest but the version: force-reload both windows (Ctrl+Shift+R); no server restart. (0.21.0 added one world setting (`editorDefinitions`, registered in code), a stylesheet rule block and the editor's scripts. The manifest changed only in its version.)  The scene-controls button is now the screwdriver-and-wrench one ("Item editor"); the old open-book "Discovery tracks" button is gone.
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.21.0**; if it is not, stop (the release may still be building).
+**What to do and see:**
+- Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.21.1**; if it is not, stop (the release may still be building).
+- Run the block below in the GM window, then again in the Player window.
+- You should see: `["<your GM name>", true, "0.21.1"]` in the GM window and `["Test", false, "0.21.1"]` in the Player window.
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.21.0"]` in the GM window and `["Test", false, "0.21.0"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 
-Safe to run again at any time (after a reload of the GM window it re-registers the in-memory material and rebuilds `globalThis.__g20`; it does not plant the orphan again).
+**What to do and see:**
+- Run the block below in the GM window. It is safe to run again at any time (after a reload of the GM window it re-registers the in-memory material and rebuilds `globalThis.__g20`; it does not plant the orphan again).
+- You should see: an object with `planted` (three lines) and `notes` (naming one formula and one pack material), and a `published` revision. On a rerun it says `already: "set up"`.
+- Remember the two names in `notes`: the formula (Step 8) and the pack material (Steps 3, 12 and 13).
 
 ```js
 // [GM] SETUP: plants one orphaned research track, one in-memory material and the character Gate G20 Scholar (owned by Test). Says what it planted.
@@ -122,15 +131,19 @@ await (async () => {
 })();
 ```
 
-Expected: an object with `planted` (three lines) and `notes` (naming one formula and one pack material), and a `published` revision. On a rerun it says `already: "set up"`. **Remember the two names in `notes`.**
 
 ## Group A: the window and the creator
 
 ## Step 3 [GM]: open the Item editor and look at it
 
-Open it from the scene controls (the screwdriver-and-wrench button, "Item editor"), or run `game.modules.get("pathfinder-progress").api.discovery.openEditor()`. **What to do and see:** in the list on the left, open **Materials** and pick the pack material named in SETUP's `notes` (Steps 12 and 13 use it too). The editor in the middle shows **Basics, Discovery, Research track, Effects** and says "From the module's packs." **Save is off.** On the right is **What players see**. Open **Leftovers** at the bottom of the list: it shows **material:g20-orphan is a research track for an item that no longer exists** with a **Remove** button (do not press it yet).
-
-**Send me a screenshot of the whole window with the three panes and the Leftovers group showing.**
+**What to do and see:**
+- Open the editor from the scene controls (the screwdriver-and-wrench button, "Item editor"), or run `game.modules.get("pathfinder-progress").api.discovery.openEditor()`.
+- In the list on the left, open **Materials** and click the pack material named in SETUP's `notes`.
+- You should see: the editor in the middle with **Basics, Discovery, Research track, Effects**, and "From the module's packs." **Save is off.**
+- You should see: on the right, **What players see**.
+- Look at **Leftovers** at the bottom of the list.
+- You should see: **material:g20-orphan is a research track for an item that no longer exists** with a **Remove** button. Do not press it yet.
+- **Send me a screenshot of the whole window with the three panes and the Leftovers group showing.**
 
 ```js
 // [GM] after the clicks above: three panes left to right, the orphan is listed, nothing is saved yet, and the in-memory material is left alone.
@@ -150,9 +163,18 @@ await (async () => {
 })();
 ```
 
+
 ## Step 4 [GM]: make a material
 
-**What to do and see:** press **New material** (top of the window). A small form appears: **Create** is off and says "Give it a name first." Type **Gate G20 Fang** as the name and choose **Tier 2**; press **Create**. The message says "**Made Gate G20 Fang and an item for it in the world's Items.**" The editor now shows it ("Made in this world's editor.") and a **Delete** button, and no "Make an item" button (it already has an item). Look in the sidebar's Items tab: a **Materials** folder holds **Gate G20 Fang**.
+**What to do and see:**
+- Click **New material** (top of the window).
+- You should see: a small form; **Create** is off and the reason says "Give it a name first." (and, new in 0.21.1, "Choose a tier first.")
+- Type **Gate G20 Fang** as the name.
+- Choose **Tier 2**.
+- Press **Create**.
+- You should see: "**Made Gate G20 Fang and an item for it in the world's Items.**"
+- You should see: the editor shows it ("Made in this world's editor.") with a **Delete** button and no "Make an item" button (it already has an item).
+- Look in the sidebar's Items tab. You should see: a **Materials** folder holding **Gate G20 Fang**.
 
 ```js
 // [GM] after the clicks above: the definition, the world record and the linked world item exist.
@@ -172,9 +194,21 @@ await (async () => {
 })();
 ```
 
+
 ## Step 5 [GM]: Basics, Save, and Push to copies
 
-**What to do and see:** with **Gate G20 Fang** picked, set **Gold value (gp each)** to **12**, **Bulk** to **1**, **Label (optional, like Parts)** to **Parts**, and type in **Description**: **A fang from a throwaway beast.** As you type, **Save** turns on, "You have unsaved changes." shows, and the right-hand pane shows "**Worth 12 gp each**" and "**Bulk 1**". Press **Save**: "Saved Gate G20 Fang. **Use Push to copies** to update the items that already exist." Press **Push to copies**: a question appears ("Write this item's name, image, description, bulk and price onto every copy ...?"); press **Yes, do it**: "**Updated 1 copy.**"
+**What to do and see:**
+- With **Gate G20 Fang** picked, set **Gold value (gp each)** to **12**.
+- Set **Bulk** to **1**.
+- Set **Label (optional, like Parts)** to **Parts**.
+- Type **A fang from a throwaway beast.** in **Description**.
+- You should see: **Save** turns on, "You have unsaved changes." shows, and the right-hand pane says "**Worth 12 gp each**" and "**Bulk 1**".
+- Press **Save**.
+- You should see: "Saved Gate G20 Fang. **Use Push to copies** to update the items that already exist."
+- Press **Push to copies**.
+- You should see: a question ("Write this item's name, image, description, bulk and price onto every copy ...?") with focus on **No, keep things as they are**.
+- Press **Yes, do it**.
+- You should see: "**Updated 1 copy.**"
 
 ```js
 // [GM] after the clicks above: the definition and the world item agree (the gold value also sets the PF2e price).
@@ -193,11 +227,25 @@ await (async () => {
 })();
 ```
 
+
 ## Group B: the effect builder
 
 ## Step 6 [GM]: Add damage and a special ability to the Weapon class
 
-**What to do and see:** in **Effects**, press the **Weapon** tab. Press **+ Add damage**: a block appears with dice **1d6** and damage type **fire**, and the **+ Add damage** button turns off (one per class). In the right-hand pane, the line is "**Gate G20 Fang adds +1d6 fire damage**" and the class picker already says **Weapon**. Press **+ Special ability text**; type **Gate Bite** as the ability name and **The bite lingers.** as what it does: the pane adds "**Gate G20 Fang gives Gate Bite: The bite lingers.**" Back in the damage block press **Table by tier**: five boxes (Tier 1 to Tier 5) appear and the note says a material has one tier, so its own row counts. Set the **Tier 2** box (this material is tier 2) to **2d6**: the pane now says "**adds +2d6 fire damage**". Press **Save**.
+**What to do and see:**
+- In **Effects**, click the **Weapon** tab.
+- Press **+ Add damage**.
+- You should see: a block with dice **1d6** and damage type **fire**; the **+ Add damage** button turns off (one per class).
+- You should see: in the right-hand pane, "**Gate G20 Fang adds +1d6 fire damage**", and the class picker already says **Weapon**.
+- Press **+ Special ability text**.
+- Type **Gate Bite** as the ability name.
+- Type **The bite lingers.** as what it does.
+- You should see: the pane adds "**Gate G20 Fang gives Gate Bite: The bite lingers.**"
+- In the damage block press **Table by tier**.
+- You should see: five boxes (Tier 1 to Tier 5) and a note that a material has one tier, so its own row counts.
+- Set the **Tier 2** box (this material is tier 2) to **2d6**.
+- You should see: the pane now says "**adds +2d6 fire damage**".
+- Press **Save**.
 
 ```js
 // [GM] after the clicks above: the blocks compiled to the roles the craft engine applies, for this material's own tier.
@@ -215,9 +263,21 @@ await (async () => {
 })();
 ```
 
+
 ## Step 7 [GM]: the other classes, a base-power tier, and the preview's class picker
 
-**What to do and see:** press the **Bomb** tab, **+ Add damage**, set the dice to **1d4** and the damage type to **acid**. Press the **Trinket** tab: **+ Add damage** is **off** here (a trinket has no bonus damage). Press **+ Grant resistance**, set the damage type to **fire** and the amount to **5**. Press the **Weapon** tab and set **Base power tier** to **T2**. Press **Save**. In the right-hand pane, use **Item class** to look at **Trinket** ("gives resistance 5 to fire", no fire damage), then **Weapon** again.
+**What to do and see:**
+- Click the **Bomb** tab and press **+ Add damage**.
+- Set the dice to **1d4** and the damage type to **acid**.
+- Click the **Trinket** tab.
+- You should see: **+ Add damage** is **off** here (a trinket has no bonus damage).
+- Press **+ Grant resistance**.
+- Set the damage type to **fire** and the amount to **5**.
+- Click the **Weapon** tab and set **Base power tier** to **T2**.
+- Press **Save**.
+- In the right-hand pane set **Item class** to **Trinket**.
+- You should see: "gives resistance 5 to fire" and no fire damage.
+- Set **Item class** back to **Weapon**.
 
 ```js
 // [GM] after the clicks above: three classes have their own effects; the picker only changes the preview.
@@ -234,9 +294,21 @@ await (async () => {
 })();
 ```
 
+
 ## Step 8 [GM]: notes (a Plan note and a Research note)
 
-**What to do and see:** press **New note**. Name it **Gate G20 Plan**, pick the formula named in SETUP's `notes`, choose **Plan note (a short study teaches the formula)** and press **Create**: "Made Gate G20 Plan and an item for it ...". Press **New note** again: **Gate G20 Research**, the same formula, **Research note (a longer study)**, **Create**. Open the **Research track** section of each: the Plan note's milestone needs fewer steps than the Research note's.
+**What to do and see:**
+- Click **New note**.
+- Type **Gate G20 Plan** as the name.
+- Choose the formula named in SETUP's `notes`.
+- Choose **Plan note (a short study teaches the formula)**.
+- Press **Create**.
+- You should see: "Made Gate G20 Plan and an item for it ..."
+- Click **New note** again.
+- Type **Gate G20 Research** as the name, choose the same formula, and choose **Research note (a longer study)**.
+- Press **Create**.
+- Open the **Research track** section of each note.
+- You should see: the Plan note's milestone needs fewer steps than the Research note's.
 
 ```js
 // [GM] after the clicks above: both notes exist with linked items in a Notes folder; the Plan preset is shorter.
@@ -254,11 +326,14 @@ await (async () => {
 })();
 ```
 
+
 ## Group C: changing what players may know
 
 ## Step 9 [GM]: a character who knows the material (no clicks)
 
-Nothing to click. Run the block. It gives **Gate G20 Scholar** a Gate G20 Fang and writes into her Compendium that she has crafted with it, so the next two steps have something a player already knows.
+**What to do and see:**
+- Nothing to click.
+- Run the block below. It gives **Gate G20 Scholar** a Gate G20 Fang and writes into her Compendium that she has crafted with it, so the next two steps have something a player already knows.
 
 ```js
 // [GM] FIXTURE: Gate G20 Scholar holds a Gate G20 Fang and has crafted with it as a weapon (a planted fact, normally learned by crafting).
@@ -278,9 +353,17 @@ await (async () => {
 })();
 ```
 
+
 ## Step 10 [GM]: Save asks first; answer No
 
-**What to do and see:** pick **Gate G20 Fang**, open the **Every class** tab in **Effects** and set **Base power tier** to **T1**. Press **Save**. Instead of saving, a question appears at the top of the window: "**Gate G20 Scholar already knows something this changes (what it does in crafts). Save anyway?**" Press **No, keep things as they are**. The question goes, **your change is still in the editor** and **Save** is still on.
+**What to do and see:**
+- Pick **Gate G20 Fang**.
+- In **Effects**, click the **Every class** tab.
+- Set **Base power tier** to **T1**.
+- Press **Save**.
+- You should see: instead of saving, a question at the editor's buttons: "**Gate G20 Scholar already knows something this changes (what it does in crafts). Save anyway?**"
+- Press **No, keep things as they are**.
+- You should see: the question goes, **your change is still in the editor** and **Save** is still on.
 
 ```js
 // [GM] after the clicks above: nothing was saved, and the draft is still there.
@@ -295,9 +378,14 @@ await (async () => {
 })();
 ```
 
+
 ## Step 11 [GM]: Save asks first; answer Yes
 
-**What to do and see:** press **Save** again; the same question appears; this time press **Yes, do it**: "**Saved Gate G20 Fang.**" **Save** goes off.
+**What to do and see:**
+- Press **Save** again.
+- You should see: the same question.
+- Press **Yes, do it**.
+- You should see: "**Saved Gate G20 Fang.**" and **Save** goes off.
 
 ```js
 // [GM] after the clicks above: the change is saved now.
@@ -313,11 +401,17 @@ await (async () => {
 })();
 ```
 
+
 ## Group D: pack items, retire and delete, export and import, leftovers
 
 ## Step 12 [GM]: edit a pack item (a world patch)
 
-**What to do and see:** pick the **pack material named in SETUP's `notes`**. Add **" (G20)"** to the end of its **Name**. **Save**. The editor now says "**From the packs, with edits made here. Edited here: name.**", the list entry says "edited here", and there is a **Take back my edits** button.
+**What to do and see:**
+- Pick the **pack material named in SETUP's `notes`**.
+- Add **" (G20)"** to the end of its **Name**.
+- Press **Save**.
+- You should see: "**From the packs, with edits made here. Edited here: name.**"
+- You should see: the list entry says "edited here" and there is a **Take back my edits** button.
 
 ```js
 // [GM] after the clicks above: the pack item is edited as a world patch, and the packs themselves are untouched.
@@ -333,9 +427,14 @@ await (async () => {
 })();
 ```
 
+
 ## Step 13 [GM]: take it back
 
-**What to do and see:** press **Take back my edits**, then **Yes, do it**: "**Back to the packs' version.**" The name is the original again and the list no longer says "edited here".
+**What to do and see:**
+- Press **Take back my edits**.
+- Press **Yes, do it**.
+- You should see: "**Back to the packs' version.**"
+- You should see: the name is the original again and the list no longer says "edited here".
 
 ```js
 // [GM] after the clicks above: the patch is gone, the pack's name is back.
@@ -349,9 +448,12 @@ await (async () => {
 })();
 ```
 
+
 ## Step 14 [GM]: a material to delete (no clicks)
 
-Nothing to click. Run the block. It makes **Gate G20 Delete Me** (through the same call the Create button uses) and gives one to Gate G20 Scholar, so the next step can try to delete something that is in use.
+**What to do and see:**
+- Nothing to click.
+- Run the block below. It makes **Gate G20 Delete Me** (through the same call the Create button uses) and gives one to Gate G20 Scholar, so the next step can try to delete something that is in use.
 
 ```js
 // [GM] FIXTURE: Gate G20 Delete Me exists and Gate G20 Scholar holds one.
@@ -367,9 +469,22 @@ await (async () => {
 })();
 ```
 
+
 ## Step 15 [GM]: Delete is refused while it is in use; Retire hides it; Bring back
 
-**What to do and see:** in the list's search box type **delete me** and pick **Gate G20 Delete Me**. Press **Delete**: a question ("Delete this item and its world item? This cannot be undone ..."); press **Yes, do it**. The message says "**It is still in use (held as 1 in Gate G20 Scholar), so it was not deleted. Retire it instead ...**" and the item is still there. Press **Retire**: "**Retired. It no longer shows in the lists unless you turn on Show retired.**" The list entry disappears. Turn on the **Show retired** chip: the entry is back, marked **retired**. Press **Bring back** ("Brought back.") and turn **Show retired** off again.
+**What to do and see:**
+- Type **delete me** in the list's search box and click **Gate G20 Delete Me**.
+- Press **Delete**.
+- You should see: a question ("Delete this item and its world item? This cannot be undone ...").
+- Press **Yes, do it**.
+- You should see: "**It is still in use (held as 1 in Gate G20 Scholar), so it was not deleted. Retire it instead ...**" and the item is still there.
+- Press **Retire**.
+- You should see: "**Retired. It no longer shows in the lists unless you turn on Show retired.**" and the list entry disappears.
+- Turn on the **Show retired** chip.
+- You should see: the entry is back, marked **retired**.
+- Press **Bring back**.
+- You should see: "Brought back."
+- Turn **Show retired** off again.
 
 ```js
 // [GM] after the clicks above: it is still there, not retired, and still held. (This block then removes her copy so the next step can delete it.)
@@ -388,9 +503,13 @@ await (async () => {
 })();
 ```
 
+
 ## Step 16 [GM]: Delete works when nothing uses it
 
-**What to do and see:** with **Gate G20 Delete Me** still picked, press **Delete**, then **Yes, do it**: "**Deleted.**" The editor goes back to "Pick an item on the left" and the item is gone from the list and from the Items tab.
+**What to do and see:**
+- With **Gate G20 Delete Me** still picked, press **Delete**.
+- Press **Yes, do it**.
+- You should see: "**Deleted.**", the editor goes back to "Pick an item on the left", and the item is gone from the list and from the Items tab.
 
 ```js
 // [GM] after the clicks above: the definition, the record and the world item are all gone; the other gate items are untouched.
@@ -406,9 +525,13 @@ await (async () => {
 })();
 ```
 
+
 ## Step 17 [GM]: export and import
 
-**What to do and see:** press **Export**: a file named `pathfinder-progress-editor.json` downloads and the message says "**Exported N records.**" (Do not press **Import** here: it opens a file picker, which the block does through the api instead.)
+**What to do and see:**
+- Press **Export**.
+- You should see: a file named `pathfinder-progress-editor.json` downloads and the message says "**Exported N records.**"
+- Do not press **Import** here: it opens a file picker, which the block does through the api instead.
 
 ```js
 // [GM] after pressing Export: the bundle is made; importing it again adds nothing; a new record imports with an item and can be deleted.
@@ -431,9 +554,14 @@ await (async () => {
 })();
 ```
 
+
 ## Step 18 [GM]: Leftovers (the must-do fix)
 
-**What to do and see:** in the list, open **Leftovers**. It shows **material:g20-orphan is a research track for an item that no longer exists**. Press **Remove** next to it: "**Removed material:g20-orphan.**" and the Leftovers group disappears.
+**What to do and see:**
+- In the list, look at **Leftovers**.
+- You should see: **material:g20-orphan is a research track for an item that no longer exists**.
+- Press **Remove** next to it.
+- You should see: "**Removed material:g20-orphan.**" and the Leftovers group disappears.
 
 ```js
 // [GM] after the clicks above: the orphan is gone from the editor and from the setting; then a second orphan is cleared through the api the way CLEANUP does it.
@@ -452,9 +580,13 @@ await (async () => {
 })();
 ```
 
+
 ## Step 19 [Player]: nothing the GM keeps to themselves reaches you
 
-Nothing to click. In the **Player** window run the block. **What you should see:** `ALL PASS`: your copy of the definitions has no effects, blocks, class table, bulk, label or description for Gate G20 Fang, and you cannot use the editor.
+**What to do and see:**
+- Nothing to click.
+- Run the block below in the **Player** window.
+- You should see: `ALL PASS`: your copy of the definitions has no effects, blocks, class table, bulk, label or description for Gate G20 Fang, and you cannot use the editor.
 
 ```js
 // [Player] the relay audit for the editor's new fields. Changes nothing.
@@ -481,11 +613,18 @@ await (async () => {
 })();
 ```
 
+
 ## Step 20 [GM]: keyboard only, and a narrow window
 
-**What to do and see:** pick **Gate G20 Fang**. Click the empty edge of the window, then press **Tab** repeatedly: the focus ring moves through the search box, the chips, the list, the fields and the buttons, always visible, and nothing jumps out of the window. **Enter** or **Space** on a focused button presses it. Then drag the window's edge until it is **about 400px wide**: the three panes stack (list, editor, preview), nothing is cut off at the right edge, and **Save** and the other buttons stay on screen at the bottom of the editor.
-
-**Send me a screenshot of the narrow window with Gate G20 Fang picked.**
+**What to do and see:**
+- Pick **Gate G20 Fang**.
+- Click the empty edge of the window, then press **Tab** repeatedly.
+- You should see: the focus ring moves through the search box, the chips, the list, the fields and the buttons, always visible, and nothing jumps out of the window.
+- Press **Enter** or **Space** on a focused button.
+- You should see: it presses the button.
+- Drag the window's edge until it is **about 400px wide**.
+- You should see: the panes stack, nothing is cut off at the right edge, and **Save** and the other buttons are reachable.
+- **Send me a screenshot of the narrow window with Gate G20 Fang picked.**
 
 ```js
 // [GM] after the clicks above: the window is in its narrow layout, nothing spills sideways, and Tab, Enter and Space stay inside the window without being cancelled.
@@ -510,9 +649,14 @@ await (async () => {
 })();
 ```
 
+
 ## Step 21 [GM]: CLEANUP (always run this, even if a step failed)
 
-Deletes everything the gate made and puts back what it changed: the editor records and world items named like a gate one, a leftover edit of the pack material, the Materials and Notes folders **if the gate created them and they are empty**, the planted orphan, the in-memory material and Gate G20 Scholar. Safe to run twice.
+**What to do and see:**
+- Nothing to click.
+- Run the block below. It deletes everything the gate made and puts back what it changed: the editor records and world items named like a gate one (tags last), a leftover edit of the pack material, the Materials and Notes folders **if the gate created them and they are empty**, the planted orphan, the in-memory material and Gate G20 Scholar. Safe to run twice.
+- You should see: `problems: []` and every `...Left` count `0`, `audit: []`.
+- (If you then run the new Steps 22 to 26, start again from SETUP and finish with Step 27.)
 
 ```js
 // [GM] CLEANUP: deletes everything the gate made and puts back what it changed. Safe to run twice, and safe after a reload (it does not need the in-memory material or the globals).
@@ -528,7 +672,7 @@ await (async () => {
   await attempt("the pack material's edit", async () => {
     for (const [key, rec] of Object.entries(api.editor.records())) if (rec.mode === "patch" && (/ \(G20\)$/.test(rec.fields?.name ?? "") || key === saved?.pack?.key)) await api.editor.revert(key);
   });
-  for (const key of Object.keys(api.editor.records()).filter(k => /:gate-g20-/.test(k))) await attempt(`remove ${key}`, () => api.editor.remove(key));
+  for (const key of Object.keys(api.editor.records()).filter(k => /:gate-g20-/.test(k)).sort((a, b) => a.startsWith("tag:") - b.startsWith("tag:"))) await attempt(`remove ${key}`, () => api.editor.remove(key));    // tags last: a material may still name one
   await attempt("stray world items", async () => { for (const item of game.items.filter(i => /^Gate G20 /.test(i.name))) await item.delete(); });
   await attempt("the folders the gate created", async () => {
     for (const name of ["Materials", "Notes"].filter(n => !(saved?.foldersBefore ?? ["Materials", "Notes"]).includes(n))) {
@@ -559,4 +703,235 @@ await (async () => {
 })();
 ```
 
-Expected: `problems: []` and every `...Left` count `0`, `audit: []`.
+
+
+## Group E: new in 0.21.1 (Steps 22 to 27)
+
+## Step 22 [GM]: fixtures for the preview stages (no clicks)
+
+**What to do and see:**
+- Nothing to click.
+- Run the block below. It plants, through the editor's api: the tag **Gate G20 Ore** (theme cowardice), the material **Gate G20 Plain Stage** (no research track) and the material **Gate G20 Study Stage** (a research track), each with a world item and the same weapon effects. CLEANUP removes them.
+
+```js
+// [GM] FIXTURE (through the editor's api): the tag Gate G20 Ore, an untracked material and a tracked one, with the same weapon effects and no DC anywhere.
+await (async () => {
+  const g = globalThis.__g20 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
+  if (g.api.definitions.material.has("gate-g20-plain-stage") || g.api.definitions.material.has("gate-g20-study-stage")) throw new Error("the stage fixtures already exist: go on to Step 23 (or run CLEANUP and SETUP to start again)");
+  await g.api.editor.create("tag", { name: "Gate G20 Ore", theme: "cowardice", worksWith: "frightened" });
+  const effectBlocks = { general: { power: 1, blocks: [] }, byClass: { weapon: { blocks: [{ type: "damage", dice: { all: "1d6" }, damageType: "fire" }, { type: "ability", title: "Gate Sting", text: "The sting lingers." }] } } };
+  await g.api.editor.create("material", { name: "Gate G20 Plain Stage", tier: 1, tag: "gate-g20-ore", effectBlocks });
+  await g.api.editor.create("material", { name: "Gate G20 Study Stage", tier: 2, tag: "gate-g20-ore", effectBlocks, research: { milestones: [{ steps: 777, grants: { type: "properties" } }] } });
+  g.check("the tag exists", g.api.definitions.tag.get("gate-g20-ore")?.theme === "cowardice");
+  g.check("Gate G20 Plain Stage has no research track", !g.api.definitions.material.get("gate-g20-plain-stage")?.research);
+  g.check("Gate G20 Study Stage has a research track", Boolean(g.api.definitions.material.get("gate-g20-study-stage")?.research));
+  g.check("both give the weapon class damage and an ability", ["gate-g20-plain-stage", "gate-g20-study-stage"].every(id => g.api.definitions.material.get(id)?.classEffects?.weapon?.bonusDamage?.dice === "1d6" && g.api.definitions.material.get(id)?.classEffects?.weapon?.specialAbility?.title === "Gate Sting"));
+  g.check("each has a world item", g.worldItems("gate-g20-plain-stage").length === 1 && g.worldItems("gate-g20-study-stage").length === 1);
+  await g.api.publishDefinitions();
+  return g.done();
+})();
+```
+
+## Step 23 [GM]: the three preview stages
+
+**What to do and see:**
+- Type **stage** in the list's search box and click **Gate G20 Study Stage**.
+- In **What players see**, click **Just picked up**.
+- You should see: the name, **Tier 2**, "Worth 25 gp each", "Bulk L", and under **What you know**: "**You haven't studied this yet.**" No tag, no theme, no effects ("No effects yet: a player learns what it does by crafting with it."), and no Item class picker.
+- Click **After studying**.
+- You should see: "**Gate G20 Ore: a theme of cowardice.**" and "**It works with frightened.**" Still no effects.
+- Click **After a successful craft in this class**.
+- You should see: the **Item class** picker (on **Weapon**) and the lines "**Gate G20 Study Stage adds +1d6 fire damage**", "**... gives Gate Sting: The sting lingers.**" and "**... sets the weapon's power (tier 1)**".
+- Set **Item class** to **Armor**.
+- You should see: only the power line (the weapon's damage and ability are not shown for armor). Set it back to **Weapon**.
+- Click **Gate G20 Plain Stage** in the list, then **Just picked up**.
+- You should see: "**Gate G20 Ore: a theme of cowardice.**" already (it has no study, so the tag and theme are known on pickup), and no effects.
+- Click **After studying**.
+- You should see: "**No study: known on pickup.**" and nothing repeated.
+- Nowhere should you see a number of steps, a threshold, a DC or odds.
+
+```js
+// [GM] after the clicks above: for BOTH materials, each stage shows only what a player would know at that point, and none shows a number of steps, a threshold, a DC or odds.
+await (async () => {
+  const g = globalThis.__g20 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
+  const app = g.screen({ confirm: false });
+  const shown = async (key, stage) => {
+    app.selectedKey = key; app.draft = null; app.previewStage = stage; app.previewClass = null;
+    await app.render();
+    return app.element.querySelector('[data-part="preview"]').textContent.replace(/\s+/g, " ");
+  };
+  const study = "material:gate-g20-study-stage", plain = "material:gate-g20-plain-stage";
+  const seen = {};
+  for (const key of [study, plain]) for (const stage of ["picked", "studied", "crafted"]) seen[`${key.split(":")[1]}/${stage}`] = await shown(key, stage);
+  const t = (key, stage) => seen[`${key.split(":")[1]}/${stage}`];
+  g.check("study / just picked up: it has not been studied, and neither tag nor theme is shown", /You haven't studied this yet\./.test(t(study, "picked")) && !/cowardice|Gate ore/.test(t(study, "picked")));
+  g.check("study / just picked up: no effects", !/1d6|fire damage|Gate Sting|power \(tier/.test(t(study, "picked")) && /No effects yet/.test(t(study, "picked")));
+  g.check("study / after studying: the tag and its theme, in plain words", /Gate G20 Ore: a theme of cowardice\./.test(t(study, "studied")) && /It works with frightened\./.test(t(study, "studied")));
+  g.check("study / after studying: still no effects", !/1d6|fire damage|Gate Sting|power \(tier/.test(t(study, "studied")));
+  g.check("study / after a craft: the weapon's effect lines", /Gate G20 Study Stage adds \+1d6 fire damage/.test(t(study, "crafted")) && /gives Gate Sting: The sting lingers\./.test(t(study, "crafted")));
+  g.check("plain / just picked up: no study, so the tag and theme are known on pickup", /cowardice/.test(t(plain, "picked")) && !/haven't studied/.test(t(plain, "picked")));
+  g.check("plain / just picked up: no effects", !/1d6|fire damage|Gate Sting/.test(t(plain, "picked")));
+  g.check("plain / after studying: says there is no study instead of repeating itself", /No study: known on pickup\./.test(t(plain, "studied")) && !/cowardice|1d6/.test(t(plain, "studied")));
+  g.check("plain / after a craft: the weapon's effect lines", /Gate G20 Plain Stage adds \+1d6 fire damage/.test(t(plain, "crafted")));
+  const leaks = Object.entries(seen).filter(([, text]) => /777|\bsteps?\b|milestone|threshold|\bDC\b|odds|%/i.test(text)).map(([k]) => k);
+  g.check("no stage shows a step count, a threshold, a DC or odds", leaks.length === 0, leaks.join(", "));
+  app.selectedKey = study; app.previewStage = "crafted"; await app.render();
+  return g.done();
+})();
+```
+
+## Step 24 [GM]: the narrow layout
+
+**What to do and see:**
+- Click **Gate G20 Study Stage** in the list.
+- Drag the window to about **400px wide**, as **tall** as your screen allows.
+- You should see: ONE scrolling column: the header and buttons, then the list pane (search box, the filter chips **wrapping onto several lines inside the pane**, the list in its own box), then the editor with **Basics** and **Effects** at full height (not a sliver), then **What players see**.
+- You should see: "Show retired" and every other chip fully inside the list pane, none overlapping another.
+- Scroll the window.
+- You should see: the whole window scrolls as one column; the list keeps its own small scroll; you can reach every field and **Save**.
+- Make the window **short** (about 420px tall) and look again.
+- You should see: the same column, just scrolling further; nothing squeezed.
+- **Send me a screenshot at about 400px wide in a tall window, and one in a short window.**
+
+```js
+// [GM] after the clicks above: the narrow window is one scrolling column; nothing is squeezed, the chips stay inside the list pane, and no control sits on another.
+await (async () => {
+  const g = globalThis.__g20 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
+  const app = g.screen({ selected: "material:gate-g20-study-stage", confirm: false });
+  if (app.layout !== "narrow") throw new Error(`Drag the Item editor narrower than about 700px first (it is "${app.layout}" now)`);
+  const el = app.element, root = el.querySelector(".pfp-editor");
+  const list = el.querySelector(".pfp-editor-list"), detail = el.querySelector(".pfp-editor-detail"), preview = el.querySelector(".pfp-editor-preview");
+  const box = n => n.getBoundingClientRect();
+  g.check("the list, the editor and the preview are all there", Boolean(list && detail && preview));
+  if (box(list).width > 0) {
+    g.check("the panes are stacked in one column: list, then editor, then preview", box(detail).top >= box(list).bottom - 1 && box(preview).top >= box(detail).bottom - 1 && Math.abs(box(list).left - box(detail).left) < 2);
+    g.check("the editor pane is not squeezed (at least 280px tall)", box(detail).height >= 280, `${box(detail).height.toFixed(0)}px`);
+    const scroller = detail.querySelector(".pfp-editor-scroll");
+    g.check("the editor's content shows in the column, not in a little scrolling box", scroller.scrollHeight <= scroller.clientHeight + 1, `${scroller.scrollHeight} vs ${scroller.clientHeight}`);
+    const outside = [...list.querySelectorAll(".pfp-search input, .pfp-row > button")].filter(b => { const r = box(b), p = box(list); return r.left < p.left - 1 || r.right > p.right + 1 || r.top < p.top - 1 || r.bottom > p.bottom + 1; }).map(b => b.textContent.trim() || b.type);
+    g.check("every control of the filter row is inside the list pane", outside.length === 0, outside.join(", "));
+    const chips = [...list.querySelectorAll(".pfp-row > button")].map(b => box(b));
+    const touching = chips.flatMap((a, i) => chips.slice(i + 1).filter(b => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1));
+    g.check("no two chips overlap", touching.length === 0);
+    g.check("the window does not scroll sideways", root.scrollWidth <= root.clientWidth + 1, `${root.scrollWidth} vs ${root.clientWidth}`);
+  }
+  g.check("Basics and Effects are in the editor", /Basics/.test(g.text()) && /Effects/.test(g.text()) && Boolean(el.querySelector('[data-field="basic"][data-name="name"]')));
+  return g.done();
+})();
+```
+
+## Step 25 [GM]: the Persistent checkbox
+
+**What to do and see:**
+- Make the window wide again (any width over about 700px).
+- Click **Gate G20 Fang**, then the **Weapon** tab in **Effects**.
+- Look at the damage block.
+- You should see: **Persistent** as a normal-sized checkbox with the word beside it on the same line (not a huge box with the word underneath).
+- Click the **word** Persistent (not the box).
+- You should see: the box ticks and **Save** turns on.
+- Click the word again.
+- You should see: the box clears.
+- Tick it once more and press **Discard changes**.
+- You should see: **Save** is off again.
+
+```js
+// [GM] after the clicks above: the Persistent checkbox is a normal-sized box with its words beside it; the label row is the 44px tap target; it is the only checkbox.
+await (async () => {
+  const g = globalThis.__g20 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
+  const app = g.screen({ selected: "material:gate-g20-fang", tab: "weapon", confirm: false });
+  const boxes = [...app.element.querySelectorAll('input[type="checkbox"]')];
+  g.check("the damage block has exactly one checkbox (Persistent) and the editor has no other", boxes.length === 1 && boxes[0].getAttribute("aria-label") === "Persistent", boxes.length);
+  const input = boxes[0], label = input?.closest("label");
+  g.check("the box sits inside a label that holds the word Persistent", Boolean(label) && /Persistent/.test(label.textContent));
+  if (input && input.getBoundingClientRect().width > 0) {
+    const b = input.getBoundingClientRect(), l = label.getBoundingClientRect(), size = parseFloat(getComputedStyle(input).fontSize);
+    g.check("the box is a normal size (about a line of text, not an enlarged box)", b.width <= size * 1.6 && b.height <= size * 1.6, `${b.width.toFixed(0)}x${b.height.toFixed(0)}px`);
+    g.check("the label row is at least 44px tall: that is the tap target", l.height >= 43.5, `${l.height.toFixed(0)}px`);
+    g.check("the words are beside the box on the same line, not underneath", Math.abs((l.top + l.height / 2) - (b.top + b.height / 2)) < 6 && label.getBoundingClientRect().width > b.width + 20);
+  }
+  g.check("ticking it and pressing Discard changes left nothing to save", g.off("save"));
+  return g.done();
+})();
+```
+
+## Step 26 [GM]: the New note formula placeholder
+
+**What to do and see:**
+- Click **New note**.
+- Type **Gate G20 Placeholder** as the name.
+- Look at the form without choosing anything.
+- You should see: the formula dropdown reads "**Choose a formula**" (not the first formula), the kind of note reads "**Choose a kind of note**", **Create** is off, and the reason line says "**Pick a formula first.**"
+- Run the block below with the form still open.
+- Then choose **Plan note** and a formula: **Create** turns on. **Do not press it**: press **Cancel**.
+- Click **New material**.
+- You should see: the tier dropdown reads "**Choose a tier**", **Create** is off and the reason says "Choose a tier first." Press **Cancel**.
+
+```js
+// [GM] while the New note form is open with a name typed and no formula chosen: the formula starts on a disabled placeholder, Create is off, and the reason says why.
+await (async () => {
+  const g = globalThis.__g20 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
+  const app = g.editor();
+  if (!app.creating || app.creating.kind !== "note") throw new Error("Click New note first, and type the name (the form must be open)");
+  const el = app.element;
+  const formula = el.querySelector('[data-field="create"][data-name="recipeId"]'), kind = el.querySelector('[data-field="create"][data-name="preset"]');
+  g.check("the formula dropdown is not on a real formula", formula.value === "", formula.value);
+  g.check("it reads \"Choose a formula\" and that option is disabled", formula.selectedOptions[0]?.textContent === "Choose a formula" && formula.selectedOptions[0]?.disabled === true);
+  g.check("the kind of note starts on \"Choose a kind of note\" too", kind.selectedOptions[0]?.textContent === "Choose a kind of note" && kind.selectedOptions[0]?.disabled === true);
+  g.check("Create is off", el.querySelector('[data-action="do-create"]').getAttribute("aria-disabled") === "true");
+  g.check("the reason is shown: Pick a formula first.", /Pick a formula first\./.test(g.text()));
+  g.check("nothing was created", !g.api.definitions.note.has("gate-g20-placeholder"));
+  return g.done();
+})();
+```
+
+## Step 27 [GM]: CLEANUP again (after the new steps)
+
+**What to do and see:**
+- Nothing to click.
+- Run the block below. It is the same block as Step 21 (CLEANUP), repeated here so the new steps can be run on their own after a fresh SETUP. Safe to run twice.
+- You should see: `problems: []` and every `...Left` count `0`, `audit: []`.
+
+```js
+// [GM] CLEANUP: deletes everything the gate made and puts back what it changed. Safe to run twice, and safe after a reload (it does not need the in-memory material or the globals).
+await (async () => {
+  const M = "pathfinder-progress", api = game.modules.get(M).api;
+  const problems = [];
+  const attempt = async (what, fn) => { try { await fn(); } catch (error) { problems.push(`${what}: ${error.message}`); } };
+  const user = game.users.getName("Test");
+  const saved = user?.getFlag(M, "gateSetup20");
+  const scholar = game.actors.getName("Gate G20 Scholar");
+  const actors = scholar?.getFlag(M, "gateThrowaway20") === true ? [scholar] : [];
+  for (const actor of actors) await attempt(`delete ${actor.name}`, () => actor.delete());
+  await attempt("the pack material's edit", async () => {
+    for (const [key, rec] of Object.entries(api.editor.records())) if (rec.mode === "patch" && (/ \(G20\)$/.test(rec.fields?.name ?? "") || key === saved?.pack?.key)) await api.editor.revert(key);
+  });
+  for (const key of Object.keys(api.editor.records()).filter(k => /:gate-g20-/.test(k)).sort((a, b) => a.startsWith("tag:") - b.startsWith("tag:"))) await attempt(`remove ${key}`, () => api.editor.remove(key));    // tags last: a material may still name one
+  await attempt("stray world items", async () => { for (const item of game.items.filter(i => /^Gate G20 /.test(i.name))) await item.delete(); });
+  await attempt("the folders the gate created", async () => {
+    for (const name of ["Materials", "Notes"].filter(n => !(saved?.foldersBefore ?? ["Materials", "Notes"]).includes(n))) {
+      const folder = game.folders.find(f => f.type === "Item" && f.name === name);
+      if (folder && !game.items.some(i => (i.folder?.id ?? i.folder) === folder.id)) await folder.delete();
+    }
+  });
+  await attempt("the research tracks (including an orphan, whose item is gone)", async () => { for (const key of Object.keys(api.discovery.tracks.overlay()).filter(k => /:g20-/.test(k))) await api.discovery.tracks.clear(key); });
+  await attempt("the editor's leftovers", async () => { for (const l of api.editor.leftovers().filter(x => /gate-g20|g20-/.test(x.key))) await api.editor.clearLeftover(l.key); });
+  api.definitions.material.delete("g20-memory");
+  await attempt("the audit ledger", async () => {
+    const ledger = api.audit.ledger();
+    for (const actor of actors) delete ledger[actor.id];
+    if (ledger._events) ledger._events.history = ledger._events.history.filter(h => !/G20|gate-g20/.test(h.text));
+    await game.settings.set(M, "auditLedger", ledger);
+  });
+  await attempt("Test's flag", async () => { if (user?.getFlag(M, "gateSetup20") !== undefined) await user.unsetFlag(M, "gateSetup20"); });
+  await attempt("publish the cleaned registry", () => api.publishDefinitions());
+  const window = foundry.applications.instances.get("pathfinder-progress-item-editor");
+  if (window) await window.close();
+  api.gm.clearLog();
+  delete globalThis.__g20;
+  return {
+    problems, actorsLeft: game.actors.filter(a => a.name === "Gate G20 Scholar").length,
+    recordsLeft: Object.keys(api.editor.records()).filter(k => /gate-g20/.test(k)).length, itemsLeft: game.items.filter(i => /^Gate G20 /.test(i.name)).length,
+    tracksLeft: Object.keys(api.discovery.tracks.overlay()).filter(k => /:g20-/.test(k)).length, audit: api.audit.scan()
+  };
+})();
+```

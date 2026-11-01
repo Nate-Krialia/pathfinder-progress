@@ -222,8 +222,9 @@
 .pfp-hub .pfp-wide { display: flex; flex-direction: column; gap: 0.3em; width: 100%; }
 .pfp-hub .pfp-wide input, .pfp-hub textarea { width: 100% !important; }
 .pfp-hub textarea { resize: vertical; }
-.pfp-hub .pfp-check { display: flex; align-items: center; gap: 0.4em; min-height: var(--pfp-target); }
-.pfp-hub input[type="checkbox"] { width: var(--pfp-target) !important; min-width: var(--pfp-target) !important; height: var(--pfp-target) !important; min-height: var(--pfp-target) !important; padding: 0 !important; }
+/* A checkbox is a NORMAL-sized box with its label beside it; the 44px tap target is the whole label row (padding on the label), not an enlarged native box. */
+.pfp-hub input[type="checkbox"] { flex: 0 0 auto; width: 1.25em !important; min-width: 0 !important; height: 1.25em !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; }
+.pfp-hub label.pfp-check, .pfp-hub .pfp-block .pfp-row > label.pfp-check { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 0.6em; flex: 0 1 auto; min-height: var(--pfp-target); padding: 0.3em 0.7em; cursor: pointer; }
 .pfp-hub .pfp-row > label { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; }
 /* Fields in the editor's sections and blocks stack their label over the control and can shrink, so a long option list never pushes a narrow window wider. */
 .pfp-hub .pfp-section .pfp-row > label, .pfp-hub .pfp-block .pfp-row > label, .pfp-hub fieldset.pfp-tiers .pfp-row > label { flex: 1 1 10em; flex-direction: column; flex-wrap: nowrap; align-items: stretch; min-width: 0; max-width: 100%; }
@@ -231,3 +232,11 @@
 .pfp-hub .pfp-leftover { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; overflow-wrap: anywhere; }
 .pfp-hub .pfp-editor-detail, .pfp-hub .pfp-editor-preview, .pfp-hub .pfp-editor-list { overflow-wrap: anywhere; }
 .pfp-hub .pfp-tiers legend { padding: 0 0.3em; }
+
+/* Item editor, narrow (v0.21.1): ONE scrolling column. The window scrolls; every pane takes its natural height (none is squeezed to a sliver); only the list keeps a capped box
+   with its own scroll, and its filter chips wrap inside the pane. Save and the other buttons follow the sections they save. */
+.pfp-hub.pfp-editor[data-layout="narrow"] { overflow-y: auto; overflow-x: hidden; }
+.pfp-hub.pfp-editor[data-layout="narrow"] > .pfp-editor-body { display: flex; flex-direction: column; flex: 0 0 auto; min-height: auto; grid-template-rows: none; }
+.pfp-hub.pfp-editor[data-layout="narrow"] .pfp-editor-body > .pfp-pane { flex: 0 0 auto; min-height: auto; }
+.pfp-hub.pfp-editor[data-layout="narrow"] .pfp-editor-body > .pfp-pane > .pfp-editor-scroll { flex: 0 0 auto; min-height: auto; overflow: visible; }
+.pfp-hub.pfp-editor[data-layout="narrow"] .pfp-editor-body > .pfp-editor-list > .pfp-editor-scroll { flex: 0 1 auto; max-height: 18em; overflow-y: auto; overflow-x: hidden; }

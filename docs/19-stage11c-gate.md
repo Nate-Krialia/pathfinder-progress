@@ -1,4 +1,4 @@
-# 19 Stage 11c gate (real Foundry): the discovery chain, item classes, gold values and the leftovers (v0.21.0)
+# 19 Stage 11c gate (real Foundry): the discovery chain, item classes, gold values and the leftovers (v0.21.1)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. Every step is labelled **[GM]** or **[Player]**. **[Player] steps tell you what to click; the block then checks what is on screen.** The blocks can be run at any time: the helper in Step 3 records every line the Hub's status line shows (they vanish after about 10 seconds), and the blocks read that record. Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, layout is the point.
 
@@ -22,13 +22,13 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
-Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.21.0**; if it is not, stop (the release may still be building).
+Force-reload BOTH windows first and wait for the world to finish loading. The version must be **0.21.1**; if it is not, stop (the release may still be building).
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
 ```
 
-Expected: `["<your GM name>", true, "0.21.0"]` in the GM window and `["Test", false, "0.21.0"]` in the Player window.
+Expected: `["<your GM name>", true, "0.21.1"]` in the GM window and `["Test", false, "0.21.1"]` in the Player window.
 
 ## Step 2 [GM]: SETUP
 

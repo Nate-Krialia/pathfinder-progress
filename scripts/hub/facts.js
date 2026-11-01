@@ -3,6 +3,7 @@
  * stationsFor, previewCraft, compendium.knownEffect, queue.list, downtime.state) and the adapter for the bag and the purse. It adds no
  * data to the player copy and invents nothing; the view-models (viewmodels.js) decide what any of it means.
  */
+import { materialInfoFor } from "./materialinfo.js";
 import * as adapter from "../adapter/pf2e.js";
 import { MODULE_ID, STATION_KEYS } from "../config.js";
 import { feeForStation } from "../stations/fees.js";
@@ -106,8 +107,7 @@ export function readFacts(api, actor, state) {
     const def = defs?.material.get(entry.id);
     if (!def) continue;
     const known = attempt("what you have studied", () => api.discovery.propertiesOpen(actor, entry.id), true);
-    const tag = known && def.tag ? defs?.tag?.get(def.tag) : null;
-    materialInfo[entry.id] = { hasTrack: Boolean(def.hasTrack), known, tag: tag ? { name: tag.name, theme: tag.theme, worksWith: tag.worksWith ?? null } : null };
+    materialInfo[entry.id] = materialInfoFor(def, known, def.tag ? defs?.tag?.get(def.tag) : null);
   }
 
   return {

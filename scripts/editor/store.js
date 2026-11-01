@@ -105,8 +105,9 @@ export function usageOf(api, key) {
   const nodes = kind === "material" ? [...defs.nodeType.values()].filter(n => Object.values(n.ladders ?? {}).some(l => l.some(r => r.materialId === id))).map(n => n.name ?? n.id) : [];
   const yields = kind === "material" ? [...defs.creatureYield.values()].filter(y => y.yield.some(r => r.materialId === id)).map(y => y.id) : [];
   const notes = [];
-  const used = { copies: [...byActor].map(([where, count]) => ({ where, count })), recipes, nodes, yields, notes };
-  return { ...used, knownBy: kind === "material" ? knownBy(api, id) : [], inUse: used.copies.length + recipes.length + nodes.length + yields.length > 0 };
+  const tagged = kind === "tag" ? [...defs.material.values()].filter(m => m.tag === id).map(m => m.name) : [];
+  const used = { copies: [...byActor].map(([where, count]) => ({ where, count })), recipes, nodes, yields, notes, tagged };
+  return { ...used, knownBy: kind === "material" ? knownBy(api, id) : [], inUse: used.copies.length + recipes.length + nodes.length + yields.length + tagged.length > 0 };
 }
 
 /** The effective definition and the editor's view of it: { key, kind, id, record, origin, retired, edited fields }. */
@@ -136,6 +137,7 @@ const MATERIAL_DEFAULTS = tier => ({ tier, value: COMMISSIONS.valueByTier[tier] 
 /** Fields a new record starts from. A note's track comes from its preset. */
 function defaultsFor(kind, fields) {
   if (kind === "material") return { ...MATERIAL_DEFAULTS(fields.tier ?? 1), ...fields };
+  if (kind === "tag") return { ...fields };                       // a tag is a name, a theme and what it works with: nothing item-like
   return { bulk: "L", preset: "research", ...fields };
 }
 
