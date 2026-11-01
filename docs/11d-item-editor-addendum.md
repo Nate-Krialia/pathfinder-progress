@@ -89,4 +89,18 @@ Afflictions are OUT (PF2e 8.6.1 refuses to construct them). There is no "Apply a
 - **The Apply result stays GM-only.** The whisper card is edited to show it. Nothing public.
 - **Item text.** At craft the item description gets the plain-words line (for example "makes the target fearful"). Never condition values, save types or DCs.
 - **Recipes.** Edit only throwaway / `g21-` recipes. For anything under `content/recipes` that looks like real campaign content, do not edit it; list the exact one-line `drives` change instead.
+- **Persistent poison already works natively** (probe results, 2026-11-01): the Add damage block with Persistent ticked makes the damage roll carry a persistent poison term, and applying the damage card adds a persistent-damage condition. Poison needs no hook.
 - **Secrecy note for the build.** `recordClassFact` copies full role values into the player-readable Compendium book, so a `forPlayer(role, value)` filter must turn `applyCondition` into a plain marker before anything is written there, to the preview or to an item.
+
+## Built as (v0.22.0): interpretations to review
+Added by Claude Code while building. Anything marked **check** is a reading worth a second look.
+- **Roles and recipes.** `applyCondition` is a new role (an array) for weapon, bomb and consumable. A recipe slot must list it in `drives`; the real recipes under `content/recipes` were NOT edited (for the Spider Fang Dagger the change is one line, listed in `docs/21`). The gate uses in-memory `g21-` recipes.
+- **No "Every class" condition.** `setProblems` refuses it on the general set (a general effect would reach worn classes); the builder offers the block on Weapon, Bomb and Consumable only. **check**
+- **Blocks are told apart by position.** Several condition blocks per class are addressed by `data-index` (the nth block of that type); the other block types still allow one per class.
+- **One condition once per class.** Setting the same condition twice in one class is a problem the editor names. **check**
+- **Value 1 to 4.** `EFFECTS.maxValue`; a valueless condition (Off-guard, Prone, Dazzled, Fatigued) has no value control and applies on any failure; "No save" applies at once with no bump.
+- **Several targets.** A weapon or bomb card names the attack's own target (`context.target` holds only the first). A consumable card names every target the roller has targeted. A fallback card takes the GM's own targets, else the tokens the GM has selected, when Apply is pressed.
+- **Dedupe.** By message id for everything, and by the item's `origin.uuid` for ten seconds for a consumable (PF2e posts a second card when Use is pressed on the first).
+- **The result stays on the card.** The whisper is edited to "Gate Goblin A is fearful, is knocked down." / "shrugs it off", plain words only, no value, save, degree or DC; those are in `api.gm.log`.
+- **The Compendium book** stores `applyCondition` as `{ plain: [lines] }` in all three places a role value is written (a class fact, a per-recipe fact, a formula's baseline), so the preview and the Hub show "makes the target fearful" and nothing else. The item description gets the same line at craft.
+- **The card is a `.pfp-hub`** (so the Hub's reset and button rules apply in the chat log); the layout harness draws it pending and done at 900 to 220px in every hostile sheet.

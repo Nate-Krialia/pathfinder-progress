@@ -265,3 +265,11 @@
 .pfp-hub.pfp-editor[data-layout="narrow"] .pfp-editor-body > .pfp-pane { flex: 0 0 auto; min-height: auto; }
 .pfp-hub.pfp-editor[data-layout="narrow"] .pfp-editor-body > .pfp-pane > .pfp-editor-scroll { flex: 0 0 auto; min-height: auto; overflow: visible; }
 .pfp-hub.pfp-editor[data-layout="narrow"] .pfp-editor-body > .pfp-editor-list > .pfp-editor-scroll { flex: 0 1 auto; max-height: 18em; overflow-y: auto; overflow-x: hidden; }
+
+/* ---- The GM's effect card in the chat log (v0.22.0) -------------------------------------------------------------------------------------------- */
+/* The card is a .pfp-hub, so the reset above and the button rules apply (Foundry restyles buttons, lists and paragraphs in chat too). It sits in the chat log, so it takes
+   the height of its content and never scrolls by itself; its buttons wrap in a row and stay 44px targets. */
+.pfp-hub.pfp-fx-card { height: auto !important; max-height: none !important; overflow: visible !important; padding: 0.5em; width: 100%; }
+.pfp-hub.pfp-fx-card .pfp-fx-actions { display: flex !important; flex-direction: row; flex-wrap: wrap; gap: 0.5em; }
+.pfp-hub.pfp-fx-card .pfp-fx-results li { display: block; }
+.pfp-hub.pfp-fx-card button.pfp-fx-btn:disabled { opacity: 0.6; cursor: not-allowed; border-style: dashed !important; }

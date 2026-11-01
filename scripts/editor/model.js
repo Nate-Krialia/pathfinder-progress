@@ -5,7 +5,7 @@
  * preview in the Hub's own wording, for the item class picked at the top). The window keeps a DRAFT; everything the draft means (what is dirty, what is wrong, what to
  * save) is worked out here from the draft and the live registry, so there is no separate "dirty" flag to get out of step.
  */
-import { DISCOVERY, ITEM_CLASSES, TRIGGER_WORDS } from "../config.js";
+import { DISCOVERY, EFFECT_CONDITIONS, EFFECT_SAVES, EFFECTS, ITEM_CLASSES, TRIGGER_WORDS } from "../config.js";
 import { DAMAGE_TYPES } from "../adapter/pf2e.js";
 import { rolesForCategory } from "../data/roles.js";
 import { normalizeDisplay } from "../hub/display.js";
@@ -13,7 +13,7 @@ import { rootAttributes } from "../hub/render.js";
 import { W } from "../discovery/words.js";
 import { isDifficultyText } from "../difficulty.js";
 import { itemKey, parseKey, trackOf } from "../discovery/track.js";
-import { BLOCK_LABELS, BLOCK_TYPES, TIERS, classRoles, powerRole, collapse, decompileRecord, describeRoles, fitsRoles, flat, newBlock, setProblems, spread, valueAt } from "./blocks.js";
+import { BLOCK_LABELS, BLOCK_TYPES, MULTI_BLOCKS, TIERS, classRoles, powerRole, collapse, decompileRecord, describeRoles, fitsRoles, flat, newBlock, setProblems, spread, valueAt } from "./blocks.js";
 import { rowEdit, rowProblems, rowsOf, trackOfRows } from "./rows.js";
 import { NO_STUDY, STAGES as PREVIEW_STAGES, STAGE_LABELS, stageOf } from "./preview.js";
 import { S } from "../hub/strings.js";
@@ -50,6 +50,7 @@ export const E = {
   power: "Base power tier", spellPower: "Spell power tier", noPower: "None",
   addBlock: "Add a block", blockLabels: BLOCK_LABELS, removeBlock: "Remove this block",
   dice: "Dice", damageType: "Damage type", persistent: "Persistent", versus: "Only against (optional)", amount: "Amount",
+  condition: "Condition", conditionValue: "Value", conditionSave: "Saving throw", conditionHelp: "The target gets a saving throw when the GM presses Apply on the card. Only you see this, never players.",
   abilityTitle: "Ability name", abilityText: "What it does", abilityOn: "When", abilityOnAny: "Whenever it applies", abilityOnHit: "On a hit", abilityOnCrit: "On a critical hit",
   sameForAll: "Same for every tier", perTier: "Table by tier", tierCell: tier => `Tier ${tier}`,
   tableNote: "A material has one tier, so the table row for its own tier is the one that counts.",
@@ -65,7 +66,7 @@ export const E = {
   previewSheet: "On the item sheet",
   previewDifficulty: "This text mentions a DC or odds. The Hub hides that wording from players, but the item's own description would not.",
   confirmYes: "Yes, do it", confirmNo: "No, keep things as they are",
-  roleWords: { basePower: "base power", spellPower: "spell power", bonusDamage: "bonus damage", specialAbility: "a special ability", resistance: "resistance", spellSlots: "spell slots" }
+  roleWords: { basePower: "base power", spellPower: "spell power", bonusDamage: "bonus damage", specialAbility: "a special ability", resistance: "resistance", spellSlots: "spell slots", applyCondition: "a condition on the target" }
 };
 
 const KIND_LABEL = { material: "Material", note: "Note", recipe: "Formula version" };
@@ -159,26 +160,39 @@ function withSet(draft, cls, set) {
   }
   return { ...draft, blocks };
 }
-const mapBlock = (set, type, fn) => ({ ...set, blocks: set.blocks.map(b => (b.type === type ? fn(b) : b)) });
-const hasBlock = (draft, cls, type) => setOf(draft, cls).blocks.some(b => b.type === type);
+/** Map the `index`th block of `type` (blocks of a type that allows several are told apart by their position among that type). */
+const mapBlock = (set, type, fn, index = 0) => { let n = -1; return { ...set, blocks: set.blocks.map(b => (b.type === type && ++n === index ? fn(b) : b)) }; };
+const hasBlock = (draft, cls, type, index = 0) => setOf(draft, cls).blocks.filter(b => b.type === type).length > index;
+const nth = (draft, cls, type, index = 0) => setOf(draft, cls).blocks.filter(b => b.type === type)[index];
+/** The first condition of the curated list this class has not used yet. */
+const freeCondition = set => Object.keys(EFFECT_CONDITIONS).find(c => !set.blocks.some(b => b.type === "condition" && b.condition === c));
 const numeric = raw => (raw === "" || raw === null || raw === undefined ? "" : Number.isFinite(Number(raw)) ? Number(raw) : raw);
 
 export const edit = {
   field: (draft, name, value) => ({ ...draft, fields: { ...draft.fields, [name]: String(value) } }),
   rowsDo: (draft, fn) => ({ ...draft, rows: fn(draft.rows) }),
-  addBlock: (draft, cls, type) => (setOf(draft, cls).blocks.some(b => b.type === type) ? draft : withSet(draft, cls, { ...setOf(draft, cls), blocks: [...setOf(draft, cls).blocks, newBlock(type)] })),
-  removeBlock: (draft, cls, type) => withSet(draft, cls, { ...setOf(draft, cls), blocks: setOf(draft, cls).blocks.filter(b => b.type !== type) }),
+  addBlock: (draft, cls, type) => {
+    const set = setOf(draft, cls);
+    if (MULTI_BLOCKS.includes(type)) {
+      const condition = freeCondition(set);
+      if (!condition || cls === "general") return draft;
+      return withSet(draft, cls, { ...set, blocks: [...set.blocks, { ...newBlock(type), condition }] });
+    }
+    return set.blocks.some(b => b.type === type) ? draft : withSet(draft, cls, { ...set, blocks: [...set.blocks, newBlock(type)] });
+  },
+  removeBlock: (draft, cls, type, index = 0) => { let n = -1; const set = setOf(draft, cls); return withSet(draft, cls, { ...set, blocks: set.blocks.filter(b => !(b.type === type && ++n === index)) }); },
   power: (draft, cls, value) => { const set = { ...setOf(draft, cls) }; if (value === "" || value === "none") delete set.power; else set.power = Number(value); return withSet(draft, cls, set); },
-  blockField: (draft, cls, type, name, value) => !hasBlock(draft, cls, type) ? draft : withSet(draft, cls, mapBlock(setOf(draft, cls), type, b => {
+  blockField: (draft, cls, type, name, value, index = 0) => !hasBlock(draft, cls, type, index) ? draft : withSet(draft, cls, mapBlock(setOf(draft, cls), type, b => {
     const next = { ...b };
+    if (type === "condition" && name === "condition") { next.condition = value; if (EFFECT_CONDITIONS[value]?.valued && !b.value) next.value = flat(1); return next; }
     if (name === "persistent") { if (value === true || value === "true") next.persistent = true; else delete next.persistent; }
     else if (["versus", "on"].includes(name)) { if (value === "" || value === undefined) delete next[name]; else next[name] = value; }
     else if (name === "dice" || name === "value") next[name] = b[name]?.byTier ? { byTier: { ...b[name].byTier } } : flat(name === "value" ? numeric(value) : value);
     else next[name] = value;
     return next;
-  })),
-  tierMode: (draft, cls, type, name, mode, tier) => !hasBlock(draft, cls, type) ? draft : withSet(draft, cls, mapBlock(setOf(draft, cls), type, b => ({ ...b, [name]: mode === "table" ? spread(b[name], name === "dice" ? "1d6" : 1) : collapse(b[name], tier) }))),
-  tierCell: (draft, cls, type, name, tier, value) => !hasBlock(draft, cls, type) || !setOf(draft, cls).blocks.find(b => b.type === type)[name]?.byTier ? draft : withSet(draft, cls, mapBlock(setOf(draft, cls), type, b => ({ ...b, [name]: { byTier: { ...b[name].byTier, [tier]: name === "value" ? numeric(value) : value } } })))
+  }, index)),
+  tierMode: (draft, cls, type, name, mode, tier, index = 0) => !hasBlock(draft, cls, type, index) ? draft : withSet(draft, cls, mapBlock(setOf(draft, cls), type, b => ({ ...b, [name]: mode === "table" ? spread(b[name], name === "dice" ? "1d6" : 1) : collapse(b[name], tier) }), index)),
+  tierCell: (draft, cls, type, name, tier, value, index = 0) => !hasBlock(draft, cls, type, index) || !nth(draft, cls, type, index)[name]?.byTier ? draft : withSet(draft, cls, mapBlock(setOf(draft, cls), type, b => ({ ...b, [name]: { byTier: { ...b[name].byTier, [tier]: name === "value" ? numeric(value) : value } } }), index))
 };
 
 /**
@@ -193,9 +207,9 @@ export function applyControl(draft, d, value) {
     case "row-grants": return edit.rowsDo(draft, rows => rowEdit.setGrants(rows, Number(d.index), value));
     case "row-recipe": return edit.rowsDo(draft, rows => rowEdit.setRecipe(rows, Number(d.index), value));
     case "power": return edit.power(draft, d.cls, value);
-    case "block": return edit.blockField(draft, d.cls, d.type, d.name, value);
-    case "cell": return edit.tierCell(draft, d.cls, d.type, d.name, Number(d.tier), value);
-    case "tier-mode": return edit.tierMode(draft, d.cls, d.type, d.name, value, tier);
+    case "block": return edit.blockField(draft, d.cls, d.type, d.name, value, Number(d.index ?? 0));
+    case "cell": return edit.tierCell(draft, d.cls, d.type, d.name, Number(d.tier), value, Number(d.index ?? 0));
+    case "tier-mode": return edit.tierMode(draft, d.cls, d.type, d.name, value, tier, Number(d.index ?? 0));
     default: return draft;
   }
 }
@@ -248,13 +262,18 @@ function effectsModel(draft, effectClass, problems) {
   const tier = Number(draft.fields.tier) || 1;
   const cls = effectClass === "general" || CLASS_IDS.includes(effectClass) ? effectClass : "general";
   const set = setOf(draft, cls);
-  const allowed = type => cls === "general" || rolesForCategory(cls).has({ damage: "bonusDamage", resistance: "resistance", ability: "specialAbility" }[type]);
+  const allowed = type => type === "condition" ? cls !== "general" && rolesForCategory(cls).has("applyCondition") : cls === "general" || rolesForCategory(cls).has({ damage: "bonusDamage", resistance: "resistance", ability: "specialAbility" }[type]);
   const tabs = ["general", ...CLASS_IDS].map(id => {
     const s = id === "general" ? draft.blocks?.general : draft.blocks?.byClass?.[id];
     return { id, label: id === "general" ? E.general : ITEM_CLASSES[id].label, selected: id === cls, hasEffects: Boolean(s && (s.blocks?.length || s.power !== undefined)) };
   });
+  const seenOfType = {};
   const blocks = set.blocks.map(b => {
-    const base = { type: b.type, label: BLOCK_LABELS[b.type] };
+    const base = { type: b.type, label: BLOCK_LABELS[b.type], index: (seenOfType[b.type] = (seenOfType[b.type] ?? -1) + 1) };
+    if (b.type === "condition") {
+      const valued = Boolean(EFFECT_CONDITIONS[b.condition]?.valued);
+      return { ...base, condition: opts(Object.entries(EFFECT_CONDITIONS).map(([id, c]) => [id, c.label]), b.condition), valued, value: valued ? tierField(b.value, tier) : null, save: opts(Object.entries(EFFECT_SAVES), b.save) };
+    }
     if (b.type === "damage") return { ...base, dice: tierField(b.dice, tier), damageType: opts(DAMAGE_TYPES.map(t => [t, t]), b.damageType), persistent: Boolean(b.persistent), versus: b.versus ?? "" };
     if (b.type === "resistance") return { ...base, damageType: opts(DAMAGE_TYPES.map(t => [t, t]), b.damageType), value: tierField(b.value, tier) };
     return { ...base, title: b.title, text: b.text, on: opts([["", E.abilityOnAny], ["hit", E.abilityOnHit], ["criticalHit", E.abilityOnCrit]], b.on ?? "") };
@@ -263,7 +282,8 @@ function effectsModel(draft, effectClass, problems) {
     tabs, cls, help: cls === "general" ? E.generalHelp : E.classHelp(cls),
     power: cls === "general" || rolesForCategory(cls).has(powerRole(cls)) ? { label: powerRole(cls) === "spellPower" ? E.spellPower : E.power, value: set.power ?? "", options: opts([["", E.noPower], ...TIERS.map(t => [t, `T${t}`])], set.power ?? "") } : null,
     blocks,
-    add: BLOCK_TYPES.map(type => ({ type, label: BLOCK_LABELS[type], disabled: set.blocks.some(b => b.type === type) || !allowed(type) })),
+    // A block the class cannot take (a condition on armor, a worn class or "Every class") is not offered at all.
+    add: BLOCK_TYPES.filter(type => type !== "condition" || allowed(type)).map(type => ({ type, label: BLOCK_LABELS[type], disabled: MULTI_BLOCKS.includes(type) ? !freeCondition(set) : set.blocks.some(b => b.type === type) || !allowed(type) })),
     extra: set.extra && Object.keys(set.extra).length ? E.extraKept(Object.keys(set.extra).map(r => E.roleWords[r] ?? r)) : null,
     empty: !set.blocks.length && set.power === undefined ? E.nothingYet : null,
     problems: problems.effects[cls] ?? [], tier
@@ -376,7 +396,7 @@ const area = (label, value, data, rows = 2) => `<label class="pfp-wide">${esc(la
 const why = items => items.map(p => `<p class="pfp-why" role="alert">${esc(p)}</p>`).join("");
 
 function renderTier(label, field, d) {
-  const base = { cls: d.cls, type: d.type, name: d.name };
+  const base = { cls: d.cls, type: d.type, name: d.name, index: d.index };
   if (field.mode === "table") {
     return `<fieldset class="pfp-tiers"><legend>${esc(label)}</legend><p class="pfp-note">${esc(E.tableNote)}</p><div class="pfp-row">${field.cells.map(c => input(c.label + (c.own ? " (this material)" : ""), c.value, { field: "cell", ...base, tier: c.tier })).join("")}</div>
       ${button({ action: "tier-mode", label: E.sameForAll, data: { ...base, mode: "flat" } })}</fieldset>`;
@@ -385,9 +405,10 @@ function renderTier(label, field, d) {
 }
 
 function renderBlock(b, cls) {
-  const common = { cls, type: b.type };
+  const common = { cls, type: b.type, ...(MULTI_BLOCKS.includes(b.type) ? { index: b.index } : {}) };
   let body;
-  if (b.type === "damage") body = `${renderTier(E.dice, b.dice, { ...common, name: "dice" })}<div class="pfp-row">${select(E.damageType, b.damageType, { field: "block", ...common, name: "damageType" })}
+  if (b.type === "condition") body = `<div class="pfp-row">${select(E.condition, b.condition, { field: "block", ...common, name: "condition" })}${select(E.conditionSave, b.save, { field: "block", ...common, name: "save" })}</div>${b.valued ? renderTier(E.conditionValue, b.value, { ...common, name: "value" }) : ""}<p class="pfp-note">${esc(E.conditionHelp)}</p>`;
+  else if (b.type === "damage") body = `${renderTier(E.dice, b.dice, { ...common, name: "dice" })}<div class="pfp-row">${select(E.damageType, b.damageType, { field: "block", ...common, name: "damageType" })}
     <label class="pfp-check"><input type="checkbox" data-field="block" data-cls="${cls}" data-type="damage" data-name="persistent"${b.persistent ? " checked" : ""} aria-label="${esc(E.persistent)}"> ${esc(E.persistent)}</label></div>${area(E.versus, b.versus, { field: "block", ...common, name: "versus" })}`;
   else if (b.type === "resistance") body = `<div class="pfp-row">${select(E.damageType, b.damageType, { field: "block", ...common, name: "damageType" })}</div>${renderTier(E.amount, b.value, { ...common, name: "value" })}`;
   else body = `${area(E.abilityTitle, b.title, { field: "block", ...common, name: "title" })}<div class="pfp-row">${select(E.abilityOn, b.on, { field: "block", ...common, name: "on" })}</div>

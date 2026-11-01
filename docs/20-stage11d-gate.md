@@ -31,9 +31,9 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
 **What to do and see:**
-- Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.21.2**; if it is not, stop (the release may still be building).
+- Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.22.0**; if it is not, stop (the release may still be building).
 - Run the block below in the GM window, then again in the Player window.
-- You should see: `["<your GM name>", true, "0.21.2"]` in the GM window and `["Test", false, "0.21.2"]` in the Player window.
+- You should see: `["<your GM name>", true, "0.22.0"]` in the GM window and `["Test", false, "0.22.0"]` in the Player window.
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]

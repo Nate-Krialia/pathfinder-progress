@@ -62,7 +62,7 @@ export const S = {
   slotChosen: name => `Using ${name}`,
   clearSlot: "Empty this slot",
   slotNoOptions: "You have no materials that fit this slot yet.",
-  slotRole: { basePower: noun => `sets the ${noun}'s power`, bonusDamage: () => "adds bonus damage", specialAbility: () => "gives a special ability", resistance: () => "gives resistance", spellPower: noun => `sets the ${noun}'s spell power`, spellSlots: () => "adds spell slots" },
+  slotRole: { basePower: noun => `sets the ${noun}'s power`, bonusDamage: () => "adds bonus damage", specialAbility: () => "gives a special ability", resistance: () => "gives resistance", applyCondition: () => "affects the target", spellPower: noun => `sets the ${noun}'s spell power`, spellSlots: () => "adds spell slots" },
   slotRoleCustom: role => `sets its ${role}`,
   slotRoleLine: (slotName, parts) => `${slotName.charAt(0).toUpperCase()}${slotName.slice(1)} ${parts.join(" and ")}.`,
   categoryNoun: { weapon: "weapon", armor: "armor", robes: "robes", focus: "focus", consumable: "item", bomb: "bomb", trinket: "trinket" },

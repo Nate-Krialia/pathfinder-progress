@@ -13,8 +13,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HUB } from "../scripts/config.js";
 import { hubModel, learnedKey } from "../scripts/hub/viewmodels.js";
-import { renderHubPage } from "../scripts/hub/render.js";
+import { renderHubPage, rootAttributes } from "../scripts/hub/render.js";
 import { draftFor, editorModel, renderEditor } from "../scripts/editor/model.js";
+import { doneContent, pendingContent } from "../scripts/effects/card.js";
+import { flat, spread } from "../scripts/editor/blocks.js";
 import { BENCH, BIG_PROJECT, BOOK_ENTRIES, FORGE, LEAD, PROJECT, STAR_EFFECT, STEEL_EFFECT, UPGRADE, compendiumFacts, compendiumState, makeBook, makeFacts, makeState, researchFacts, researchState } from "../tests/hub-fixtures.js";
 
 const cssUrl = pathToFileURL(new URL("../styles/hub.css", import.meta.url).pathname).href;
@@ -114,7 +116,18 @@ const editorScene = (key, over = {}) => {
   const { tweak, ...rest } = over;
   return { editor: { registry: EDITOR_REGISTRY, overlay: {}, records: RECORDS, selectedKey: key, base, draft: tweak ? tweak(base) : base, origin: key ? { origin: RECORDS[key]?.mode === "new" ? "world" : RECORDS[key] ? "edited" : "pack", editedFields: RECORDS[key]?.mode === "patch" ? ["name", "value"] : [], retired: false, hasItem: true } : null, ...rest } };
 };
+// v0.22.0: a weapon class with several condition blocks (a valued one with a tier table, one with a long name and no save, a valueless one), and the GM's effect card in the chat log.
+const CONDITION_BLOCKS = [
+  { type: "condition", condition: "frightened", value: spread(flat(1), 1), save: "will" },
+  { type: "condition", condition: "off-guard", save: "none" },
+  { type: "condition", condition: "stupefied", value: flat(2), save: "fortitude" }
+];
+const CARD_TEXT = "Gate Mitflit Fang of the Unbroken Horizon Wanderers hit Gate Goblin Skirmisher Number Twelve and Gate Goblin Archer: makes the target fearful and leaves the target off guard.";
 export const SCENES = {
+  editorConditions: editorScene("material:gate-m4", { effectClass: "weapon", tweak: d => ({ ...d, blocks: { ...d.blocks, byClass: { ...(d.blocks?.byClass ?? {}), weapon: { blocks: CONDITION_BLOCKS } } } }) }),
+  editorConditionsArmor: editorScene("material:gate-m4", { effectClass: "armor", tweak: d => ({ ...d, blocks: { ...d.blocks, byClass: { ...(d.blocks?.byClass ?? {}), weapon: { blocks: CONDITION_BLOCKS } } } }) }),
+  fxCardPending: { card: pendingContent(CARD_TEXT) },
+  fxCardDone: { card: doneContent(CARD_TEXT, [{ name: "Gate Goblin Skirmisher Number Twelve", lines: ["is fearful", "is off guard"] }, { name: "Gate Goblin Archer", lines: ["shrugs it off"] }]) },
   editorEmpty: editorScene(null),
   editor300: editorScene("material:gate-m4", { effectClass: "weapon" }),
   editorRows: editorScene("material:gate-m8", { effectClass: "weapon", tweak: d => ({ ...d, fields: { ...d.fields, name: "", tier: "7" }, rows: [{ steps: "4", type: "properties", recipeId: "" }, { steps: "4", type: "formula", recipeId: "" }, { steps: "abc", type: "formula", recipeId: "gate-blade" }] }) }),
@@ -193,7 +206,7 @@ function pageChecks({ minTarget, checkWords, belowMinimum, minEditorPane }) {
   // 2b. Nothing in the Hub is positioned absolutely or fixed: badges, pills and bars stay in the flow, so they cannot print over a neighbour.
   for (const el of els) if (/(absolute|fixed)/.test(style(el).position)) problems.push(`positioned ${style(el).position} (it can cover a neighbour): ${name(el)}`);
   // 3. Every control is a big enough target.
-  for (const el of root.querySelectorAll("[data-action], input, select, textarea")) {
+  for (const el of root.querySelectorAll("[data-action], [data-pfp-fx], input, select, textarea")) {
     // A checkbox or radio keeps a normal-sized native box; its tap target is the whole label row around it.
     const r = (/^(checkbox|radio)$/.test(el.type) && el.closest("label") ? el.closest("label") : el).getBoundingClientRect();
     // ...and that native box stays a normal size (about the height of a line of text), not an enlarged one.
@@ -327,7 +340,7 @@ export async function renderState(page, { scene, theme = "parchment", textSize =
   const spec = SCENES[scene];
   const layout = width < HUB.stackBelowPx ? "narrow" : "wide";
   const display = { theme, textSize, font };
-  const html = spec.editor ? renderEditor(editorModel({ ...spec.editor, layout, display })) : renderHubPage(hubModel(spec.facts, { ...spec.state, layout, display }), announce ? [announce] : []);
+  const html = spec.card ? spec.card.replace('data-layout="narrow"', Object.entries(rootAttributes({ layout, display })).map(([k, v]) => `${k}="${String(v).replace(/"/g, "&quot;")}"`).join(" ")) : spec.editor ? renderEditor(editorModel({ ...spec.editor, layout, display })) : renderHubPage(hubModel(spec.facts, { ...spec.state, layout, display }), announce ? [announce] : []);
   const frameHeight = height ?? (layout === "narrow" ? null : 820);
   await page.setViewportSize({ width, height: frameHeight ?? 900 });
   await page.evaluate(({ html, hostileCss, extraCss, frameHeight }) => {

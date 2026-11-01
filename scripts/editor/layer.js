@@ -14,7 +14,7 @@ import { parseDefinition } from "../data/validate.js";
 export const STORE_VERSION = 1;
 export const emptyStore = () => ({ v: STORE_VERSION, records: {} });
 export const keyOf = (kind, id) => `${kind}:${id}`;
-const ROLE_OF = { damage: "bonusDamage", resistance: "resistance", ability: "specialAbility" };
+const ROLE_OF = { damage: "bonusDamage", resistance: "resistance", ability: "specialAbility", condition: "applyCondition" };
 
 /** What a store must look like; a damaged setting is an error to show, never silently replaced. */
 export function storeProblems(store) {
@@ -70,7 +70,7 @@ export function layerSources(sources, store) {
     for (const o of mat.data.recipeOverrides ?? []) {
       const recipe = byKey.get(keyOf("recipe", o.recipeId));
       if (!recipe?.data) { leftovers.push({ key: keyOf("material", mat.data.id), message: `has an override for "${o.recipeId}", which does not exist` }); continue; }
-      recipe.data = { ...recipe.data, overrides: [...(recipe.data.overrides ?? []).filter(x => !(x.materialId === mat.data.id && x.slot === o.slot && x.role === ROLE_OF[o.block.type])), { materialId: mat.data.id, slot: o.slot, role: ROLE_OF[o.block.type], effect: blockValue(o.block, mat.data.tier) }] };
+      recipe.data = { ...recipe.data, overrides: [...(recipe.data.overrides ?? []).filter(x => !(x.materialId === mat.data.id && x.slot === o.slot && x.role === ROLE_OF[o.block.type])), { materialId: mat.data.id, slot: o.slot, role: ROLE_OF[o.block.type], effect: o.block.type === "condition" ? [blockValue(o.block, mat.data.tier)] : blockValue(o.block, mat.data.tier) }] };
       recipe.edited = true;
     }
   }

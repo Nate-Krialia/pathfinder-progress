@@ -357,3 +357,24 @@ await (async () => {
 | Step 6 | Whether persistent poison from Add damage already makes a condition on the target |
 | Step 7 | Whether the trinket's `wornDamage` can be persistent, and with which rule fields |
 | Step 8 | Whether a timed condition is cheap enough to offer after 0.22.0 |
+
+## Results (2026-11-01)
+
+Real Foundry v14.369, PF2e 8.6.1. These facts supersede every "unverified" item in the 0.22.0 plan.
+
+**Chat messages**
+- **Attack roll (weapon and bomb alike).** `flags.pf2e.context = { type:"attack-roll", outcome: success|failure|criticalSuccess|criticalFailure, target:{ token:"Scene.X.Token.Y", actor:"Scene.X.Token.Y.Actor.Z" }, origin:{ actor, token }, action:"strike", identifier:"<itemId>.<slug>.melee|ranged" }`. `flags.pf2e.origin = { actor:"Actor.<id>", uuid:"Actor.<id>.Item.<id>", type:"weapon" }`. `message.item` works.
+- **Targets.** `context.target` holds ONLY the first target even when two are targeted. `message.author.targets`, read on the GM client, holds all of them, so the GM window can see the roller's targets.
+- **Damage roll.** `context.type` is `"damage-roll"` with the attack's outcome; the target is in `context.target` and `flags.pf2e.target`; origin as above. The hook must NOT trigger on these.
+- **Consumable use.** Clicking the item posts a card whose `flags.pf2e` has ONLY `origin { actor, uuid, type:"consumable" }` (no context, no target). Clicking Use on that card posts a second consumable message, then a damage-taken message. Trigger on the FIRST (origin type consumable, no context) and dedupe by `origin.uuid` for about 10 s. Targets for a consumable come from `message.author.targets`.
+- **Unlinked tokens.** `origin.uuid` is `"Actor.<worldActorId>.Item.<id>"`, which is NOT the item on an unlinked token's synthetic actor. Resolve the item through `context.origin.token`'s actor first (`fromUuid` on the token, then `.actor.items`), falling back to `origin.uuid`.
+
+**Conditions, on `token.actor`** (an unlinked token has its own actor; never use the world actor)
+- `increaseCondition(slug, {value:N, max:M})` ADDS N to the existing value (1 then `{value:3}` gives 4; `{value:6, max:4}` caps at 4) and returns the condition. For a valueless condition already present it returns null.
+- `decreaseCondition(slug)` lowers by 1; `{forceRemove:true}` removes. `toggleCondition` returns a Boolean. `getCondition(slug)?.value` is the current value (null for valueless).
+- So to apply "frightened N": `existing = getCondition(slug)?.value ?? 0`; if `N > existing` call `increaseCondition(slug, {value: N - existing, max: 4})`; never stack.
+- All ten curated slugs exist in `CONFIG.PF2E.conditionTypes`.
+
+**Persistent damage ALREADY WORKS natively.** The module's `DamageDice` rule with category `"persistent"` makes the damage roll carry a PERSISTENT poison term, and applying the damage card to a target adds a persistent-damage condition (dice doubled on a crit). Poison needs no hook.
+
+**Worn trinket (record only, for 0.22.1).** A `FlatModifier { selector:"damage", damageType:"poison", damageCategory:"persistent", value:3 }` adds "3 persistent poison" to the wearer's damage; without `damageCategory` it adds normal poison.

@@ -33,7 +33,7 @@ export function build() {
         "preview-stage"(event, target) { this.previewStage = target.dataset.stage; return this.render(); },
         "effect-class"(event, target) { this.effectClass = target.dataset.cls; return this.render(); },
         "add-block"(event, target) { return this.#change(d => edit.addBlock(d, target.dataset.cls, target.dataset.type)); },
-        "remove-block"(event, target) { return this.#change(d => edit.removeBlock(d, target.dataset.cls, target.dataset.type)); },
+        "remove-block"(event, target) { return this.#change(d => edit.removeBlock(d, target.dataset.cls, target.dataset.type, Number(target.dataset.index ?? 0))); },
         "tier-mode"(event, target) { return this.#change(d => applyControl(d, { field: "tier-mode", ...target.dataset }, target.dataset.mode)); },
         "add-row"() { return this.#change(d => edit.rowsDo(d, rows => rowEdit.add(rows, d.kind))); },
         "add-default"() { return this.#change(d => edit.rowsDo(d, () => rowEdit.addDefault(d.kind, this.#defaultRecipe(d)))); },

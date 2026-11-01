@@ -17,6 +17,7 @@
 import { COMMISSIONS } from "../config.js";
 import { baseRoleFor, parseTier, slotRoles } from "../data/roles.js";
 import { resolveSlotEffects } from "../crafting/plan.js";
+import { forPlayer, rolesForPlayer } from "../effects/plain.js";
 
 const FORBIDDEN = new Set(["__proto__", "constructor", "prototype"]);
 const own = (object, key) => Object.hasOwn(object ?? {}, key);
@@ -41,7 +42,7 @@ export function recordExperiment(book, { recipeId, recipeName, category, slot, m
   const next = clone(book);
   const entry = entryFor(next, recipeId, recipeName, at, category);
   entry.slots[slot] ??= {};
-  if (!own(entry.slots[slot], materialId)) entry.slots[slot][materialId] = { materialId, materialName: materialName ?? materialId, ...(tier === undefined ? {} : { tier }), effects: clone(effects ?? {}), at };
+  if (!own(entry.slots[slot], materialId)) entry.slots[slot][materialId] = { materialId, materialName: materialName ?? materialId, ...(tier === undefined ? {} : { tier }), effects: clone(rolesForPlayer(effects ?? {})), at };   // GM-only roles become plain markers
   else if (materialName && entry.slots[slot][materialId].materialName === materialId) entry.slots[slot][materialId].materialName = materialName;
   return next;
 }
@@ -70,7 +71,7 @@ export function recordClassFact(book, { category, materialId, materialName, tier
   next.classes[category] ??= {};
   const fact = next.classes[category][materialId] ??= { materialId, materialName: materialName ?? materialId, ...(tier === undefined ? {} : { tier }), effects: {}, at };
   if (materialName && fact.materialName === materialId) fact.materialName = materialName;
-  for (const [role, value] of Object.entries(effects ?? {})) if (!own(fact.effects, role)) fact.effects[role] = clone(value);
+  for (const [role, value] of Object.entries(effects ?? {})) if (!own(fact.effects, role)) fact.effects[role] = clone(forPlayer(role, value));   // a GM-only role (a condition's value, save) is stored as a plain marker only
   return next;
 }
 
@@ -158,7 +159,7 @@ export function computeBaseline(recipe, registry) {
       .filter(({ found }) => found.missing.length === 0)
       .sort((a, b) => a.material.tier - b.material.tier || valueOf(a.material) - valueOf(b.material) || a.material.id.localeCompare(b.material.id));
     if (!valid.length) return null;
-    slots.push({ slot: slot.name, tierFloor: slot.tierFloor, materialId: valid[0].material.id, effects: clone(valid[0].found.resolved) });
+    slots.push({ slot: slot.name, tierFloor: slot.tierFloor, materialId: valid[0].material.id, effects: clone(rolesForPlayer(valid[0].found.resolved)) });
   }
   const baseRole = baseRoleFor(recipe);
   const baseSlot = baseRole ? slots.find(s => baseRole in s.effects) : null;

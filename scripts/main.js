@@ -34,6 +34,9 @@ import { installEditorEntryPoints } from "./editor/entry.js";
 import { asGM } from "./queue/work.js";
 import { UPGRADE_KINDS } from "./workshop/rules.js";
 import { handleChatMessage, addGrantButton, getXp, getTier } from "./skill-xp/xp.js";
+import * as pf2eEffects from "./adapter/pf2e-effects.js";
+import { createEffects, installEffectsHooks } from "./effects/hook.js";
+import { gmIds } from "./chat.js";
 
 Hooks.once("init", () => {
   gathering.registerNodeHooks();
@@ -237,7 +240,9 @@ Hooks.once("ready", async () => {
       /** GM: fold the old per-recipe facts into item classes (idempotent; the module runs it once at startup). */
       migrateClasses: () => compendium.migrateClasses(api.definitions),
       /** GM: reveal the baseline of every OWNED formula an actor already holds (formulas gained before Stage 10d). Pass no actor for every character. */
-      revealBaselines: actor => compendium.revealBaselines(api.definitions, actor)
+      revealBaselines: actor => compendium.revealBaselines(api.definitions, actor),
+      /** GM testing tool: record what a successful craft of `recipeId` with `uses` ([{ slot, materialId }]) teaches `actor` (the call a craft makes). */
+      noteCrafted: (actor, recipeId, uses) => compendium.noteCrafted(api.definitions, actor, api.definitions.recipe.get(recipeId), uses)
     },
     /**
      * Workshops (Stage 10c). Players can call startUpgrade / startDesign / putAside (relayed to the GM client; immediate; no downtime needed).
@@ -463,6 +468,11 @@ Hooks.once("ready", async () => {
     }
   };
   game.modules.get(MODULE_ID).api = api;
+  // Effects that act on a target (v0.22.0): the GM-assisted hook, its card and the GM-only api (docs/11d-item-editor-addendum.md, "v0.22.0 decisions").
+  const effects = createEffects({ adapter: pf2eEffects, registry: () => api.definitions, chat: { create: data => ChatMessage.create(data), get: id => game.messages.get(id), gmIds }, log: gmLog.record, levelDC: adapter.levelDC, notify: ui.notifications });
+  const gmOnly = fn => (...args) => { if (!game.user.isGM) throw new Error("effects: GM only"); return fn(...args); };
+  api.effects = { handle: gmOnly(m => effects.handle(m)), applyCard: gmOnly((id, options) => effects.applyCard(id, options)), skipCard: gmOnly(id => effects.skipCard(id)), adapter: pf2eEffects };
+  installEffectsHooks(effects, { isActiveGM: () => game.user.isGM && game.users.activeGM?.id === game.user.id, isGM: () => game.user.isGM });
   queueStore.bind(api);
   workshop.bind(api);
   leads.bind(api);
