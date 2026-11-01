@@ -136,3 +136,24 @@ test("EDITOR LAYOUT: 300 items stay usable: the list is on the left and scrolls 
     }
   } finally { await b.close(); }
 });
+
+test("CHECKBOX RESET (v0.21.2): with Foundry-style checkbox CSS an unchecked box looks empty and a checked box shows ONE tick; without the reset the matrix fails", { skip, timeout: 180000 }, async () => {
+  const b = await launchChromium();
+  try {
+    const inject = '<label class="pfp-check"><input type="checkbox" aria-label="Second box" checked> Second box</label><label class="pfp-check"><input type="radio" name="r" aria-label="A radio"> A radio</label>';
+    const withReset = await openHarness(b);
+    for (const hostile of [null, ...Object.keys(HOSTILE)]) for (const theme of ["parchment", "dark", "contrast"]) for (const textSize of [100, 175]) {
+      for (const spec of [{ scene: "editor300" }, { scene: "editorEmpty", inject }]) {
+        const { problems } = await renderState(withReset, { ...spec, theme, hostile, width: 900, textSize });
+        assert.deepEqual(problems.filter(p => /checkbox|radio|\bmark/.test(p)), [], `${spec.scene} ${theme} ${textSize}% hostile=${hostile}`);
+      }
+    }
+    // MUTATION: the same stylesheet with the reset cut out. Foundry's dark square and double tick then show, and the checks must say so.
+    const without = await openHarness(b, { stripReset: true });
+    const { problems } = await renderState(without, { scene: "editor300", hostile: "important 2.5rem", width: 900, textSize: 100 });
+    assert.ok(problems.some(p => /unchecked checkbox .* shows 1 mark/.test(p)), `the dark filled square is caught: ${problems}`);
+    assert.ok(problems.some(p => /checked checkbox .* shows 2 marks, not exactly one/.test(p)), `the second tick is caught: ${problems}`);
+    const injected = await renderState(without, { scene: "editorEmpty", hostile: "plain 2rem hidden", width: 900, textSize: 100, inject });
+    assert.ok(injected.problems.some(p => /radio/.test(p)) && injected.problems.some(p => /checked checkbox "Second box"/.test(p)), "any checkbox or radio is caught, not just the Persistent one");
+  } finally { await b.close(); }
+});

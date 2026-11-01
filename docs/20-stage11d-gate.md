@@ -1,10 +1,12 @@
-# 20 Stage 11d gate (real Foundry): the Item editor, the Material creator and the effect builder (v0.21.1)
+# 20 Stage 11d gate (real Foundry): the Item editor, the Material creator and the effect builder (v0.21.2)
 
 Run in a real world, with a **GM window** and an **incognito Player window logged in as the user "Test"**. Every step is labelled **[GM]** or **[Player]**. **Click steps tell you what to click; the block then checks what is on screen and in the world.** Blocks print `PASS:` / `FAIL:` lines and end with `ALL PASS`: paste back anything that is not `ALL PASS`. Where a step says **"send me a screenshot of ..."**, layout is the point. **Each step's instructions are a short bullet list, one action per bullet, in the order you do them; what you should see is its own bullet starting "You should see:".**
 
 `tests/gate20.test.js` plays every step against the real `main.js` in a fake Foundry with a real DOM and the strict ApplicationV2 stand-in (it clicks what the steps tell you to click, then runs the block). What it cannot show: the real window, fonts, focus rings, real PF2e item sheets and prices, the real Tab key, file downloads, or the file picker.
 
 **Before each click step, the block checks the screen first** ("preflight"): is the Item editor open, is the item the step is about picked, is the right Effects tab showing? If not, the block stops with a plain sentence saying what to open or pick, instead of reporting a confusing failure. Run it again after you fix the screen.
+
+**Changed in 0.21.2: Step 25 only** (it now uses Gate G20 Study Stage, made by Step 22, so it works when only Steps 22 to 27 are run; it checks both checkbox states and asks for a screenshot of each). Rerun just Step 25, or Steps 22 to 27 after a fresh SETUP.
 
 **New in 0.21.1: Steps 22 to 27.** They make their own items, so after a fresh SETUP (Step 2) you can run just Steps 22 to 27 and finish with Step 27 (CLEANUP again). Steps 1 to 21 are unchanged in what they do and check (their instructions are now short bullets; Step 21's CLEANUP also removes tags last). For a full run do 1 to 20, then 22 to 26, then CLEANUP (Step 21 or Step 27: the same block). The new steps cover: the three preview stages (Steps 22 and 23), the narrow layout (Step 24), the Persistent checkbox (Step 25) and the New note formula placeholder (Step 26).
 
@@ -24,14 +26,14 @@ Run in a real world, with a **GM window** and an **incognito Player window logge
 
 **Safety.** Throwaway things named "Gate G20 ...", ids starting `gate-g20-` / `g20-`. They are real world data while the gate runs (the editor writes to the world setting `editorDefinitions` and to the world's Items, and may create a **Materials** and a **Notes** folder if you have none), and CLEANUP removes every one. No real campaign data is changed: the only edit of an existing item (Steps 12 and 13) is a world patch on a material from the packs, which is taken back in the next step. SETUP refuses to run if an earlier run left something behind (an editor record or world item named like a gate one, or a leftover `g20-` track) or if a "Gate G20 ..." actor exists that it did not make. CLEANUP always works and is safe to run twice, even after reloading the GM window (the fake definitions and the planted orphan are gone from memory but the orphan's track is still saved: CLEANUP clears it anyway).
 
-**Restart note.** 0.21.1 changes the stylesheet and the editor's scripts and nothing in the manifest but the version: force-reload both windows (Ctrl+Shift+R); no server restart. (0.21.0 added one world setting (`editorDefinitions`, registered in code), a stylesheet rule block and the editor's scripts. The manifest changed only in its version.)  The scene-controls button is now the screwdriver-and-wrench one ("Item editor"); the old open-book "Discovery tracks" button is gone.
+**Restart note.** 0.21.2 and 0.21.1 change the stylesheet and the editor's scripts and nothing in the manifest but the version: force-reload both windows (Ctrl+Shift+R); no server restart. (0.21.0 added one world setting (`editorDefinitions`, registered in code), a stylesheet rule block and the editor's scripts. The manifest changed only in its version.)  The scene-controls button is now the screwdriver-and-wrench one ("Item editor"); the old open-book "Discovery tracks" button is gone.
 
 ## Step 1 [GM] and [Player]: force-reload, then check who and what version you are
 
 **What to do and see:**
-- Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.21.1**; if it is not, stop (the release may still be building).
+- Force-reload BOTH windows first (Ctrl+Shift+R) and wait for the world to finish loading. The version must be **0.21.2**; if it is not, stop (the release may still be building).
 - Run the block below in the GM window, then again in the Player window.
-- You should see: `["<your GM name>", true, "0.21.1"]` in the GM window and `["Test", false, "0.21.1"]` in the Player window.
+- You should see: `["<your GM name>", true, "0.21.2"]` in the GM window and `["Test", false, "0.21.2"]` in the Player window.
 
 ```js
 [game.user.name, game.user.isGM, game.modules.get("pathfinder-progress").version]
@@ -820,25 +822,29 @@ await (async () => {
 })();
 ```
 
-## Step 25 [GM]: the Persistent checkbox
+## Step 25 [GM]: the Persistent checkbox (both states)
 
 **What to do and see:**
 - Make the window wide again (any width over about 700px).
-- Click **Gate G20 Fang**, then the **Weapon** tab in **Effects**.
-- Look at the damage block.
-- You should see: **Persistent** as a normal-sized checkbox with the word beside it on the same line (not a huge box with the word underneath).
+- Type **stage** in the list's search box and click **Gate G20 Study Stage** (made by Step 22, so this step works with only Steps 22 to 27 run).
+- In **Effects**, click the **Weapon** tab.
+- Find the **Add damage** block (dice, damage type). The **Persistent** box is in it, under the damage type.
+- You should see (unticked): an EMPTY box with a visible border and the word **Persistent** beside it on the same line. Not a dark or filled square, and no mark inside.
+- **Send me a screenshot of the unticked box.**
 - Click the **word** Persistent (not the box).
-- You should see: the box ticks and **Save** turns on.
+- You should see (ticked): the same box with exactly ONE tick inside it, and nothing else drawn below or beside it. **Save** turns on.
+- **Send me a screenshot of the ticked box.**
 - Click the word again.
-- You should see: the box clears.
+- You should see: the box is empty again.
 - Tick it once more and press **Discard changes**.
-- You should see: **Save** is off again.
+- You should see: the box is empty and **Save** is off.
+- Run the block below. It flips the box itself to read both states and prints one `STYLE {...}` line with the box's computed style (both states, including `::before` and `::after`): paste that line back too.
 
 ```js
-// [GM] after the clicks above: the Persistent checkbox is a normal-sized box with its words beside it; the label row is the 44px tap target; it is the only checkbox.
+// [GM] after the clicks above: the Persistent checkbox is a normal-sized box inside a 44px label row; UNCHECKED it looks empty (the card colour, a visible border, no mark), CHECKED it shows exactly ONE mark; it is the only checkbox.
 await (async () => {
   const g = globalThis.__g20 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
-  const app = g.screen({ selected: "material:gate-g20-fang", tab: "weapon", confirm: false });
+  const app = g.screen({ selected: "material:gate-g20-study-stage", tab: "weapon", confirm: false });
   const boxes = [...app.element.querySelectorAll('input[type="checkbox"]')];
   g.check("the damage block has exactly one checkbox (Persistent) and the editor has no other", boxes.length === 1 && boxes[0].getAttribute("aria-label") === "Persistent", boxes.length);
   const input = boxes[0], label = input?.closest("label");
@@ -847,7 +853,29 @@ await (async () => {
     const b = input.getBoundingClientRect(), l = label.getBoundingClientRect(), size = parseFloat(getComputedStyle(input).fontSize);
     g.check("the box is a normal size (about a line of text, not an enlarged box)", b.width <= size * 1.6 && b.height <= size * 1.6, `${b.width.toFixed(0)}x${b.height.toFixed(0)}px`);
     g.check("the label row is at least 44px tall: that is the tap target", l.height >= 43.5, `${l.height.toFixed(0)}px`);
-    g.check("the words are beside the box on the same line, not underneath", Math.abs((l.top + l.height / 2) - (b.top + b.height / 2)) < 6 && label.getBoundingClientRect().width > b.width + 20);
+    g.check("the words are beside the box on the same line, not underneath", Math.abs((l.top + l.height / 2) - (b.top + b.height / 2)) < 6 && l.width > b.width + 20);
+    // Both states, read from the computed style (the pseudo-elements too), because Foundry restyles checkboxes: a dark fill when unchecked, ticks drawn with ::before and ::after.
+    const probe = document.createElement("div");
+    probe.style.background = "var(--pfp-card)";
+    app.element.querySelector(".pfp-hub").append(probe);
+    const emptyColour = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    const was = input.checked;
+    const read = checked => {
+      input.checked = checked;
+      const cs = getComputedStyle(input);
+      const pseudo = pe => { const c = getComputedStyle(input, pe).content; return c && c !== "none" && c !== "normal" ? c : null; };
+      return { checked, background: cs.backgroundColor, backgroundImage: cs.backgroundImage, border: `${cs.borderTopWidth} ${cs.borderTopStyle} ${cs.borderTopColor}`, appearance: cs.appearance, size: `${cs.width} x ${cs.height}`, before: pseudo("::before"), after: pseudo("::after") };
+    };
+    const off = read(false), on = read(true);
+    input.checked = was;
+    console.log(`STYLE ${JSON.stringify({ off, on, emptyColour })}`);
+    const marks = s => [s.before, s.after, s.backgroundImage !== "none" ? "image" : null].filter(Boolean).length;
+    g.check("UNCHECKED: no mark at all (no dark square, no tick)", marks(off) === 0, JSON.stringify([off.before, off.after, off.backgroundImage]));
+    g.check("UNCHECKED: it looks empty (the card colour, not a dark fill)", off.background === emptyColour, `${off.background} vs ${emptyColour}`);
+    g.check("UNCHECKED: it has a visible border", parseFloat(off.border) >= 1.5 && /solid/.test(off.border), off.border);
+    g.check("CHECKED: exactly ONE mark (not a tick plus a stray second one)", marks(on) === 1, JSON.stringify([on.before, on.after, on.backgroundImage]));
+    g.check("CHECKED: the box itself is not filled; only the tick marks it", on.background === emptyColour, `${on.background} vs ${emptyColour}`);
   }
   g.check("ticking it and pressing Discard changes left nothing to save", g.off("save"));
   return g.done();

@@ -222,8 +222,33 @@
 .pfp-hub .pfp-wide { display: flex; flex-direction: column; gap: 0.3em; width: 100%; }
 .pfp-hub .pfp-wide input, .pfp-hub textarea { width: 100% !important; }
 .pfp-hub textarea { resize: vertical; }
-/* A checkbox is a NORMAL-sized box with its label beside it; the 44px tap target is the whole label row (padding on the label), not an enlarged native box. */
-.pfp-hub input[type="checkbox"] { flex: 0 0 auto; width: 1.25em !important; min-width: 0 !important; height: 1.25em !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; }
+/* >>> checkbox reset (v0.21.2)
+   Foundry restyles form controls (a dark fill for an unchecked box, ticks drawn with ::before and ::after, an accent colour), the same family as the <button> reset above.
+   So a checkbox or radio inside the Hub is reset to nothing and drawn again: an EMPTY box with a visible border when unchecked, the same box with ONE tick of ours when
+   checked, so the state is told by shape and never by colour alone. Every state Foundry might style (checked, hover, focus, active, disabled) is reset on both pseudo-elements.
+   The tap target is the label row around the box (Step 25), not the box. */
+.pfp-hub input[type="checkbox"], .pfp-hub input[type="radio"] {
+  -webkit-appearance: none !important; -moz-appearance: none !important; appearance: none !important;
+  position: relative !important; display: inline-block !important; flex: 0 0 auto;
+  box-sizing: border-box !important; width: 1.4em !important; height: 1.4em !important; min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important;
+  margin: 0 !important; padding: 0 !important;
+  border: 2px solid var(--pfp-text) !important; border-radius: 0.25em !important;
+  background: var(--pfp-card) !important; background-color: var(--pfp-card) !important; background-image: none !important;
+  color: var(--pfp-text) !important; box-shadow: none !important; filter: none !important; opacity: 1 !important; transform: none !important; cursor: pointer;
+}
+.pfp-hub input[type="radio"] { border-radius: 50% !important; }
+.pfp-hub input:is([type="checkbox"], [type="radio"]):is(:checked, :not(:checked), :hover, :focus, :active, :disabled)::before,
+.pfp-hub input:is([type="checkbox"], [type="radio"]):is(:checked, :not(:checked), :hover, :focus, :active, :disabled)::after { content: none !important; display: none !important; }
+.pfp-hub input[type="checkbox"]:checked::after {
+  content: "" !important; display: block !important; position: absolute !important; left: 50% !important; top: 44% !important; width: 0.34em !important; height: 0.7em !important;
+  margin: 0 !important; padding: 0 !important; background: none !important; border: solid var(--pfp-text) !important; border-width: 0 0.24em 0.24em 0 !important; border-radius: 0 !important;
+  transform: translate(-50%, -50%) rotate(45deg) !important;
+}
+.pfp-hub input[type="radio"]:checked::after {
+  content: "" !important; display: block !important; position: absolute !important; left: 50% !important; top: 50% !important; width: 0.6em !important; height: 0.6em !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 50% !important; background: var(--pfp-text) !important; transform: translate(-50%, -50%) !important;
+}
+/* <<< checkbox reset */
 .pfp-hub label.pfp-check, .pfp-hub .pfp-block .pfp-row > label.pfp-check { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 0.6em; flex: 0 1 auto; min-height: var(--pfp-target); padding: 0.3em 0.7em; cursor: pointer; }
 .pfp-hub .pfp-row > label { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; }
 /* Fields in the editor's sections and blocks stack their label over the control and can shrink, so a long option list never pushes a narrow window wider. */

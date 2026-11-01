@@ -78,6 +78,8 @@ GM only. `docs/11d-item-editor-addendum.md` records the decisions; `docs/20-stag
 - **Required choices start on a disabled placeholder** ("Choose a formula", "Choose a tier", "Choose a kind of note"), Create stays off and a reason line says why. A checkbox is a normal-sized box inside a label row; the label row is the 44px target.
 - A tag created in the editor carries only its own fields; deleting a tag a material still names is refused.
 
+**Checkboxes and radios, v0.21.2.** Foundry restyles them (a dark fill when unchecked, ticks drawn with `::before`/`::after`), so `styles/hub.css` resets every `input[type=checkbox|radio]` under `.pfp-hub` (marked `>>> checkbox reset`) and draws one tick of its own; unchecked = empty bordered box, checked = box with one tick. The layout harness imitates Foundry's checkbox styling and reads both states from the computed style (pseudo-elements included); a mutation test strips the reset and must fail.
+
 ## Offline queue (players submit any time)
 Sockets only reach online clients, so the queue lives in data players can write:
 1. Each player's actor has a `pendingActions` flag.

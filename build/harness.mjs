@@ -8,7 +8,7 @@
  */
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HUB } from "../scripts/config.js";
@@ -33,11 +33,17 @@ const common = (button, extra = "") => `
   p { margin: 0.75rem 0; } ul, ol { margin: 0.75rem 0; padding-left: 2rem; } li { margin: 0.25rem 0; }
   label { display: block; margin: 0.3rem 0; } legend { padding: 0 0.5rem; margin: 0 0 0.5rem; } fieldset { margin: 0.5rem 0; padding: 0 0.5rem 0.5rem; border: 2px groove #666; }
   span, div, section, nav, header { line-height: 1.6; }`;
+// What Foundry does to checkboxes (as seen in a real window, v0.21.1): a dark filled square when UNCHECKED, and when checked a tick drawn with ::before plus a second stray one with ::after.
+const checkboxes = important => `
+  input[type="checkbox"], input[type="radio"] { -webkit-appearance: none; appearance: none; position: relative; width: 16px; height: 16px; border: 1px solid #555; background: #1a1a1a${important}; accent-color: #ff6400; }
+  input[type="checkbox"]::before, input[type="radio"]::before { content: ""${important}; position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: #1a1a1a; }
+  input[type="checkbox"]:checked::before, input[type="radio"]:checked::before { content: "\\2713"${important}; position: absolute; left: 1px; top: -3px; color: #ff6400; font-size: 14px; }
+  input[type="checkbox"]:checked::after, input[type="radio"]:checked::after { content: "\\2713"${important}; position: absolute; left: 1px; top: 11px; color: #ff6400; font-size: 14px; }`;
 export const HOSTILE = {
-  "plain 2rem hidden": common("button", "").replaceAll("HEIGHT", "2rem").replaceAll("OVERFLOW", "hidden"),
-  "plain 2.5rem visible": common("button", "").replaceAll("HEIGHT", "2.5rem").replaceAll("OVERFLOW", "visible"),
-  "specific 2rem hidden": common(".application.window-app .window-content button, .application button[type='button']", "").replaceAll("HEIGHT", "2rem").replaceAll("OVERFLOW", "hidden"),
-  "important 2.5rem": common("button", " !important; height: 2.5rem !important; line-height: 1 !important; white-space: nowrap !important; overflow: hidden !important; text-align: center !important; padding: 0 0.5rem !important").replaceAll("HEIGHT", "2.5rem").replaceAll("OVERFLOW", "hidden")
+  "plain 2rem hidden": common("button", "").replaceAll("HEIGHT", "2rem").replaceAll("OVERFLOW", "hidden") + checkboxes(""),
+  "plain 2.5rem visible": common("button", "").replaceAll("HEIGHT", "2.5rem").replaceAll("OVERFLOW", "visible") + checkboxes(""),
+  "specific 2rem hidden": common(".application.window-app .window-content button, .application button[type='button']", "").replaceAll("HEIGHT", "2rem").replaceAll("OVERFLOW", "hidden") + checkboxes(""),
+  "important 2.5rem": common("button", " !important; height: 2.5rem !important; line-height: 1 !important; white-space: nowrap !important; overflow: hidden !important; text-align: center !important; padding: 0 0.5rem !important").replaceAll("HEIGHT", "2.5rem").replaceAll("OVERFLOW", "hidden") + checkboxes(" !important")
 };
 const windowCss = `
   html, body { margin: 0; background: #444; font-family: "Signika", sans-serif; font-size: 16px; }
@@ -224,6 +230,33 @@ function pageChecks({ minTarget, checkWords, belowMinimum, minEditorPane }) {
     const controls = [...root.querySelectorAll("[data-action], input, select, textarea")].filter(el => el.getClientRects().length).map(el => [el, visibleRect(el)]).filter(([, r]) => r);
     for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) if (overlap(controls[i][1], controls[j][1])) problems.push(`controls overlap: ${name(controls[i][0])} / ${name(controls[j][0])}`);
   }
+  // 3c. Checkboxes and radios (v0.21.2). Foundry restyles them (a dark fill when UNCHECKED, ticks drawn with ::before and ::after), and the earlier checks only measured their size
+  //     and tap target, never what they LOOK like. So both states are read from the computed style, including the pseudo-elements: an unchecked box must look empty (the card
+  //     colour, a visible border, no mark) and a checked box must show exactly ONE mark.
+  {
+    const probe = document.createElement("div");
+    probe.style.background = "var(--pfp-card)";
+    root.append(probe);
+    const empty = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    for (const el of root.querySelectorAll('input[type="checkbox"], input[type="radio"]')) {
+      const was = el.checked;
+      const read = checked => {
+        el.checked = checked;
+        const cs = getComputedStyle(el);
+        const pseudo = ["::before", "::after"].filter(pe => { const c = getComputedStyle(el, pe).content; return c && c !== "none" && c !== "normal"; }).length;
+        return { marks: pseudo + (cs.backgroundImage !== "none" ? 1 : 0), bg: cs.backgroundColor, bw: parseFloat(cs.borderTopWidth), bs: cs.borderTopStyle, bc: cs.borderTopColor };
+      };
+      const off = read(false), on = read(true);
+      el.checked = was;
+      const what = `${el.type} "${(el.closest("label")?.textContent ?? "").trim().slice(0, 24)}"`;
+      if (off.marks) problems.push(`an unchecked ${what} shows ${off.marks} mark(s)`);
+      if (off.bg !== empty) problems.push(`an unchecked ${what} looks filled (${off.bg}; empty is ${empty})`);
+      if (!(off.bw >= 1.5 && off.bs === "solid" && off.bc !== off.bg)) problems.push(`an unchecked ${what} has no visible border`);
+      if (on.marks !== 1) problems.push(`a checked ${what} shows ${on.marks} marks, not exactly one`);
+      if (on.bg !== empty) problems.push(`a checked ${what} is filled (${on.bg}); only its tick should mark it`);
+    }
+  }
   // 4. Nothing is cut off at the right edge, and the page itself does not scroll sideways.
   const vw = document.documentElement.clientWidth;
   if (!belowMinimum && document.documentElement.scrollWidth > vw + 1) problems.push(`the page scrolls sideways (${document.documentElement.scrollWidth} > ${vw})`);
@@ -266,10 +299,19 @@ function pageChecks({ minTarget, checkWords, belowMinimum, minEditorPane }) {
 }
 
 /** One page, reused. It is loaded from a real file: a stylesheet link from about:blank to file:// is blocked, which silently renders everything unstyled. */
-export async function openHarness(browser) {
+export async function openHarness(browser, { stripReset = false } = {}) {
   const page = await browser.newPage();
-  const file = join(mkdtempSync(join(tmpdir(), "pfp-harness-")), "harness.html");
-  writeFileSync(file, `<!doctype html><meta charset="utf-8"><style id="window">${windowCss}</style><style id="hostile"></style><link rel="stylesheet" href="${cssUrl}"><style id="extra"></style><body></body>`);
+  const dir = mkdtempSync(join(tmpdir(), "pfp-harness-"));
+  const file = join(dir, "harness.html");
+  let href = cssUrl;
+  if (stripReset) {      // the stylesheet WITHOUT the checkbox reset (for the mutation test: the matrix must fail without it)
+    const css = readFileSync(new URL("../styles/hub.css", import.meta.url), "utf8");
+    const cut = css.replace(/\/\* >>> checkbox reset[\s\S]*?<<< checkbox reset \*\//, "");
+    if (cut === css) throw new Error("the checkbox reset markers were not found in styles/hub.css");
+    writeFileSync(join(dir, "hub.css"), cut);
+    href = pathToFileURL(join(dir, "hub.css")).href;
+  }
+  writeFileSync(file, `<!doctype html><meta charset="utf-8"><style id="window">${windowCss}</style><style id="hostile"></style><link rel="stylesheet" href="${href}"><style id="extra"></style><body></body>`);
   await page.goto(pathToFileURL(file).href);
   // Fail loudly if the real stylesheet did not load (a layout "pass" against no CSS at all would mean nothing).
   const loaded = await page.evaluate(() => { const probe = document.createElement("div"); probe.className = "pfp-hub"; document.body.append(probe); const ok = getComputedStyle(probe).display === "flex"; probe.remove(); return ok; });
@@ -281,7 +323,7 @@ export async function openHarness(browser) {
  * Render one state. Options: { scene, theme, textSize, width, hostile (a HOSTILE key or null), font, announce, height, fit, shot (path) }.
  * Returns { problems, layout }.
  */
-export async function renderState(page, { scene, theme = "parchment", textSize = 100, width = 900, height, hostile = null, font = "standard", announce = null, shot = null, extraCss = "" }) {
+export async function renderState(page, { scene, theme = "parchment", textSize = 100, width = 900, height, hostile = null, font = "standard", announce = null, shot = null, extraCss = "", inject = "" }) {
   const spec = SCENES[scene];
   const layout = width < HUB.stackBelowPx ? "narrow" : "wide";
   const display = { theme, textSize, font };
@@ -293,6 +335,7 @@ export async function renderState(page, { scene, theme = "parchment", textSize =
     document.getElementById("extra").textContent = extraCss;
     document.body.innerHTML = `<div class="application window-app theme-dark" style="width:100%;${frameHeight ? `height:${frameHeight}px` : ""}"><section class="window-content">${html}</section></div>`;
   }, { html, hostileCss: hostile ? HOSTILE[hostile] : "", extraCss, frameHeight });
+  if (inject) await page.evaluate(html => document.querySelector(".pfp-hub").insertAdjacentHTML("beforeend", html), inject);
   await page.evaluate(() => document.fonts.ready);
   const problems = await page.evaluate(pageChecks, { minTarget: HUB.minTarget ?? 44, checkWords: width >= 280, belowMinimum: width < HUB.minSize.width, minEditorPane: 280 });
   if (shot) await page.screenshot({ path: shot, fullPage: layout === "narrow" });

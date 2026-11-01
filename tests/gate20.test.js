@@ -79,7 +79,8 @@ async function playNewSteps(d) {
   for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 1000);
   await wait(30);
   await set('[data-field="search"]', "", "input");
-  await pick("material:gate-g20-fang");
+  await set('[data-field="search"]', "stage", "input");
+  await pick("material:gate-g20-study-stage");
   await click("effect-class", '[data-cls="weapon"]');
   const word = el().querySelector("label.pfp-check");
   assert.ok(word && /Persistent/.test(word.textContent), "the word Persistent is in the label");
@@ -125,10 +126,10 @@ test("the stage 11d gate doc: steps are labelled, click-through steps say what y
     assert.doesNotMatch(section.replace(/^- .*$/gm, ""), /\n[A-Z][^\n]{200,}/, `step ${step} has no long paragraph of instructions outside the bullets`);
     if (!/Nothing to click/i.test(section) && step !== 1 && step !== 2) assert.ok(bullets.some(b => /^- (You should see|Look at .*You should see|Run the block)/.test(b) || /You should see:/.test(b)), `step ${step} has a "You should see:" bullet`);
   }
-  assert.deepEqual([...GATE].filter(([, e]) => /send me a screenshot/i.test(e.text)).map(([n]) => n), [3, 20, 24], "screenshots: the whole window with its three panes, and the narrow layout (twice)");
+  assert.deepEqual([...GATE].filter(([, e]) => /send me a screenshot/i.test(e.text)).map(([n]) => n), [3, 20, 24, 25], "screenshots: the whole window with its three panes, the narrow layout (twice), and the Persistent box (unticked and ticked)");
   assert.match(gateDoc, new RegExp(`version must be \\*\\*${MODULE_VERSION.replace(/\./g, "\\.")}\\*\\*`));
   assert.match(gateDoc, /Force-reload BOTH windows first/);
-  assert.match(gateDoc, /\(v0\.21\.1\)/);
+  assert.match(gateDoc, /\(v0\.21\.2\)/);
   for (const must of [/What SETUP plants/, /orphaned research track/, /material:g20-orphan/, /preflight/i, /Leftovers/, /Push to copies/, /Plan note/, /Research note/, /already knows something this changes/, /Take back my edits/, /Show retired/, /still in use/, /Just picked up/, /After studying/, /After a successful craft in this class/, /Choose a formula/, /Pick a formula first\./, /Persistent/, /about \*\*400px wide\*\*/, /New in 0\.21\.1/]) assert.match(gateDoc, must);
   assert.equal(GATE.get(27).code, GATE.get(21).code, "Step 27 is the same CLEANUP block as Step 21");
   assert.doesNotMatch(gateDoc.replace(/DC\b[^\n]*never/gi, ""), /\bDC \d|odds of|\d+% chance/i, "the gate text itself never talks about difficulty to the player");
@@ -402,8 +403,6 @@ test("GATE 20 (new in 0.21.1): after a fresh SETUP, Steps 22 to 26 run on their 
   };
   await quietly(async () => {
     await runBlock(2, gm);
-    // Gate G20 Fang is made by Step 4 in a full run; the new steps only need one to look at the checkbox, so the test makes it the way Step 4 does.
-    await as(gm, () => api.editor.create("material", { name: "Gate G20 Fang", tier: 2, effectBlocks: { general: { blocks: [] }, byClass: { weapon: { blocks: [{ type: "damage", dice: { all: "1d6" }, damageType: "fire" }] } } } }));
     await as(gm, async () => { app = api.discovery.openEditor(); await wait(30); });
     await playNewSteps({ click, set, text, el, pick: key => click("pick-item", `[data-key="${key}"]`), expectPass, seen: pattern => assert.match(text(), pattern), gm });
     const cleanup = await runBlock(27, gm);

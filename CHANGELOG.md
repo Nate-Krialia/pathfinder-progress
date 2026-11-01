@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.21.2
+
+Fix round after gate 20 in real Foundry (Step 25).
+
+- **The Persistent checkbox rendered wrong in a real window** (a dark filled square when unticked, which read as ticked; when ticked, a tick plus a second stray tick). Foundry restyles checkboxes, the same family as the `<button>` reset. Every `input[type=checkbox]` and `input[type=radio]` under `.pfp-hub` now has a hard reset (appearance none, own size, border and background, `::before` and `::after` reset in every state Foundry might style) and draws ONE tick of its own when checked: an empty bordered box when unticked, the box with one tick when ticked, so the state is told by shape. The tap target is still the label row. Touched: the Persistent checkbox is the only checkbox or radio in the editor and the Hub (the Hub has none); the reset is written for all of them so a future one cannot regress.
+- **What the old check missed:** the harness only measured a checkbox's size and its tap target, never what it LOOKED like. It now imitates Foundry's checkbox styling in every hostile sheet (a dark square drawn with `::before` when unchecked, a tick in `::before` plus a second in `::after` when checked) and reads both states from the computed style, pseudo-elements included: an unchecked box must look empty (card colour, visible border, no mark) and a checked box must show exactly one mark. A mutation test cuts the reset out of the stylesheet and the matrix must fail (it reports exactly the two symptoms); a second check injects an extra checkbox and a radio. It cannot prove the reset beats Foundry's REAL CSS: that is Step 25's job, and Step 25 now prints one `STYLE {...}` line with the box's computed style in both states.
+- **Gate 20, Step 25** told you to open Gate G20 Fang, which does not exist when only Steps 22 to 27 run. It now uses Gate G20 Study Stage (made by Step 22), says where the Persistent box is (Effects, Weapon tab, Add damage block), looks at BOTH states (unticked: empty box; ticked: one tick) and asks for a screenshot of each. The gate test now runs Steps 22 to 27 with no Fang at all. Nothing renumbered.
+- Tests: 1135 in all (the layout matrix now draws Foundry-style checkbox CSS in every hostile sheet; one new test strips the reset and must fail, and injects a second checkbox and a radio).
+- No manifest change except the version: force-reload both windows (Ctrl+Shift+R); no server restart.
+
 ## 0.21.1
 
 Fix round after gate 20 in real Foundry.
