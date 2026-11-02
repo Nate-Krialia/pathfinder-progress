@@ -17,8 +17,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The layout tests (tests/hub-layout.test.js) draw the Hub in real Chromium. Without a browser they used to SKIP silently (4 skipped tests in every CI run),
+      # so the hostile-CSS layout matrix only ever ran in the cloud workspace. Install the browser and make a missing one a failure, not a skip.
+      - name: Install Chromium for the layout tests
+        run: npx playwright install --with-deps chromium
       - name: Run tests
         run: npm test
+        env:
+          REQUIRE_CHROMIUM: "1"
       - name: Build compendium packs
         run: npm run build:packs
       - name: Build module zip
