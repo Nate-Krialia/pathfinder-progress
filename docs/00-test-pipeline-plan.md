@@ -153,7 +153,7 @@ Either add `npx playwright install --with-deps chromium` and a `playwright` devD
 
 The danger: a self-hosted runner on a public repo will run whatever a workflow says, and a stranger's pull request can change the workflow. Everything below is required; the first item removes most of the risk by itself.
 
-1. **Runner attached to a PRIVATE repo only.** The kit repo `foundry-e2e-kit` (private) owns the workflow and the runner. It checks out the public module repo's branch as plain read-only *data* (the module's scripts and docs are copied into the clone and executed by Foundry's browser pages, and the gate blocks run inside the clone's browser, not on the runner's shell). Strangers cannot open pull requests against a private repo, and cannot trigger its workflows.
+1. **Runner attached to a PRIVATE repo only.** The kit repo `foundry-e2e-kit` (private) owns the workflow and the runner. It fetches the public module repo's commit as plain read-only *data* (docs and click scripts) and downloads the module's **finished CI build** (artifact `module-<sha>`); it NEVER builds or executes the module branch's code on the runner (change A). The module's scripts run only inside the clone's browser pages, and the gate blocks run inside the clone's browser, not on the runner's shell. Strangers cannot open pull requests against a private repo, and cannot trigger its workflows.
    - **If Nate refuses a private repo**: keep everything in the public repo, but then *all* of the following must hold, and I would call the residual risk "acceptable but not comfortable".
 2. **No pull-request triggers.** The workflow's `on:` is only `workflow_dispatch` (manual/agent trigger) and, if wanted, `push` restricted to Nate's own branches (`claude/**`, `main`). There is no `pull_request` or `pull_request_target` trigger at all. In repo settings (Actions, General): "Fork pull request workflows from outside collaborators" set to *Require approval for all outside collaborators* (or runs disabled for forks).
 3. **Actor guard in every job**: `if: github.repository == 'Nate-Krialia/<kit repo>' && github.actor == 'Nate-Krialia'` (agent pushes already appear as Nate-Krialia in the run list, so this does not block the agent).
@@ -161,7 +161,7 @@ The danger: a self-hosted runner on a public repo will run whatever a workflow s
 5. **Rebuildable**: a Proxmox snapshot of the clean runner; optionally an `--ephemeral` runner (it takes one job, then deregisters; a small script restores the snapshot and re-registers). A compromised runner is then a restore, not a clean-up.
 6. **No secrets in any repo.** Foundry passwords ("access keys") and the optional admin password live only in a root-owned, mode-0600 environment file on the runner (`/etc/foundry-e2e/env`), read by the runner process; nothing is passed through GitHub Secrets (so even a workflow edit cannot exfiltrate them through GitHub), and the config files hold only the *names* of environment variables. The runner redacts those values from every log and from every artifact.
 7. **The deploy path is narrow.** The runner reaches the clone host through **one SSH key restricted with `command="/usr/local/bin/pfp-deploy"`**: the only things it can do are "stop the test Foundry, restore the pristine world, copy the module in, start it". No shell, no other paths.
-8. **Pin and review**: third-party actions pinned by commit SHA; Playwright pinned to one version; the runner image rebuilt from a documented script, not by hand.
+8. **Pin and review**: the only marketplace action is `actions/upload-artifact@v4` (a KNOWN warning: pin it to a commit in Stage B); every other step is plain shell; the kit's tooling is installed with `npm ci --ignore-scripts` from a lockfile; Playwright pinned to one version; the runner image rebuilt from a documented script, not by hand.
 9. **The world-id guard** (section 5.2) is a second, independent fence: even if everything above failed, the runner refuses to act on any world that is not the dedicated test world, and refuses any URL that is not on the allow-list.
 10. **Foundry's licence terms**: Foundry's FAQ allows a second private instance on one licence as long as nobody else can reach it past the login screen. That means: no port-forward, no reverse proxy entry, no DNS name on the internet, firewalled from everything except the runner and Nate's own machine, and the test accounts' access keys stay private. (Nate confirms by reading the FAQ himself; I am restating the rule as he gave it.)
 
@@ -188,9 +188,10 @@ It also refuses to start if `config.target.denyOrigins` contains the origin (a l
 
 ### 5.3 Getting the branch into the clone
 
-- The runner checks out the module branch at the requested SHA, runs `npm ci` and `npm run build:packs` (packs are gitignored and built from `content/` by `@foundryvtt/foundryvtt-cli`; the existing CI does the same), and calls the restricted `pfp-deploy` command on the clone host, which: (1) stops the test Foundry process/container, (2) restores the **pristine world folder** (and wipes the module's old folder), (3) copies `module.json scripts styles packs README.md` into `Data/modules/pathfinder-progress/`, (4) starts Foundry with the test world auto-launched.
+- **The runner does not build.** (Change A.) The module repo's CI already runs the tests and builds the zip (packs are gitignored and built from `content/` in CI), and since 0.22.0's follow-up it uploads each build as the artifact `module-<sha>` (module.zip, module.zip.sha256, module.json; kept 30 days). The runner downloads that artifact for the requested SHA (`kit/fetch-artifact.mjs`), checks the checksum, unpacks it with strict rules into an empty staging folder (allowed top-level names only; no `..`, absolute paths, symlinks or oversize files; module.json id must match), uploads the staging folder with rsync (jailed by `rrsync` to the staging dir), and calls the restricted `pfp-deploy deploy` command on the clone host, which: (1) stops the test Foundry process/container, (2) restores the **pristine world folder** (and wipes the module's old folder), (3) copies `module.json scripts styles packs README.md` into `Data/modules/pathfinder-progress/`, (4) starts Foundry with the test world auto-launched.
 - **Why stop Foundry first**: the packs are LevelDB folders with `LOCK` files; copying them under a running Foundry is unsafe, and a changed `module.json` (new packs, scripts) needs a server restart anyway.
-- Alternative rejected: installing through the module's manifest URL (the rolling `dev` release). It races with the next push (the `dev` tag is overwritten by every build) and cannot test an arbitrary SHA. The runner deploys its own build of the exact SHA instead.
+- Alternative rejected: installing through the module's manifest URL (the rolling `dev` release). It races with the next push (the `dev` tag is overwritten by every build) and cannot test an arbitrary SHA. The runner deploys CI's build of the exact SHA instead. A SHA whose CI is not green has no artifact (or a failing one), so the run refuses it.
+- The same job refuses to start unless the unpacked `module.json` says the version the run expects.
 - The clone must already have the **PF2e system** (8.6.1) and the **socketlib** module installed (the module requires it), and the module enabled in the test world (done once, by Nate, and preserved in the pristine world).
 
 ### 5.4 The world and the clean-state guarantee
@@ -381,6 +382,7 @@ Create the clone and the test world with the two accounts; create the runner con
 | B4 | **Gate 20, then 19, then 18**: shared click scripts on the real page | all PASS; screenshots at the named states |
 | B5 | **Gate 17** (look-steps): screenshots for all 24, text assertions where the bullets quote text | gallery reviewed by Nate |
 | B6 | Summary delivery and the agent's single read (section 9); artifacts | the agent triggers once and reads the summary once |
+| B3b | **Gate 21** (v0.22.0, effects that act on a target): Steps 1-11 and 25 are API/clicks; **Steps 12-24 need the real canvas and real PF2e** (select a token, target a token, a real Strike, a real consumable Use, PF2e's real save roll). The kit's named target actions (`selectToken`, `targetTokens`, `strike`, `useConsumable`, `pressApply`, `pressApplyRefused`, `advance`) are the ONLY real-Foundry work left for it; the click script `e2e/steps/gate21.steps.mjs` is written | the 13 real-Foundry steps pass with the canvas ON, or the real failures are found |
 | B7 | Stabilise: flaky-step list, retry policy, the CI-side Playwright fix (3.4), docs for extraction to a shared kit | three consecutive green runs from a cold clone |
 
 ---
@@ -477,3 +479,20 @@ Plain-language terms first:
 - Gate docs 13 to 21: 25, 31, 18, 22, 40, 25, 17, 27, 25 steps (230 in all; 205 for gates 13 to 20), globals as in 1.2, classification as in 1.3. The branch's 0.22.0 commits did not touch `package.json` or `.github/` (checked), so the CI and Playwright findings stand.
 - Entry points: `api.hub.open(actor)`, `api.discovery.openEditor(key)`, scene-controls buttons, actor-sheet header controls.
 - **Not verified (cannot be from here)**: Foundry v14.369's join-page selectors, whether `game.ready` and the canvas behave in headless Chromium, the Foundry container's packaging. Each has a named Stage B0 check.
+
+
+---
+
+## 12. Stage A result and what changed from the plan (written at the end of Stage A)
+
+**Canvas finding (change E).** Gate 21's steps 12-24 read `canvas.tokens.controlled` and `game.user.targets`, and need real PF2e strikes, so gate 21 needs the canvas ON. Section 11's answer 9 (turn the canvas off in the test world) therefore becomes **per gate**: each gate in the config has `canvas: "on" | "off" | "inherit"` and the target has a default; gates 13-20 may run with the canvas off if Stage B0 shows they pass without it, gate 21 stays on. The runner applies the setting per run (`applyCanvas`, the setting name is verified in B0).
+
+**Built for future modules (change E).** Per-module config folders; canvas/scene screenshots (skipped when the canvas is off); sound checked by API spies on the audio helper (no audio is captured); 1..N browser contexts (a GM-only module needs one).
+
+**The deploy path (change A).** Artifact download + checksum + strict unzip + rsync into a jailed staging dir + one forced command with three fixed words (`rsync`, `deploy`, `status`). Everything the host may touch is named in a root-owned config, never by the client.
+
+**Setup guide (change B).** `docs/SETUP.md` in the kit repo, with the new steps "change the clone's Foundry ADMIN password (a clone inherits the real one)" and "check that the clone starts and activates on the licence".
+
+**Gate 21 Player helper (change C).** Confirmed: gate 21 has no Player helper (no `__p21`); its Player blocks (steps 8, 12, 14, 16, 18, 20, 22, 24) are self-contained.
+
+**Not proven until Stage B** (honestly): the real join-page selectors (guessed: `select[name=userid]`, `input[name=password]`, `button[name=join]`), the real canvas setting name (guessed `core.noCanvas`), the Playwright driver against real Foundry windows (it passes the same contract test as the DOM driver on a stand-in page), the named target actions for gates 18-21 in a real Foundry, the mailbox comment waking a subscribed session, and the runner/forced-command/firewall on real machines.
