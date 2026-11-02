@@ -29,6 +29,18 @@ jobs:
         run: npm run build:packs
       - name: Build module zip
         run: zip -r module.zip module.json scripts styles packs README.md
+      # The real-Foundry e2e runner (private repo foundry-e2e-kit) deploys THIS exact build, named by commit, and never builds anything itself.
+      - name: Record the build's checksum
+        run: sha256sum module.zip > module.zip.sha256
+      - name: Keep the exact build as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-${{ github.sha }}
+          path: |
+            module.zip
+            module.zip.sha256
+            module.json
+          retention-days: 30
       - name: Publish rolling "dev" release
         uses: softprops/action-gh-release@v2
         with:
