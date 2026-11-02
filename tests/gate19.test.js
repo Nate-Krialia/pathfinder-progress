@@ -8,8 +8,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { as, env, getApi, getUsers, makeActor, measure, quietly, snapshot, world } from "./fake-world.js";
-import { build } from "../scripts/hub/app.js";
 import { installFakeApplication } from "./fake-application.js";
+import script from "../e2e/steps/gate19.steps.mjs";
+import { makeDomDriver, playStep } from "../e2e/driver-dom.mjs";
 import { chatLeaks } from "./helpers.js";
 
 const gateDoc = readFileSync("docs/19-stage11c-gate.md", "utf8");
@@ -27,6 +28,7 @@ function runBlock(step, user) {
 }
 const gateWorld = options => world({ downtime: 0, iron: 0, fang: 0, perClientDefinitions: true, ...options });
 const wait = ms => new Promise(r => setTimeout(r, ms));
+const whoOf = step => (GATE.get(step).who.includes("[Player]") && !GATE.get(step).who.includes("[GM]") ? "player" : "gm");
 const roll = (degree, total = 25, natural = 15) => ({ options: { degreeOfSuccess: degree }, total, dice: [{ faces: 20, results: [{ result: natural, active: true }] }] });
 
 test("the stage 11c gate doc: steps are labelled, click-through steps say what you should see, screenshots are asked for only where layout matters", () => {
@@ -57,109 +59,34 @@ test("GATE 19: every code step runs, in order, and the click-through steps are p
     try { assert.equal(await runBlock(step, user), "ALL PASS", `step ${step} did not report ALL PASS:\n${sink.join("\n").split("\n").filter(l => l.startsWith("FAIL")).join("\n")}`); } finally { console.log = logged; }
   };
   installFakeApplication();
+  const base = {
+    drivers: { gm: makeDomDriver({ as, user: gm }), player: makeDomDriver({ as, user: testUser }) }, state: {}, assert, wait,
+    extras: {
+      scriptRolls: async (name, specs) => { for (const [degree, total, natural] of specs) game.actors.getName(name).rolls.push({ options: { degreeOfSuccess: degree }, total, dice: [{ faces: 20, results: [{ result: natural, active: true }] }] }); },
+      noGm: async on => { env.noGM = on; },
+      resize: async width => {          // jsdom has no layout engine, so the geometry is stubbed; the real values are what the person checks
+        const app = foundry.applications.instances.get("pathfinder-progress-hub");
+        const root = app.element.querySelector(".pfp-hub");
+        for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, width);
+        Object.defineProperty(root, "scrollWidth", { value: width, configurable: true });
+        Object.defineProperty(root, "clientWidth", { value: width, configurable: true });
+        (app.element.closest(".application") ?? app.element).getBoundingClientRect = () => ({ width });
+        await wait(20);
+      }
+    }
+  };
+  const play = n => playStep({ script, n, who: whoOf(n), base, runBlock: (step, who) => (GATE.get(step).code ? expectPass(step, who === "player" ? testUser : gm) : undefined) });
   await quietly(async () => {
     assert.deepEqual(await runBlock(1, gm), ["GM", true, MODULE_VERSION]);
     assert.deepEqual(await runBlock(1, testUser), ["Test", false, MODULE_VERSION]);
     const setup = await runBlock(2, gm);
     assert.deepEqual([setup.scholar, setup.friend, setup.testUsersCharacter], ["Gate Scholar", "Gate Friend", "Gate Scholar"]);
-    const scholar = game.actors.getName("Gate Scholar");
-    const refresh = () => as(testUser, () => api.definitions.refresh({ force: true }));
-    await refresh();
-    await expectPass(3, testUser);
-
-    const Hub = build();
-    let app;
-    const click = async (action, where = "") => {
-      const target = [...app.element.querySelectorAll(`[data-action="${action}"]${where}`)].find(b => b.getAttribute("aria-disabled") !== "true");
-      assert.ok(target, `a live ${action}${where} button is on the page`);
-      await as(testUser, async () => { target.click(); await wait(25); });
-    };
-    const text = () => app.element.querySelector(".pfp-main").textContent.replace(/\s+/g, " ");
-    const seen = pattern => assert.match(text(), pattern);
-    const redraw = async () => { await refresh(); await as(testUser, () => app.redraw()); };
-
-    // Step 4: open the Hub on the Research tab
-    await as(testUser, async () => { app = new Hub(api, scholar); await app.render({ force: true }); });
-    await click("switch-tab", '[data-tab="research"]');
-    await expectPass(4, testUser);
-    // Step 5: follow Gate Ore B and queue two checks
-    await click("follow-lead", '[data-lead="item:material:g7-b"]');
-    seen(/Studying this can teach you what it is good for, and perhaps more\./);
-    await click("set-skill", '[data-skill="crafting"]');
-    await click("days-up");
-    seen(/2 days \(2 checks\)/);
-    await click("queue-research");
-    await expectPass(5, testUser);
-    // Step 6: the GM resolves (scripted rolls), then tops up
-    scholar.rolls.push(roll(3), roll(2));
-    await expectPass(6, gm);
-    await redraw();
-    // Step 7: Compendium, then Formulae
-    await click("switch-tab", '[data-tab="compendium"]');
-    await click("select-entry", '[data-entry="g7-b"]');
-    seen(/What you know[\s\S]*Gate ore: a theme of cowardice\.[\s\S]*It works with frightened\./);
-    await click("select-entry", '[data-entry="g7-a"]');
-    seen(/What you know[\s\S]*You haven't studied this yet\./);
-    assert.doesNotMatch(text(), /cowardice/, "no theme before the study");
-    await click("switch-tab", '[data-tab="formulae"]');
-    await click("select-recipe", '[data-recipe="g7-blade"]');
-    await click("pick-material", '[data-slot="body"][data-material="g7-plain"]');
-    await expectPass(7, testUser);
-    // Steps 8-10: Gate Ore A finishes; the higher version is a lead; follow it; the GM finishes it
-    await expectPass(8, gm);
-    await redraw();
-    await click("switch-tab", '[data-tab="research"]');
-    const versionLead = scholar.getFlag("pathfinder-progress", "leads").find(l => l.recipeId === "g7-blade2").id;
-    seen(/Gate Blade II[\s\S]*What you have learned about Gate ore materials shows how to make a better version\./);
-    await click("follow-lead", `[data-lead="${versionLead}"]`);
-    await expectPass(9, testUser);
-    await expectPass(10, gm);
-    await redraw();
-    // Step 11: Put aside keeps a study's progress
-    await click("select-project", '[data-project="study:note:g7-page"]');
-    await click("put-aside");
-    assert.equal(document.activeElement?.dataset?.focusKey, "keep-aside", "focus lands on Keep");
-    seen(/Put aside\? Your progress is kept\./);
-    await click("confirm-aside");
-    await wait(30);
-    seen(/Gate Page[\s\S]*You've started studying Gate Page\. Pick it up again whenever you like\.[\s\S]*Pick the study up again/);
-    await click("follow-lead", '[data-lead="item:note:g7-page"]');
-    seen(/Study: Gate Page[\s\S]*Getting somewhere/);
-    await expectPass(11, testUser);
-    // Step 12: Gate Plain gets a track through the api (the window moved to the Item editor, gate 20)
-    await expectPass(12, gm);
-    await redraw();
-    await expectPass(13, testUser);
-    // Step 14: keyboard and a narrow window (jsdom has no layout engine: the geometry is stubbed here; the real values are what the person checks)
-    await as(testUser, () => app.element.querySelector('[data-action="toggle-display"]').focus());
-    const root = app.element.querySelector(".pfp-hub");
-    for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 300);
-    Object.defineProperty(root, "scrollWidth", { value: 300, configurable: true });
-    Object.defineProperty(root, "clientWidth", { value: 300, configurable: true });
-    (app.element.closest(".application") ?? app.element).getBoundingClientRect = () => ({ width: 300 });
-    await wait(20);
-    await expectPass(14, testUser);
-    // Steps 15-16: no GM connected
-    await click("switch-tab", '[data-tab="research"]');
-    await click("follow-lead", '[data-lead="item:note:g7-letter"]');          // Step 15: while the GM is still connected
-    env.noGM = true;
-    await click("switch-tab", '[data-tab="compendium"]');
-    await click("select-entry", '[data-entry="g7-plain"]');
-    await click("share-entry");
-    await click("switch-tab", '[data-tab="research"]');
-    await click("follow-lead", '[data-lead="item:material:g7-plain"]');       // Gate Plain has a track since Step 12
-    await click("select-project", '[data-project="study:note:g7-letter"]');
-    await click("put-aside");
-    await click("confirm-aside");
-    await click("set-skill", '[data-skill="crafting"]');
-    await click("queue-research");
-    await expectPass(16, testUser);
-    env.noGM = false;
-    // Step 17: CLEANUP
+    // Steps 3 to 16 with their clicks from the SHARED click script (e2e/steps/gate19.steps.mjs); Step 15 (the GM goes away) has no block
+    for (let n = 3; n <= 16; n++) await play(n);
     assert.deepEqual(chatLeaks(env.chat), [], "no chat message carries a DC or a roll");
     const cleanup = await runBlock(17, gm);
     assert.deepEqual(cleanup, { problems: [], actorsLeft: 0, downtimeOpen: false, testUsersCharacter: null, tracksLeft: 0, audit: [] });
-    await as(testUser, () => app.close());
+    await as(testUser, () => foundry.applications.instances.get("pathfinder-progress-hub")?.close());
     globalThis.__p7rec?.observer.disconnect();
   });
   for (const name of ["Gate Scholar", "Gate Friend"]) assert.equal(game.actors.getName(name), undefined, name);

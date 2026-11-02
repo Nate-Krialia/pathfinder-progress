@@ -8,10 +8,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { as, env, getApi, getUsers, makeActor, measure, quietly, snapshot, world } from "./fake-world.js";
-import { build } from "../scripts/hub/app.js";
 import { HUB } from "../scripts/config.js";
-import { build as buildReview } from "../scripts/queue/review-app.js";
 import { installFakeApplication } from "./fake-application.js";
+import script from "../e2e/steps/gate18.steps.mjs";
+import { makeDomDriver, playStep } from "../e2e/driver-dom.mjs";
 import { chatLeaks } from "./helpers.js";
 
 const gateDoc = readFileSync("docs/18-stage11b-gate.md", "utf8");
@@ -29,6 +29,7 @@ function runBlock(step, user) {
 }
 const gateWorld = options => world({ downtime: 0, iron: 0, fang: 0, perClientDefinitions: true, ...options });
 const wait = ms => new Promise(r => setTimeout(r, ms));
+const whoOf = step => (GATE.get(step).who.includes("[Player]") && !GATE.get(step).who.includes("[GM]") ? "player" : "gm");
 
 test("the stage 11b gate doc: steps are labelled, click-through steps say what you should see, screenshots are asked for only where layout matters", () => {
   assert.deepEqual([...GATE.keys()], Array.from({ length: 25 }, (_, i) => i + 1));
@@ -59,161 +60,50 @@ test("GATE 18: every code step runs, in order, and the click-through steps are p
     try { assert.equal(await runBlock(step, user), "ALL PASS", `step ${step} did not report ALL PASS:\n${sink.join("\n").split("\n").filter(l => l.startsWith("FAIL")).join("\n")}`); } finally { console.log = logged; }
   };
   installFakeApplication();
+  const base = {
+    drivers: { gm: makeDomDriver({ as, user: gm }), player: makeDomDriver({ as, user: testUser }) }, state: {}, assert, wait,
+    extras: {
+      scriptRolls: async (name, specs) => { for (const [degree, total, natural] of specs) game.actors.getName(name).rolls.push({ options: { degreeOfSuccess: degree }, total, dice: [{ faces: 20, results: [{ result: natural, active: true }] }] }); },
+      statusMs: async ms => { HUB.statusMs = ms; },
+      clearChat: async () => { env.chat.length = 0; },
+      resize: async width => {          // jsdom has no layout engine or stylesheet, so the geometry is stubbed here; the real values (and the focus ring) are what the person checks
+        const app = foundry.applications.instances.get("pathfinder-progress-hub");
+        const root = app.element.querySelector(".pfp-hub");
+        for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, width);
+        Object.defineProperty(root, "scrollWidth", { value: width, configurable: true });
+        Object.defineProperty(root, "clientWidth", { value: width, configurable: true });
+        (app.element.closest(".application") ?? app.element).getBoundingClientRect = () => ({ width });
+        await wait(20);
+      }
+    }
+  };
+  const play = n => playStep({ script, n, who: whoOf(n), base, runBlock: (step, who) => (GATE.get(step).code ? expectPass(step, who === "player" ? testUser : gm) : undefined) });
   await quietly(async () => {
     assert.deepEqual(await runBlock(1, gm), ["GM", true, MODULE_VERSION]);
     assert.deepEqual(await runBlock(1, testUser), ["Test", false, MODULE_VERSION]);
     const setup = await runBlock(2, gm);
     assert.deepEqual([setup.scholar, setup.friend, setup.testUsersCharacter], ["Gate Scholar", "Gate Friend", "Gate Scholar"]);
-    await as(testUser, () => api.definitions.refresh());
-    await expectPass(3, testUser);
-
     const scholar = game.actors.getName("Gate Scholar");
-    const Hub = build();
-    let app;
-    const click = async (action, where = "") => {
-      const target = [...app.element.querySelectorAll(`[data-action="${action}"]${where}`)].find(b => b.getAttribute("aria-disabled") !== "true");
-      assert.ok(target, `a live ${action}${where} button is on the page`);
-      await as(testUser, async () => { target.click(); await wait(20); });
-    };
-    const read = () => app.element.querySelector(".pfp-main").textContent.replace(/\s+/g, " ");
-    const seen = pattern => assert.match(read(), pattern);
-    // Step 4: open the Hub and the Research tab
-    await as(testUser, async () => { app = new Hub(api, scholar); await app.render({ force: true }); });
-    await click("switch-tab", '[data-tab="research"]');
-    seen(/Gate Draught[\s\S]*Gate Giant|Gate Giant[\s\S]*Gate Draught/);
-    seen(/Leads you could follow/);
-    await expectPass(4, testUser);
-    // Step 5: queue three checks
-    await click("select-project", '[data-project="unlock-g6-draught"]');
-    seen(/Finishing teaches you the formula for Gate Draught\./);
-    seen(/Crafting[\s\S]*Your modifier [+-]\d+[\s\S]*Nature[\s\S]*Your modifier [+-]\d+/);
-    assert.equal(app.element.querySelector('[data-action="queue-research"]').getAttribute("aria-disabled"), "true");
-    seen(/Choose a skill to roll with first\./);
-    await click("set-skill", '[data-skill="crafting"]');
-    await click("days-up"); await click("days-up");
-    seen(/3 days \(3 checks\)/);
-    HUB.statusMs = 60;                 // the real line lasts 10 s; here it is gone long before the block runs, as when the tester is slow
-    await click("queue-research");
-    await wait(250);
-    assert.equal(app.element.querySelector(".pfp-live").textContent, "", "the line has timed out on screen");
-    await expectPass(5, testUser);     // ... and the block still passes: it reads the recorder
-    HUB.statusMs = 10000;
-    // Step 6: the GM resolves, with queued fake rolls (the real one rolls PF2e)
-    const roll = (degree, total, natural) => ({ options: { degreeOfSuccess: degree }, total, dice: [{ faces: 20, results: [{ result: natural, active: true }] }] });
-    scholar.rolls.push(roll(3, 31, 19), roll(2, 22, 11), roll(1, 9, 4));
-    await expectPass(6, gm);
-    await wait(40);
-    // Step 7: the window followed by itself
-    await as(testUser, () => app.redraw());
-    await expectPass(7, testUser);
-    // Step 8: queue one check and cancel it
-    await click("queue-research");
-    await click("cancel-queued");
-    await expectPass(8, testUser);
-    // Step 9: put aside, Keep first, then Confirm
-    await click("select-project", '[data-project="unlock-g6-giant"]');
-    await click("put-aside");
-    assert.equal(document.activeElement?.dataset?.focusKey, "keep-aside", "focus lands on Keep");
-    seen(/Put aside\? Progress is not kept\./);
-    await click("keep-aside");
-    assert.equal(document.activeElement?.dataset?.focusKey, "put-aside", "Keep returns focus to the Put aside button");
-    await click("put-aside");
-    await click("confirm-aside");
-    await expectPass(9, testUser);
-    // Step 10: follow the lead
-    await click("follow-lead");
-    await expectPass(10, testUser);
-    // Step 11: Open in Research from the Formulae tab
-    await click("switch-tab", '[data-tab="formulae"]');
-    await click("open-in-research", '[data-project="unlock-g6-draught"]');
-    await expectPass(11, testUser);
-    // Steps 12-14: close and reopen downtime
-    await expectPass(12, gm);
-    await as(testUser, () => app.redraw());
-    await expectPass(13, testUser);
-    await expectPass(14, gm);
-    // Group B: the Compendium
-    await click("switch-tab", '[data-tab="compendium"]');
-    seen(/Materials 2/);
-    await expectPass(15, testUser);
-    await click("select-entry", '[data-entry="g6-ore"]');
-    seen(/Tier 1[\s\S]*Gate Field[\s\S]*a basic find[\s\S]*a better find/);
-    await click("select-entry", '[data-entry="g6-star"]');
-    seen(/No places recorded yet\.[\s\S]*You haven't gathered it from a node yet\./);
-    await click("set-category", '[data-category="creatures"]');
-    await click("select-entry", '[data-entry="gate-wolf"]');
-    seen(/Type: beast[\s\S]*Gate Fang/);
-    await click("set-category", '[data-category="regions"]');
-    await click("select-entry", '[data-entry="g6-field"]');
-    seen(/Gate Bush/);
-    await click("set-category", '[data-category="experiments"]');
-    await click("select-entry", '[data-entry="g6-blade"]');
-    await expectPass(16, testUser);
-    // Step 17: share two
-    await click("set-category", '[data-category="materials"]');
-    await click("select-entry", '[data-entry="g6-ore"]');
-    await click("share-entry");
-    seen(/Waiting for the GM to approve sharing it\./);
-    assert.match(app.element.querySelector(".pfp-live").textContent, /^Share queued: Gate Ore\. Waiting for the GM\.$/);
-    await click("cancel-queued");
-    assert.match(app.element.querySelector(".pfp-live").textContent, /^Share cancelled: Gate Ore\. It stays private\.$/);
-    await click("share-entry");
-    await click("select-entry", '[data-entry="g6-star"]');
-    await click("share-entry");
-    await expectPass(17, testUser);
-    await expectPass(18, gm);
-    await wait(40);
-    await as(testUser, () => app.redraw());
-    seen(/Shared[\s\S]*Everyone in the party can read this\.|Only you/);
-    await expectPass(19, testUser);
-    // Steps 20-22: share the creature, the GM rejects it THROUGH THE QUEUE WINDOW (a click), the player's block checks the chat
-    await click("set-category", '[data-category="creatures"]');
-    await click("select-entry", '[data-entry="gate-wolf"]');
-    await click("share-entry");
-    await expectPass(20, testUser);
-    const wolfRow = api.queue.list([scholar]).find(r => r.action.type === "share");
-    assert.match(wolfRow.label, /^Share: Gate Wolf \(creature\)$/);
-    env.chat.length = 0;
-    const review = new (buildReview())(api);
-    await as(gm, async () => {
-      await review.render({ force: true });
-      review.element.querySelector(`[data-action="reject"][data-action-id="${wolfRow.action.id}"]`).click();
-      await wait(40);
-    });
-    assert.equal(api.queue.list([scholar]).length, 0, "the row left the queue window");
-    await as(gm, async () => { await review.close(); });
-    await as(testUser, () => app.redraw());                    // (in Foundry the live update does this)
-    await expectPass(22, testUser);
-    seen(/Gate Wolf[\s\S]*Only you can read this\./);
-
-    // Group C: keyboard, and the narrow layout. jsdom has no layout engine or stylesheet, so the geometry is stubbed here; the real values (and the focus ring, which is a look-at-the-screen item) are what the person checks.
-    await as(testUser, () => app.element.querySelector('[data-action="toggle-display"]').focus());
-    await expectPass(23, testUser);
-    const root = app.element.querySelector(".pfp-hub");
-    for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 300);
-    Object.defineProperty(root, "scrollWidth", { value: 300, configurable: true });
-    Object.defineProperty(root, "clientWidth", { value: 300, configurable: true });
-    const frame = app.element.closest(".application") ?? app.element;
-    frame.getBoundingClientRect = () => ({ width: 300 });
-    await wait(20);
-    await expectPass(24, testUser);
+    // Steps 3 to 24, each with its before/after clicks from the SHARED click script (e2e/steps/gate18.steps.mjs); Step 21 is the GM's click in the queue window and has no block
+    for (let n = 3; n <= 24; n++) await play(n);
     assert.deepEqual(chatLeaks(env.chat), [], "no chat message carries a DC or a roll");
     // the recorder survives the Hub being closed and opened again, and a re-run of the helper replaces it
-    const recorder = globalThis.__p6rec;
+    const hub = () => foundry.applications.instances.get("pathfinder-progress-hub");
     assert.ok(globalThis.__p6.said(/^Research started: Gate Lantern\.$/), "the recorder kept the earlier lines");
-    await as(testUser, () => app.close());
-    await as(testUser, async () => { app = new Hub(api, scholar); await app.render({ force: true }); });
+    await as(testUser, () => hub().close());
+    await as(testUser, async () => { api.hub.open(scholar); await wait(30); });
     const probe = Object.assign(document.createElement("div"), { className: "pfp-live", textContent: "after reopen" });
     document.body.append(probe);
     await wait(30);
     assert.ok(globalThis.__p6.said(/^after reopen$/), "and it still records after the reopen");
     probe.remove();
+    const recorder = globalThis.__p6rec;
     await expectPass(3, testUser);
     assert.notEqual(globalThis.__p6rec, recorder, "re-running the helper installs a new recorder");
     assert.equal(globalThis.__p6.said(/Research started/), false, "which starts empty");
     const cleanup = await runBlock(25, gm);
     assert.deepEqual(cleanup, { problems: [], actorsLeft: 0, downtimeOpen: false, testUsersCharacter: null, sharedLeft: 0, audit: [] });
-    await as(testUser, () => app.close());
+    await as(testUser, () => hub().close());
     globalThis.__p6rec?.observer.disconnect();
   });
   for (const name of ["Gate Scholar", "Gate Friend"]) assert.equal(game.actors.getName(name), undefined, name);

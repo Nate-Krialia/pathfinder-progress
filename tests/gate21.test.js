@@ -11,6 +11,8 @@ import { readFileSync } from "node:fs";
 import { M, as, env, getApi, getUsers, quietly, world } from "./fake-world.js";
 import { asPage, seedRecords } from "./helpers.js";
 import { installFakeApplication } from "./fake-application.js";
+import script from "../e2e/steps/gate21.steps.mjs";
+import { makeDomDriver, playStep } from "../e2e/driver-dom.mjs";
 
 const gateDoc = readFileSync("docs/21-stage11d-effects-gate.md", "utf8");
 const MODULE_VERSION = JSON.parse(readFileSync("module.json", "utf8")).version;
@@ -124,24 +126,55 @@ test("GATE 21: every step runs in order (the click steps by real clicks on the e
     try { assert.equal(await runBlock(step, user), "ALL PASS", `step ${step} did not report ALL PASS:\n${sink.join("\n")}`); } finally { console.log = logged; }
   };
   installFakeApplication();
-  let app;
-  const el = () => app.element;
-  const click = async (action, where = "") => {
-    const target = [...el().querySelectorAll(`[data-action="${action}"]${where}`)].find(b => b.getAttribute("aria-disabled") !== "true");
-    assert.ok(target, `a live ${action}${where} button is on the page`);
-    await as(gm, async () => { target.click(); await wait(30); });
-  };
-  const set = async (selector, value, event = "change") => {
-    const input = el().querySelector(selector);
-    assert.ok(input, `${selector} is on the page`);
-    input.value = value;
-    await as(gm, async () => { input.dispatchEvent(new window.Event(event, { bubbles: true })); await wait(30); });
-  };
-  const block = (cls, name, index) => `[data-field="block"][data-cls="${cls}"][data-type="condition"][data-name="${name}"][data-index="${index}"]`;
-  const create = name => `[data-field="create"][data-name="${name}"]`;
-  const hero = () => game.actors.getName("Gate G21 Hero"), goblin = n => game.actors.getName(`Gate G21 Goblin ${n}`);
+  const hero = () => game.actors.getName("Gate G21 Hero");
   const tok = name => scene.tokens.find(t => t.name === `Gate G21 ${name}`);
-  const later = () => { skew += 20000; };
+  const handle = async message => api.effects.handle(message);
+  const newest = test => chat.filter(test).at(-1);
+  const attackAs = (outcome, itemName, target) => {
+    const item = hero().items.find(i => i.name === `Gate G21 Mitflit ${itemName}`), t = tok(target);
+    return { id: `real${++seq}`, flags: { pf2e: { context: { type: "attack-roll", outcome, target: { token: t.uuid, actor: `${t.uuid}.Actor.${t.actorId}` }, origin: { actor: `Actor.${hero().id}`, token: tok("Hero").uuid }, action: "strike", identifier: `${item.id}.sword.melee` }, origin: { actor: `Actor.${hero().id}`, uuid: item.uuid, type: "weapon" } } }, author: { targets: new Set([{ document: t }]) } };
+  };
+  const useAs = targets => {
+    const item = hero().items.find(i => i.name === "Gate G21 Mitflit Draught");
+    return { id: `real${++seq}`, flags: { pf2e: { origin: { actor: `Actor.${hero().id}`, uuid: item.uuid, type: "consumable" } } }, author: { targets: new Set(targets.map(n => ({ document: tok(n) }))) } };
+  };
+  let strikeTarget = "Goblin A";
+  // The fake Foundry's version of the shared script's named actions (the real runner clicks the canvas and rolls real PF2e instead).
+  const extras = {
+    resize: async width => { for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, width); await wait(30); },
+    advance: async ms => { skew += ms; },
+    selectToken: async name => { canvas.tokens.controlled = [tok(name)]; gm.targets = new Set(); },
+    targetTokens: async (who, names) => {
+      const set = new Set(names.map(n => tok(n)));
+      if (who === "gm") gm.targets = new Set(names.map(n => ({ document: tok(n) })));
+      else { testUser.targets = set; strikeTarget = names[0] ?? strikeTarget; }
+    },
+    strike: async (outcome, itemName) => { const m = attackAs(outcome, itemName, "Goblin A"); chat.push({ ...m, getFlag: () => undefined, content: "PF2e attack card" }); return handle(m); },
+    useConsumable: async names => {
+      const post = m => { chat.push({ ...m, getFlag: () => undefined, content: "PF2e consumable card" }); return handle(m); };
+      if (!names.length) return handle(useAs([]));
+      await post(useAs(names)); await post(useAs(names));      // PF2e posts the use card, a second card, then a damage-taken message
+      await post({ id: "dmg-taken", flags: { pf2e: { context: { type: "damage-taken" } } }, author: { targets: new Set() } });
+    },
+    pressApply: async (match, { degree, fallback } = {}) => {
+      const card = newest(m => m.getFlag?.(M, "fx")?.state === "pending" && (fallback ? m.getFlag(M, "fx").fallback && match && new RegExp(match).test(m.content) : new RegExp(match).test(m.getFlag(M, "fx").text)));
+      assert.ok(card, `a pending card matching "${match}" is there`);
+      if (!fallback && degree) tok("Goblin A").actor.degree = 1;
+      assert.equal((await api.effects.applyCard(card.id, degree && fallback ? { forceDegree: degree } : undefined)).ok, true);
+    },
+    pressApplyRefused: async () => {
+      const fallback = newest(m => m.getFlag?.(M, "fx")?.fallback && m.getFlag(M, "fx").state === "pending" && /no one is targeted/.test(m.content));
+      assert.ok(fallback, "the fallback card is there");
+      canvas.tokens.controlled = [];
+      gm.targets = new Set();
+      assert.equal((await api.effects.applyCard(fallback.id)).ok, false, "with nothing targeted Apply refuses and the card stays");
+      assert.equal(fallback.getFlag(M, "fx").state, "pending");
+    }
+  };
+  const base = { drivers: { gm: makeDomDriver({ as, user: gm }), player: makeDomDriver({ as, user: testUser }) }, state: {}, assert, wait, extras };
+  const whoOf = step => (GATE.get(step).who.includes("[Player]") && !GATE.get(step).who.includes("[GM]") ? "player" : "gm");
+  const play = n => playStep({ script, n, who: whoOf(n), base, runBlock: (step, who) => expectPass(step, who === "player" ? testUser : gm) });
+
 
   await quietly(async () => {
     // Steps 1-2
@@ -155,33 +188,8 @@ test("GATE 21: every step runs in order (the click steps by real clicks on the e
     assert.equal((await runBlock(2, gm)).already, "set up");
     assert.equal(scene.tokens.length, 3, "a rerun does not place the tokens twice");
     assert.ok(api.definitions.recipe.has("g21-sword") && api.definitions.material.has("g21-mitflit"));
-    // Steps 3-6: the builder, played by clicks
-    await as(gm, async () => { app = api.discovery.openEditor(); await wait(30); });
-    await click("new-material");
-    await set(create("name"), "Gate G21 Fang");
-    await set(create("tier"), "2");
-    await click("do-create");
-    await click("effect-class", '[data-cls="weapon"]');
-    await click("add-block", '[data-cls="weapon"][data-type="condition"]');
-    assert.equal(el().querySelector(block("weapon", "condition", 0)).value, "frightened");
-    assert.equal(el().querySelector(block("weapon", "save", 0)).value, "will");
-    await click("add-block", '[data-cls="weapon"][data-type="condition"]');
-    assert.equal(el().querySelector(block("weapon", "condition", 1)).value, "sickened");
-    await set(block("weapon", "save", 0), "fortitude");
-    await click("tier-mode", '[data-index="0"][data-type="condition"][data-mode="table"]');
-    await set('input[data-field="cell"][data-type="condition"][data-index="0"][data-tier="2"]', "2");
-    await set(block("weapon", "condition", 1), "prone");
-    await set(block("weapon", "save", 1), "none");
-    assert.equal(el().querySelectorAll('[data-type="condition"][data-index="1"][data-name="value"]').length, 0);
-    await expectPass(3);
-    await expectPass(4);
-    for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 400);
-    await wait(30);
-    await expectPass(5);
-    for (const watched of globalThis.__fakeDom.observers.flatMap(o => [...o.targets])) globalThis.__fakeDom.resize(watched, 1000);
-    await wait(30);
-    await click("save");
-    await expectPass(6);
+    // Steps 3-6: the builder, played by the SHARED click script (e2e/steps/gate21.steps.mjs)
+    for (const n of [3, 4, 5, 6]) await play(n);
     // Steps 7-8: teach the Hero; the Player sees plain words only
     await expectPass(7);
     await expectPass(8, testUser);
@@ -190,66 +198,12 @@ test("GATE 21: every step runs in order (the click steps by real clicks on the e
     assert.equal(chat.length, 4);
     for (const m of chat) assert.deepEqual(m.whisper, ["gm1"]);
     await expectPass(10);
-    // Steps 11-24: the real-Foundry part, from probe-shaped messages
+    // Steps 11-24: the real-Foundry part, from probe-shaped messages; the shared script names each action, the fake supplies it
     await expectPass(11);
-    const handle = async message => api.effects.handle(message);
-    const attackAs = (outcome, itemName, target) => {
-      const item = hero().items.find(i => i.name === `Gate G21 Mitflit ${itemName}`), t = tok(target);
-      return { id: `real${++seq}`, flags: { pf2e: { context: { type: "attack-roll", outcome, target: { token: t.uuid, actor: `${t.uuid}.Actor.${t.actorId}` }, origin: { actor: `Actor.${hero().id}`, token: tok("Hero").uuid }, action: "strike", identifier: `${item.id}.sword.melee` }, origin: { actor: `Actor.${hero().id}`, uuid: item.uuid, type: "weapon" } } }, author: { targets: new Set([{ document: t }]) } };
-    };
-    const useAs = (targets) => {
-      const item = hero().items.find(i => i.name === "Gate G21 Mitflit Draught");
-      return { id: `real${++seq}`, flags: { pf2e: { origin: { actor: `Actor.${hero().id}`, uuid: item.uuid, type: "consumable" } } }, author: { targets: new Set(targets.map(n => ({ document: tok(n) }))) } };
-    };
-    const strike = async (outcome, itemName = "Sword") => { const m = attackAs(outcome, itemName, "Goblin A"); chat.push({ ...m, getFlag: () => undefined, content: "PF2e attack card" }); return handle(m); };
-    // 12-13: two misses
-    gm.targets = new Set(); canvas.tokens.controlled = [tok("Hero")]; testUser.targets = new Set([tok("Goblin A")]);
-    assert.equal(await runBlock(12, testUser), "ALL PASS");
-    await strike("criticalFailure"); await strike("criticalFailure");
-    await expectPass(13);
-    // 14-15: a hit, then Apply (a real save: the fake rolls a failure)
-    assert.equal(await runBlock(14, testUser), "ALL PASS");
-    await strike("success");
-    const newest = test => chat.filter(test).at(-1);
-    const swordCard = newest(m => m.getFlag?.(M, "fx")?.state === "pending" && /Mitflit Sword/.test(m.getFlag(M, "fx").text));
-    assert.ok(swordCard);
-    tok("Goblin A").actor.degree = 1;
-    assert.equal((await api.effects.applyCard(swordCard.id)).ok, true);
-    await expectPass(15);
-    assert.deepEqual(tok("Goblin A").actor.saveRolls.at(-1)[1], { dc: { value: 20 }, skipDialog: true, createMessage: false }, "levelDC(5) = 20, and the roll makes no chat card");
-    // 16-17: a bomb hit, applied; then 18-19: a bomb critical failure makes no card
-    assert.equal(await runBlock(16, testUser), "ALL PASS");
-    await strike("success", "Bomb");
-    const bombCard = newest(m => m.getFlag?.(M, "fx")?.state === "pending" && /Mitflit Bomb/.test(m.getFlag(M, "fx").text));
-    await api.effects.applyCard(bombCard.id);
-    await expectPass(17);
-    assert.equal(await runBlock(18, testUser), "ALL PASS");
-    await strike("criticalFailure", "Bomb");
-    await expectPass(19);
-    // 20-21: a consumable use: PF2e posts three messages for it; ONE card
-    later();
-    testUser.targets = new Set([tok("Goblin A")]);
-    assert.equal(await runBlock(20, testUser), "ALL PASS");
-    const post = m => { chat.push({ ...m, getFlag: () => undefined, content: "PF2e consumable card" }); return handle(m); };   // PF2e posts the use card, a second card, then a damage-taken message
-    await post(useAs(["Goblin A"])); await post(useAs(["Goblin A"])); await post({ id: "dmg-taken", flags: { pf2e: { context: { type: "damage-taken" } } }, author: { targets: new Set() } });
-    const useCard = newest(m => m.getFlag?.(M, "fx")?.state === "pending" && /Draught/.test(m.getFlag(M, "fx").text));
-    await api.effects.applyCard(useCard.id);
-    await expectPass(21);
-    // 22-23: nothing targeted -> the fallback; the GM targets both goblins and presses Apply
-    later();
-    testUser.targets = new Set();
-    assert.equal(await runBlock(22, testUser), "ALL PASS");
-    await handle(useAs([]));
-    const fallback = newest(m => m.getFlag?.(M, "fx")?.fallback && m.getFlag(M, "fx").state === "pending" && /no one is targeted/.test(m.content));
-    assert.ok(fallback, "the fallback card is there");
-    canvas.tokens.controlled = [];                       // (the fake has one canvas for both windows; the GM has nothing selected)
-    assert.equal((await api.effects.applyCard(fallback.id)).ok, false, "with nothing targeted Apply refuses and the card stays");
-    assert.equal(fallback.getFlag(M, "fx").state, "pending");
-    gm.targets = new Set([{ document: tok("Goblin A") }, { document: tok("Goblin B") }]);
-    assert.equal((await api.effects.applyCard(fallback.id, { forceDegree: "failure" })).ok, true);
-    await expectPass(23);
-    // 24: the Player's view of the chat
-    await expectPass(24, testUser);
+    gm.targets = new Set();
+    for (const n of [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]) await play(n);
+    assert.deepEqual(tok("Goblin A").actor.saveRolls.length > 0, true);
+    assert.deepEqual(tok("Goblin A").actor.saveRolls.find(([, o]) => o.dc.value === 20)?.[1], { dc: { value: 20 }, skipDialog: true, createMessage: false }, "levelDC(5) = 20, and the roll makes no chat card");
     // The secret save never reached chat: every save the module rolled was rolled with createMessage false
     for (const actor of [tok("Goblin A").actor, tok("Goblin B").actor]) for (const [, opts] of actor.saveRolls) assert.equal(opts.createMessage, false);
     // Step 25: CLEANUP, twice, and the third time after a "reload" (the globals and the in-memory definitions gone)
