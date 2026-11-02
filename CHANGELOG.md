@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.22.0
+
+Stage 11d, second half (part 1): effects that act on a TARGET, GM-assisted. (`docs/11d-item-editor-addendum.md`, "v0.22.0 decisions"; the real-Foundry probe that settled PF2e 8.6.1's shapes is `docs/probes/11d-targets-probe.md`. Adjust and the trinket are 0.22.1; afflictions are out.)
+
+- **Apply a condition** (effect builder, Weapon, Bomb and Consumable tabs): a condition from a short list of ten (Frightened, Sickened, Clumsy, Enfeebled, Stupefied, Slowed, Off-guard, Prone, Dazzled, Fatigued), a saving throw (Will, Fortitude, Reflex or No save) and a value of 1 to 4 (one value or a T1 to T5 table; only the material's own tier row applies; no value box for a condition without a value). Several per class. Armor, robes, focus, trinket and "Every class" are not offered it, and the editor refuses it there.
+- **GM hook and card.** The one active GM client watches for a crafted item: a weapon hit (success or critical success), a bomb throw (anything but a critical failure) or a consumable use (the first card; PF2e's second card within ten seconds is the same use) and whispers the GM a card with **Apply** and **Skip**. A damage roll never triggers. A message the module cannot place, or a hit with no target, gives a **fallback card** (Apply uses the GM's own targets or selection). The item is found through the attacking token's actor first, so unlinked tokens work. Everything that reads PF2e's message shapes is in `scripts/adapter/pf2e-effects.js`.
+- **Apply.** The GM client looks the effects up again in its registry, computes the DC (the crafted item's recipe craft level through the PF2e level-DC table), rolls ONE secret save per effect per target on the **target token's** actor (`createMessage: false`) and puts the condition on that actor (never the world actor): critical failure = value + 1 (capped at 4), failure = the value, success or critical success = nothing, No save = applies at once. A condition is raised to the wanted value, never stacked. The DC and the roll go to `api.gm.log`; the card is edited into a plain, GM-only result ("Goblin A is fearful, is knocked down." / "shrugs it off"). Buttons are off while a roll is in flight.
+- **Players never see it.** The item carries only the `crafted` flag; the condition, value, save and DC are looked up on the GM's client. The plain line ("makes the target fearful") goes on the item description at craft and into the Compendium book (`forPlayer` turns the role into a plain marker in all three places a role value is written) and the preview. New leak scan (`findLeaks`); a test adds a GM-only field to a stripped record and expects the scan to fail.
+- **Persistent poison** already works natively (probe): an Add damage block with Persistent ticked makes the damage roll carry a persistent poison term, and applying the damage card adds a persistent-damage condition.
+- **Gate 21** (`docs/21-stage11d-effects-gate.md`, 25 steps): the builder, the plain words, the leak scan, the card from recorded message shapes, Apply with forced saves, the unlinked token and two targets; then, in real Foundry, a real weapon hit and miss, a bomb throw, a consumable use (one card, not two), the fallback card, two targets and the secrecy of the save. `api.compendium.noteCrafted` is a new GM testing tool.
+- Tests: 1165 in all (new: effects-pure, effects-hook (PF2e's probe-recorded shapes, the real adapter over a fake world), effects-layout (Chromium), gate21 with its doc-format check).
+- Layout: the condition blocks (three at once, a tier table, a valueless one) and the GM card are in the hostile-CSS harness at 900 to 220px.
+- Recipes: nothing under `content/recipes` was edited. To use the block in a real recipe, add `"applyCondition"` to its slot's `drives` (for the Spider Fang Dagger: `{ "name": "fang", "drives": ["bonusDamage", "specialAbility", "applyCondition"], "tierFloor": 2, "qty": 1 }`).
+- No manifest change except the version: force-reload both windows (Ctrl+Shift+R); no server restart.
+
 ## 0.21.2
 
 Fix round after gate 20 in real Foundry (Step 25).

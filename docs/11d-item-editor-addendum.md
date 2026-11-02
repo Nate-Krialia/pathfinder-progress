@@ -36,7 +36,7 @@ Where this disagrees with earlier design files, THIS FILE WINS. Numbers are Stag
   - **Add damage** (type + dice), e.g. extra poison damage.
   - **Grant resistance** (type + amount), e.g. scorpion parts in armor: poison resistance.
   - **Adjust** (replaces the old "Amplify"), three modes: *more damage* (flat bonus or bigger dice), *push an affliction's stage forward*, *push an affliction's stage back* (also covers antidote-style materials). e.g. scorpion parts in a trinket.
-- **The item class decides the trigger**: weapon on hit, bomb/consumable on use, armor and trinket passively while worn. Build once per class.
+- **The item class decides the trigger**: weapon on hit, bomb/consumable on use, armor and trinket passively while worn. Build once per class. (Corrected in v0.22.0 decisions below: worn classes cannot apply a condition.)
 - **Values can scale with material tier** (e.g. Frightened 1 at T1, 2 at T3), set per tier in the builder.
 - **Conditions and afflictions allow a saving throw** (decided): the builder picks the save type per effect (e.g. Will for Frightened, Fortitude for Sickened); the DC comes from the crafted item.
 - The builder generates the **plain-words line** players see ("makes the target fearful"), never numbers they should not see.
@@ -71,3 +71,36 @@ Added by Claude Code while building; the numbered answers that came with the app
 - **Notes:** a Plan note is a short study (3 steps) that teaches its formula, a Research note a longer one (8 steps); both numbers are `DISCOVERY.notePresets`.
 - **Export / import** shipped in 0.21.0 (plain JSON, clashes skipped with a reason unless replace).
 - **The old Discovery tracks window is gone;** its rows, validation and layout live in the editor, and its overlay is folded in (`api.editor.foldOverlay`) with a **Leftovers** list for anything whose item no longer exists.
+
+## v0.22.0 decisions (2026-11-01, Nate's answers to the 0.22.0 plan; THESE WIN over everything above)
+Afflictions are OUT (PF2e 8.6.1 refuses to construct them). There is no "Apply an affliction" block and no "push stage". Persistent poison is an Add damage block with Persistent ticked. Hidden difficulty stands: `stripForPlayer` is the only gate, and condition values, save types and DCs never reach anything a player can read.
+- **Split.** 0.22.0 = Apply a condition + GM hook + card + plain words. 0.22.1 = Adjust + trinket.
+- **Probe first.** `docs/probes/11d-targets-probe.md` (console snippets, not module code) settles the PF2e 8.6.1 message shapes, targeting, condition API, persistent damage and FlatModifier questions before 0.22.0 is built.
+- **Worn classes (armor, robes, focus, trinket) cannot use Apply a condition.** `setProblems` refuses it and the builder hides the block. This corrects the earlier "while worn" trigger line. Triggers: weapon, bomb and consumable only.
+- **Adjust is CROSS-MATERIAL.** It amplifies the damage blocks supplied by OTHER slots in the same craft (a plan-time pass). If no other slot adds damage it does nothing, and the preview says so.
+- **Trinket.** New role `wornDamage { type, flat }`, compiled to a PF2e `FlatModifier` on the wearer's damage of that type (persistent included if the probe says it works). Flat only.
+- **Several Apply a condition blocks per class are allowed.** One Apply on the card runs all of them: one secret save per effect per target.
+- **"No save" option.** The condition applies automatically when the GM presses Apply.
+- **Save outcomes.** Critical failure: condition value +1 (capped at 4). Failure: the value. Success and critical success: no effect. Valueless conditions: same as failure.
+- **Duration.** PF2e's normal rules; the GM removes it by hand. No timers in 0.22.0.
+- **Condition dropdown is a short curated list, not all 44.** Proposed (Nate vets it): valued Frightened, Sickened, Clumsy, Enfeebled, Stupefied, Slowed; valueless Off-guard, Prone, Dazzled, Fatigued. Slugs are checked against `CONFIG.PF2E.conditionTypes` in the probe.
+- **Triggers.** Weapon = attack roll with outcome success or critical success. Bomb = attack roll with any outcome except critical failure (the GM decides on the card). Consumable = the use card. An unknown or targetless message = the fallback card.
+- **Target.** Roll the save and apply the condition on the TARGET TOKEN's actor (`token.actor`), never the world actor, so unlinked tokens work.
+- **The Apply result stays GM-only.** The whisper card is edited to show it. Nothing public.
+- **Item text.** At craft the item description gets the plain-words line (for example "makes the target fearful"). Never condition values, save types or DCs.
+- **Recipes.** Edit only throwaway / `g21-` recipes. For anything under `content/recipes` that looks like real campaign content, do not edit it; list the exact one-line `drives` change instead.
+- **Persistent poison already works natively** (probe results, 2026-11-01): the Add damage block with Persistent ticked makes the damage roll carry a persistent poison term, and applying the damage card adds a persistent-damage condition. Poison needs no hook.
+- **Secrecy note for the build.** `recordClassFact` copies full role values into the player-readable Compendium book, so a `forPlayer(role, value)` filter must turn `applyCondition` into a plain marker before anything is written there, to the preview or to an item.
+
+## Built as (v0.22.0): interpretations to review
+Added by Claude Code while building. Anything marked **check** is a reading worth a second look.
+- **Roles and recipes.** `applyCondition` is a new role (an array) for weapon, bomb and consumable. A recipe slot must list it in `drives`; the real recipes under `content/recipes` were NOT edited (for the Spider Fang Dagger the change is one line, listed in `docs/21`). The gate uses in-memory `g21-` recipes.
+- **No "Every class" condition.** `setProblems` refuses it on the general set (a general effect would reach worn classes); the builder offers the block on Weapon, Bomb and Consumable only. **check**
+- **Blocks are told apart by position.** Several condition blocks per class are addressed by `data-index` (the nth block of that type); the other block types still allow one per class.
+- **One condition once per class.** Setting the same condition twice in one class is a problem the editor names. **check**
+- **Value 1 to 4.** `EFFECTS.maxValue`; a valueless condition (Off-guard, Prone, Dazzled, Fatigued) has no value control and applies on any failure; "No save" applies at once with no bump.
+- **Several targets.** A weapon or bomb card names the attack's own target (`context.target` holds only the first). A consumable card names every target the roller has targeted. A fallback card takes the GM's own targets, else the tokens the GM has selected, when Apply is pressed.
+- **Dedupe.** By message id for everything, and by the item's `origin.uuid` for ten seconds for a consumable (PF2e posts a second card when Use is pressed on the first).
+- **The result stays on the card.** The whisper is edited to "Gate Goblin A is fearful, is knocked down." / "shrugs it off", plain words only, no value, save, degree or DC; those are in `api.gm.log`.
+- **The Compendium book** stores `applyCondition` as `{ plain: [lines] }` in all three places a role value is written (a class fact, a per-recipe fact, a formula's baseline), so the preview and the Hub show "makes the target fearful" and nothing else. The item description gets the same line at craft.
+- **The card is a `.pfp-hub`** (so the Hub's reset and button rules apply in the chat log); the layout harness draws it pending and done at 900 to 220px in every hostile sheet.

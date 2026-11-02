@@ -333,3 +333,27 @@ export const HUB = {
   research: { maxStepBoxes: 20, recentChecks: 5, leadNoteMax: 300 },
   minTarget: 44                      // px: the smallest a clickable control may be (the stylesheet and the layout checks both use it)
 };
+
+/**
+ * Effects that act on a target (Stage 11d, v0.22.0; docs/11d-item-editor-addendum.md "v0.22.0 decisions"). The curated condition list (valued ones carry a value), the
+ * saves a builder may pick, and the hook's tunables. All placeholders.
+ */
+export const EFFECT_CONDITIONS = {
+  frightened: { label: "Frightened", valued: true },
+  sickened: { label: "Sickened", valued: true },
+  clumsy: { label: "Clumsy", valued: true },
+  enfeebled: { label: "Enfeebled", valued: true },
+  stupefied: { label: "Stupefied", valued: true },
+  slowed: { label: "Slowed", valued: true },
+  "off-guard": { label: "Off-guard", valued: false },
+  prone: { label: "Prone", valued: false },
+  dazzled: { label: "Dazzled", valued: false },
+  fatigued: { label: "Fatigued", valued: false }
+};
+export const EFFECT_SAVES = { will: "Will", fortitude: "Fortitude", reflex: "Reflex", none: "No save" };
+export const EFFECTS = {
+  maxValue: 4,                       // a valued condition never goes above this (a critical failure on a save adds 1, up to the cap)
+  dedupeMs: 10000,                   // a consumable's second card (Use on the card) within this long of the first is the same use
+  cardFlag: "fx",                    // the flag on the GM's card message
+  craftedFlag: "crafted"             // the flag on a crafted item (written by buildCraftedItemData)
+};

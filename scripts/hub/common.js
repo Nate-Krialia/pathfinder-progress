@@ -2,6 +2,7 @@
 import { S } from "./strings.js";
 import { parseTier } from "../data/roles.js";
 import { isDifficultyText } from "../difficulty.js";
+import { plainLines } from "../effects/plain.js";
 
 export const cap = text => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -28,6 +29,7 @@ export function roleText(role, value, recipe) {
     case "spellPower": return `${S.slotRole.spellPower(noun)} (tier ${parseTier(value)})`;
     case "bonusDamage": return `adds +${value.dice} ${value.persistent ? "persistent " : ""}${value.type} damage${value.versus ? ` against ${value.versus}` : ""}`;
     case "specialAbility": return `gives ${value.title}: ${value.text}${value.on ? ` (on a ${value.on === "criticalHit" ? "critical hit" : "hit"})` : ""}`;
+    case "applyCondition": return plainLines(value).join(" and ") || "affects the target";
     case "resistance": return `gives resistance ${value.value} to ${value.type}`;
     case "spellSlots": return `adds ${plural(value, "spell slot")}`;
     default: return `${role}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`;

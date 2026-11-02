@@ -11,12 +11,14 @@ import { baseRoleFor, parseTier, slotRoles } from "../data/roles.js";
 import { resolveMaterialEffect } from "../data/resolver.js";
 import { isUuid } from "../data/outputRefs.js";
 import { feeForStation } from "../stations/fees.js";
+import { plainLines } from "../effects/plain.js";
 
 const emptyDescription = () => ({
   baseTier: null,
   damageBonuses: [],
   abilities: [],
   resistances: [],
+  conditions: [],       // plain-words lines only (v0.22.0): the condition, its value and its save are GM-only and are resolved again when the item is used
   fields: [],
   spellSlots: 0
 });
@@ -113,6 +115,7 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       else if (role === "bonusDamage") description.damageBonuses.push({ ...value, label: material.name, source });
       else if (role === "specialAbility") description.abilities.push({ on: "hit", ...value, source });
       else if (role === "resistance") description.resistances.push({ ...value, source });
+      else if (role === "applyCondition") for (const plain of plainLines(value)) description.conditions.push({ plain, source });
       else if (role === "spellSlots") description.spellSlots += value;
       else {
         const custom = customRoles.find(r => r.id === role);

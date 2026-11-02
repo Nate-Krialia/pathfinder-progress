@@ -6,7 +6,7 @@
  * Shapes are "indicative" in the spec; anything it leaves open is noted inline
  * and should be tightened as the owning stage is built.
  */
-import { CRAFT_LEVEL_RANGE, DISCOVERY, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
+import { CRAFT_LEVEL_RANGE, DISCOVERY, EFFECT_CONDITIONS, EFFECT_SAVES, EFFECTS, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
 import { looksLikeUuid } from "./outputRefs.js";
 import { validateLadder } from "../gathering/ladder.js";
 import { DAMAGE_TYPES, isSkillSlug } from "../adapter/pf2e.js";
@@ -46,7 +46,9 @@ const tierValue = of => obj({ all: optional(of), byTier: optional(record(of)) },
 const effectBlock = variant("type", {
   damage: { dice: tierValue(str({ pattern: /^[1-9]\d?d(4|6|8|10|12)$/, patternHint: 'must be dice like "1d6"' })), damageType: oneOf(DAMAGE_TYPES), persistent: optional(bool()), versus: optional(str()) },
   resistance: { damageType: oneOf(DAMAGE_TYPES), value: tierValue(int({ min: 1, max: 50 })) },
-  ability: { title: str(), text: str(), on: optional(oneOf(["hit", "criticalHit"])) }
+  ability: { title: str(), text: str(), on: optional(oneOf(["hit", "criticalHit"])) },
+  // v0.22.0: a condition put on the TARGET (weapon, bomb and consumable only; several per class). GM-only data: it never reaches a player. The value is absent for a valueless condition.
+  condition: { condition: oneOf(Object.keys(EFFECT_CONDITIONS)), value: optional(tierValue(int({ min: 1, max: EFFECTS.maxValue }))), save: oneOf(Object.keys(EFFECT_SAVES)) }
 });
 const effectSet = obj({ power: optional(int({ min: 1, max: 5 })), blocks: arr(effectBlock), extra: optional(record(any())) });
 const effectBlocks = obj({ general: optional(effectSet), byClass: optional(record(effectSet)) });

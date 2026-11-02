@@ -199,6 +199,7 @@ export function buildDescriptionHtml(description) {
   }
   for (const a of description.abilities ?? []) items.push(`<strong>${escapeHtml(a.title)}:</strong> ${a.text}`);
   for (const r of description.resistances ?? []) items.push(`Resistance ${escapeHtml(r.type)} ${r.value}`);
+  for (const c of description.conditions ?? []) items.push(escapeHtml(`${c.plain.charAt(0).toUpperCase()}${c.plain.slice(1)}`));   // plain words only: never a condition value, a save or a DC
   if (description.spellSlots) items.push(`Spell slots: +${description.spellSlots}`);
   if (!items.length) return "";
   return `<hr><p><strong>Crafted properties</strong></p><ul>${items.map(i => `<li>${i}</li>`).join("")}</ul>`;

@@ -2,19 +2,19 @@
  * The role vocabulary: which roles exist per recipe category, and the exact
  * value shape each role accepts. No Foundry globals (testable in Node).
  */
-import { BASE_ROLE_BY_CATEGORY, TIER_RANGES, TRAIT_SLUG_PATTERN } from "../config.js";
+import { BASE_ROLE_BY_CATEGORY, EFFECT_CONDITIONS, EFFECT_SAVES, EFFECTS, TIER_RANGES, TRAIT_SLUG_PATTERN } from "../config.js";
 import { DAMAGE_TYPES } from "../adapter/pf2e.js";
-import { bool, int, obj, oneOf, optional, scalar, str } from "./schema.js";
+import { arr, bool, int, obj, oneOf, optional, scalar, str } from "./schema.js";
 
 /** Built-in roles by recipe category (docs/01-data-model.md). */
 export const BUILT_IN_ROLES = {
-  weapon: ["basePower", "bonusDamage", "specialAbility"],
+  weapon: ["basePower", "bonusDamage", "specialAbility", "applyCondition"],
   armor: ["basePower", "resistance", "specialAbility"],
   robes: ["basePower", "resistance", "specialAbility"],
   focus: ["spellPower", "spellSlots", "specialAbility"],
   // Stage 11d: classes with no recipe yet. A bomb and a consumable hit or help when USED; a trinket helps while worn.
-  bomb: ["basePower", "bonusDamage", "specialAbility"],
-  consumable: ["basePower", "bonusDamage", "resistance", "specialAbility"],
+  bomb: ["basePower", "bonusDamage", "specialAbility", "applyCondition"],
+  consumable: ["basePower", "bonusDamage", "resistance", "specialAbility", "applyCondition"],
   trinket: ["basePower", "resistance", "specialAbility"]
 };
 
@@ -49,6 +49,8 @@ export const ROLE_SPECS = {
     on: optional(oneOf(["hit", "criticalHit"]))
   }),
   resistance: obj({ type: damageType(), value: int({ min: 1, max: 50 }) }),
+  // v0.22.0: conditions put on the target (GM-only; value absent for a valueless condition). An array: several per item class.
+  applyCondition: arr(obj({ condition: oneOf(Object.keys(EFFECT_CONDITIONS)), value: optional(int({ min: 1, max: EFFECTS.maxValue })), save: oneOf(Object.keys(EFFECT_SAVES)) }), { min: 1 }),
   // Stage 2 records this in the item description and flags only.
   spellSlots: int({ min: 1 })
 };
