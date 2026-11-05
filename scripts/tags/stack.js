@@ -33,6 +33,9 @@ export function mergeCaps(table = null, defaults = TAGS.defaultCaps) {
   return out;
 }
 
+/** The limits in force (not caps on a role): the defaults with the GM's `limits` over them. */
+export const mergeLimits = (table = null) => ({ maxDepth: TAGS.maxDepth, ...(table?.limits ?? {}) });
+
 const CAP_FIELDS = { basePower: ["maxTier"], spellPower: ["maxTier"], bonusDamage: ["maxDicePerType"], resistance: ["maxValue"], specialAbility: ["maxCount"], applyCondition: ["maxValue", "maxCount"] };
 export const CAP_ROLES = Object.keys(CAP_FIELDS);
 
@@ -40,6 +43,10 @@ export const CAP_ROLES = Object.keys(CAP_FIELDS);
 export function capsProblems(table) {
   if (!table || typeof table !== "object" || table.v !== 1 || typeof table.roles !== "object" || Array.isArray(table.roles)) return ["The caps table has an unknown shape."];
   const problems = [];
+  for (const [name, value] of Object.entries(table.limits ?? {})) {
+    if (name !== "maxDepth") problems.push(`"${name}" is not a limit (the limit is: maxDepth).`);
+    else if (!Number.isInteger(value) || value < 1 || value > 6) problems.push("maxDepth must be a whole number from 1 to 6.");
+  }
   for (const [role, fields] of Object.entries(table.roles)) {
     if (!CAP_FIELDS[role]) { problems.push(`"${role}" is not a role that has a cap.`); continue; }
     for (const [field, value] of Object.entries(fields ?? {})) {

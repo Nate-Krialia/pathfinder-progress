@@ -6,7 +6,8 @@
  * for good, or the unused materials handed back), and cancelling hands it all back. The record of what was
  * taken rides inside the queued action (`params.escrow`), so any later step can return exactly that.
  *
- *   escrow = { days, feeCopper, station: { id, name }, units: [{ materialId, name, tier, units }] }
+ *   escrow = { days, feeCopper, station: { id, name }, units: [{ materialId, name, tier, units, itemData?, freezeId? }] }
+ *   (itemData, and for a crafted item its opaque freezeId, are kept for anything that is not a material: Slice 3)
  *
  * (Stage 8 commissions hold nothing until craft time; only the "what is short" helpers are shared with them.)
  */
@@ -24,11 +25,12 @@ export const escrowStackId = materialId => `escrow:${materialId}`;
  * @param {number} args.days  craft days, from craftDays()
  * @returns {{ escrow: object, byStack: Object<string, number> }}  byStack = units to take from each real stack
  */
-export function escrowFromPlan({ plan, days, tierOf }) {
+export function escrowFromPlan({ plan, days, tierOf, heldOf = () => null }) {
   const byMaterial = new Map();
   const byStack = {};
   for (const use of plan.uses) {
-    const entry = byMaterial.get(use.materialId) ?? { materialId: use.materialId, name: use.materialName, tier: tierOf(use.materialId), units: 0 };
+    // `heldOf(use)` (Slice 3) gives the full item (a crafted item keeps its record held in the GM-only store) of anything that is not a material, so cancelling or a failed craft hands back THAT item, not a stand-in.
+    const entry = byMaterial.get(use.materialId) ?? { materialId: use.materialId, name: use.materialName, tier: tierOf(use.materialId), units: 0, ...(heldOf(use) ?? {}) };
     entry.units += use.units;
     byMaterial.set(use.materialId, entry);
     for (const { stackId, units } of use.from) byStack[stackId] = (byStack[stackId] ?? 0) + units;

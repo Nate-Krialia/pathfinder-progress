@@ -4,7 +4,7 @@
  */
 import { HUB, MODULE_ID } from "../config.js";
 import { renderTagger, taggerModel, T } from "./model.js";
-import { getCaps, getLedger } from "./current.js";
+import { getCaps, getLedger, getLimits } from "./current.js";
 import { fxEdit, fxEmpty, fxProblems } from "./fx.js";
 
 export const TAGGER_ID = `${MODULE_ID}-tagger`;
@@ -35,7 +35,7 @@ export function build() {
         "fx-discard"() { this.ui.fx = null; return this.render(); },
         "fx-save"() { return this.#saveFx(); },
         "caps-save"() { return this.#saveCaps(); },
-        "caps-reset"() { return this.#run(async () => { await this.api.tags.setCaps({ v: 1, roles: {} }); this.ui.capsDraft = {}; return "The caps are back to the defaults."; }); }
+        "caps-reset"() { return this.#run(async () => { await this.api.tags.setCaps({ v: 1, roles: {} }); this.ui.capsDraft = {}; this.ui.limitsDraft = {}; return "The caps are back to the defaults."; }); }
       }
     };
 
@@ -56,7 +56,7 @@ export function build() {
       return undefined;
     }
 
-    #model() { return taggerModel(this.ui, this.api.definitions, getLedger(), getCaps()); }
+    #model() { return taggerModel(this.ui, this.api.definitions, getLedger(), getCaps(), getLimits()); }
 
     #fx(fn) { this.ui.fx.draft = fn(this.ui.fx.draft); this.ui.fx.message = ""; return this.render(); }
 
@@ -75,8 +75,9 @@ export function build() {
       return this.#run(async () => {
         const roles = {};
         for (const [role, fields] of Object.entries(this.ui.capsDraft ?? {})) for (const [name, raw] of Object.entries(fields)) { roles[role] ??= {}; roles[role][name] = Number(raw); }
-        await this.api.tags.setCaps({ v: 1, roles: { ...(this.api.tags.caps().table?.roles ?? {}), ...roles } });
-        this.ui.capsDraft = {};
+        const limits = { ...(this.api.tags.caps().table?.limits ?? {}), ...Object.fromEntries(Object.entries(this.ui.limitsDraft ?? {}).map(([k, v]) => [k, Number(v)])) };
+        await this.api.tags.setCaps({ v: 1, roles: { ...(this.api.tags.caps().table?.roles ?? {}), ...roles }, limits });
+        this.ui.capsDraft = {}; this.ui.limitsDraft = {};
         return "Saved the caps.";
       });
     }
@@ -171,6 +172,7 @@ export function build() {
       if (f === "priority") { this.ui.priorities[el.dataset.tag] = el.value; return undefined; }
       if (f === "slot-kind") { (this.ui.slotKinds ??= {})[el.dataset.slot] = el.value; return undefined; }
       if (f === "fx-kind" && this.ui.fx) { this.ui.fx.kind = el.value.trim(); return this.render(); }
+      if (f === "limit") { (this.ui.limitsDraft ??= {})[el.dataset.name] = el.value; return undefined; }
       if (f === "cap") { (this.ui.capsDraft[el.dataset.role] ??= {})[el.dataset.name] = el.value; return undefined; }
       const fx = this.ui.fx, cls = el.dataset.cls, index = Number(el.dataset.index);
       if (fx && f === "fx-power") { fx.draft = fxEdit.setPower(fx.draft, cls, el.value, fx.kind ?? ""); return this.render(); }

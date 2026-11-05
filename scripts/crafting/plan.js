@@ -12,8 +12,9 @@ import { resolveMaterialEffect } from "../data/resolver.js";
 import { isUuid } from "../data/outputRefs.js";
 import { feeForStation } from "../stations/fees.js";
 import { plainLines } from "../effects/plain.js";
-import { effectiveTags, effectiveTier, hasNeeds, isOptionalSlot, itemName, slotFit, standInMaterial } from "../tags/ledger.js";
-import { getCaps, getLedger } from "../tags/current.js";
+import { effectiveTags, effectiveTier, hasNeeds, isCraftedRef, craftedId, isOptionalSlot, itemName, slotFit, standInMaterial } from "../tags/ledger.js";
+import { embedRecord } from "../tags/frozen.js";
+import { getCaps, getLedger, getLimits } from "../tags/current.js";
 import { stackedCraft, stackingRolesFor } from "../tags/contributions.js";
 
 const emptyDescription = () => ({
@@ -53,7 +54,7 @@ export function resolveSlotEffects(recipe, slot, material) {
   return { resolved, missing };
 }
 
-export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING, mechanical = false, ledger = getLedger(), caps = getCaps() }) {
+export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING, mechanical = false, ledger = getLedger(), caps = getCaps(), limits = getLimits() }) {
   const errors = [];
   const remaining = new Map(stacks.map(s => [s.stackId, s.quantity]));
   const customRoles = mechanical ? [] : [...registry.customRole.values()];
@@ -138,6 +139,12 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
     }
   }
 
+  // Slice 3: crafted items used as ingredients, and how deep the nesting goes. Refused in plain words before anything is spent.
+  let depth = 1;
+  const craftedUses = mechanical ? [] : uses.filter(u => isCraftedRef(u.materialId));
+  for (const u of craftedUses) depth = Math.max(depth, (ledger?.crafted?.[craftedId(u.materialId)]?.depth ?? 1) + 1);
+  if (depth > limits.maxDepth) errors.push(`this would nest crafted items ${depth} deep; the limit is ${limits.maxDepth} (crafted items made from crafted items made from...)`);
+
   // Slice 2a: what the TAGGED slots contribute (the materials' own effects and every tag's, each at its contributor's tier), stacked and capped. Old slots never read a tag.
   let capNotes = [];
   let frozen = null;
@@ -151,11 +158,23 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
     for (const e of r.resistance ?? []) description.resistances.push({ ...e, source });
     if (r.applyCondition?.length) for (const plain of plainLines(r.applyCondition)) description.conditions.push({ plain, source });
     capNotes = stacked.notes;
-    // Slice 2b: what the tagged slots were made of and what they stacked to, for the GM-only frozen store (written when the craft resolves, never read from here by a player).
-    if (stacked.taggedSlots.size) {
+    // Slice 2b/3: what the craft was made of and what it stacked to, for the GM-only frozen store (written when the craft resolves, never read from here by a player). A craft is frozen when it has a
+    // tagged slot, or its recipe has a ledger entry (the GM tagged what it makes), so the item it makes can be an ingredient later.
+    const native = ledger?.items?.[recipe.id]?.tags ?? [];
+    if (stacked.taggedSlots.size || native.length || ledger?.items?.[recipe.id]) {
+      const inputTiers = uses.map(u => effectiveTier(u.materialId, registry, ledger)).filter(Number.isInteger);
       frozen = {
         recipeId: recipe.id,
-        uses: uses.filter(u => stacked.taggedSlots.has(u.slot)).map(u => ({ slot: u.slot, ref: u.materialId, name: itemName(u.materialId, registry, ledger), tier: effectiveTier(u.materialId, registry, ledger), tags: effectiveTags(u.materialId, registry, ledger) })),
+        name: recipe.resultName ?? recipe.name,
+        // the item's own tier: the GM's tier for its recipe, else the craft's power tier, else the highest input tier (recipes with no power role)
+        tier: ledger?.items?.[recipe.id]?.tier ?? description.baseTier ?? (inputTiers.length ? Math.max(...inputTiers) : null),
+        depth,
+        native: [...native],
+        inherited: [],
+        uses: uses.filter(u => stacked.taggedSlots.has(u.slot) || isCraftedRef(u.materialId)).map(u => ({
+          slot: u.slot, ref: u.materialId, name: itemName(u.materialId, registry, ledger), tier: effectiveTier(u.materialId, registry, ledger), tags: effectiveTags(u.materialId, registry, ledger),
+          ...(isCraftedRef(u.materialId) ? { from: embedRecord(ledger?.crafted?.[craftedId(u.materialId)]) } : {})
+        })),
         roles: stacked.roles,
         contributions: stacked.contributions.map(c => ({ role: c.role, value: c.value, from: c.from }))
       };

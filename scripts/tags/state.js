@@ -7,15 +7,16 @@ import { MODULE_ID, TAGS } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { logWorldEvent } from "../audit/store.js";
 import { emptyLedger, entryProblems, ledgerProblems } from "./ledger.js";
-import { getCaps, getCapsTable, getFrozenStore, getLedger, setCurrentCaps, setCurrentFrozen, setCurrentLedger } from "./current.js";
+import { getCaps, getCapsTable, getFrozenStore, getLimits, getLedger, setCurrentCaps, setCurrentFrozen, setCurrentLedger } from "./current.js";
 import { emptyFrozen, frozenProblems, recordFromPlan } from "./frozen.js";
 import { capsProblems } from "./stack.js";
+import { craftedRef } from "./ledger.js";
 
-export { getLedger, getCaps };
+export { getLedger, getCaps, getFrozenStore };
 /** Tests and the loader put a ledger in memory directly (and tell the adapter which items are tagged). */
 export function setLedger(ledger) {
   setCurrentLedger(ledger);
-  adapter.setTaggedRefProvider(() => new Set(Object.keys(getLedger().items)));
+  adapter.setTaggedRefProvider(() => new Set([...Object.keys(getLedger().items), ...Object.keys(getFrozenStore().items).map(craftedRef)]));   // tagged items, and crafted items that have a frozen record
 }
 
 export class TagError extends Error {
@@ -46,15 +47,15 @@ export function loadCaps() {
 /** GM: replace the cap table: { v: 1, roles: { <role>: { <cap>: n } } }. Anything left out keeps its default. Players never see it. */
 export async function setCaps(table) {
   requireGM("tags.setCaps");
-  const clean = { v: 1, roles: structuredClone(table?.roles ?? {}) };
+  const clean = { v: 1, roles: structuredClone(table?.roles ?? {}), ...(table?.limits && Object.keys(table.limits).length ? { limits: structuredClone(table.limits) } : {}) };
   const problems = capsProblems(clean);
   if (problems.length) throw new TagError(problems.join(" "), { problems });
   await game.settings.set(MODULE_ID, TAGS.capsSetting, clean);
   setCurrentCaps(clean);
   await logWorldEvent("tags: changed the caps");
-  return { table: structuredClone(clean), effective: getCaps() };
+  return { table: structuredClone(clean), effective: getCaps(), limits: getLimits() };
 }
-export const capsNow = () => { requireGM("tags.caps"); return { table: structuredClone(getCapsTable()), effective: getCaps() }; };
+export const capsNow = () => { requireGM("tags.caps"); return { table: structuredClone(getCapsTable()), effective: getCaps(), limits: getLimits() }; };
 
 async function commit(api, next, what) {
   await game.settings.set(MODULE_ID, TAGS.ledgerSetting, next);
@@ -165,6 +166,32 @@ export async function freezeCraft(plan) {
   return { id, undo: () => removeFrozen(id) };
 }
 
+/** GM: put a frozen result back (a crafted ingredient came back out of escrow; the hook had removed its record when the item left the bag). */
+export async function restoreFrozen(id, record) {
+  if (!game.user?.isGM || !id || !record || getFrozenStore().items[id]) return false;
+  const next = structuredClone(getFrozenStore());
+  next.items[id] = structuredClone(record);
+  await writeFrozen(next);
+  return true;
+}
+
+/** GM: mark a frozen result as held while its item waits in a queued craft's escrow, so the item leaving the bag (or a prune) does not drop it. The record stays in the GM-only store: it is never copied into the queued action (an actor flag). */
+export async function holdFrozen(id) {
+  if (!game.user?.isGM || !id || !getFrozenStore().items[id]) return null;
+  const was = !!getFrozenStore().items[id].held;
+  if (!was) await setHeld(id, true);
+  return { undo: () => (was ? null : setHeld(id, false)) };
+}
+/** GM: the held item came back to a bag (or the hold was undone). */
+export const releaseFrozen = id => (game.user?.isGM && id && getFrozenStore().items[id]?.held ? setHeld(id, false) : false);
+async function setHeld(id, held) {
+  if (!getFrozenStore().items[id]) return false;
+  const next = structuredClone(getFrozenStore());
+  if (held) next.items[id].held = true; else delete next.items[id].held;
+  await writeFrozen(next);
+  return true;
+}
+
 /** GM: forget a frozen result (the item is gone, or the craft was rolled back). Quiet when it is not there. */
 export async function removeFrozen(id) {
   if (!game.user?.isGM) return false;
@@ -184,7 +211,7 @@ export function itemsWithFreezeId(id) {
 /** GM safety net: drop every frozen result that no item in the world carries any more. Unlinked token actors are not searched, so this is run by hand (api.tags.pruneFrozen()), never on its own. */
 export async function pruneFrozen() {
   requireGM("tags.pruneFrozen");
-  const gone = Object.keys(getFrozenStore().items).filter(id => itemsWithFreezeId(id).length === 0);
+  const gone = Object.keys(getFrozenStore().items).filter(id => !getFrozenStore().items[id].held && itemsWithFreezeId(id).length === 0);
   if (!gone.length) return { removed: [] };
   const next = structuredClone(getFrozenStore());
   for (const id of gone) delete next.items[id];
@@ -207,7 +234,7 @@ export function installFrozenHooks(hooks = globalThis.Hooks) {
   hooks.on("deleteItem", item => {
     if (!activeGM()) return;
     const id = item?.getFlag?.(MODULE_ID, "crafted")?.freezeId;
-    if (!id || itemsWithFreezeId(id).some(other => other !== item && other.id !== item.id)) return;
+    if (!id || getFrozenStore().items[id]?.held || itemsWithFreezeId(id).some(other => other !== item && other.id !== item.id)) return;
     return removeFrozen(id).catch(error => console.error(`${MODULE_ID} | could not remove a frozen craft result`, error));
   });
   hooks.on("updateSetting", setting => { if (game.user?.isGM && setting?.key === `${MODULE_ID}.${TAGS.frozenSetting}`) loadFrozen(); });

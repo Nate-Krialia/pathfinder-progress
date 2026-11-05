@@ -16,6 +16,8 @@ import { booksFor, noteCrafted } from "../compendium/store.js";
 import { effectKnown, knownResult } from "../compendium/experiments.js";
 import { propertiesOpen } from "../discovery/store.js";
 import { W } from "../discovery/words.js";
+import { overlayLedger } from "../tags/ledger.js";
+import { getLedger } from "../tags/current.js";
 
 const d100 = () => Math.floor(CONFIG.Dice.randomUniform() * 100) + 1;
 
@@ -37,7 +39,7 @@ function playerMissingRecipe(actor, recipeId) {
  * Changes nothing. Returns { ok, errors, plan, stations: { verdicts, chosen } }.
  * `stacks` replaces the character's own stash (a queued craft resolves against what it put in escrow).
  */
-export function previewCraft(actor, recipeId, selection, api, stationId, { stacks } = {}) {
+export function previewCraft(actor, recipeId, selection, api, stationId, { stacks, crafted } = {}) {
   const recipe = api.definitions?.recipe.get(recipeId);
   // On a player client a formula the character does not hold gets ONE plain answer, whether or not the recipe happens to be loaded
   // (a sibling character may hold it) or even exists. It never says "unknown".
@@ -60,6 +62,8 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
     registry: api.definitions,
     selection,
     stacks: stacks ?? stacksFor(actor),
+    // a queued craft resolves against what it put in escrow, including the frozen records of crafted ingredients that left the bag (Slice 3)
+    ...(crafted ? { ledger: overlayLedger(getLedger(), crafted) } : {}),
     outputs: api.resolvedOutputs?.get(recipeId),
     stations,
     crafterId: actor.id,

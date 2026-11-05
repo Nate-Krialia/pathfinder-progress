@@ -68,7 +68,7 @@ export const chatLeaks = messages => messages.filter(m => CHAT_LEAK.test(m.conte
  */
 export function findTagLeaks(payload, { ledgerOnlyRefs = [], neededTags = [] } = {}) {
   const leaks = [];
-  const forbidden = new Set(["needs", "tags", "tagLedger", "ledger", "priority", "effectBlocks", "effectSets", "caps", "tagCaps", "contributions", "capNotes", "bySlot", "tagOverrides", "tagCrafted"]);
+  const forbidden = new Set(["needs", "tags", "tagLedger", "ledger", "priority", "effectBlocks", "effectSets", "caps", "tagCaps", "contributions", "capNotes", "bySlot", "tagOverrides", "tagCrafted", "inherited", "passCap", "outputTags", "native"]);
   const walk = (node, path) => {
     if (node instanceof Map) return walk([...node.values()], path);
     if (Array.isArray(node)) return node.forEach((x, i) => walk(x, `${path}[${i}]`));

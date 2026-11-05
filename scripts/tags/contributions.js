@@ -8,7 +8,7 @@
  */
 import { slotRoles } from "../data/roles.js";
 import { compileSet } from "../editor/blocks.js";
-import { effectiveTags, effectiveTier, hasNeeds, itemName } from "./ledger.js";
+import { hasNeeds, itemName, tagTiers } from "./ledger.js";
 import { STACKING_ROLES, stackContributions } from "./stack.js";
 
 /** The roles a slot takes in a TAGGED slot and stacks (the recipe's power role included). */
@@ -43,12 +43,12 @@ export function tagRoles({ tag, recipe, kind, tier }) {
 /** The tag effects one ingredient brings to one slot: [{ role, value, from }]. Empty when the slot has no `needs`. */
 export function tagContributions({ recipe, slot, ref, registry, ledger }) {
   if (!hasNeeds(slot)) return [];
-  const tier = effectiveTier(ref, registry, ledger);
-  if (!Number.isInteger(tier)) return [];
   const driven = new Set(slotRoles(slot));
   const kind = slotKind(slot);
   const out = [];
-  for (const tagId of effectiveTags(ref, registry, ledger)) {
+  // each tag counts at the tier IT came with: the item's own tier, or (a crafted item's inherited tag) the tier it was contributed at
+  for (const { tag: tagId, tier } of tagTiers(ref, registry, ledger)) {
+    if (!Number.isInteger(tier)) continue;
     const tag = registry.tag?.get(tagId);
     if (!tag?.effectBlocks && !(recipe.tagOverrides ?? []).some(o => o.tag === tagId)) continue;
     for (const [role, value] of Object.entries(tagRoles({ tag: tag ?? { id: tagId }, recipe, kind, tier }))) {
@@ -71,7 +71,7 @@ export function stackedCraft({ recipe, uses, registry, ledger, caps, baseRole, r
     if (!taggedSlots.has(slot.name)) continue;
     for (const use of uses.filter(u => u.slot === slot.name)) {
       const material = registry.material?.get(use.ref);
-      if (material) for (const [role, value] of Object.entries(resolveEffects(recipe, slot, material).resolved)) if (wanted.has(role)) contributions.push({ role, value, from: { name: material.name, slot: slot.name, tier: effectiveTier(use.ref, registry, ledger) ?? material.tier, priority: 0 } });
+      if (material) for (const [role, value] of Object.entries(resolveEffects(recipe, slot, material).resolved)) if (wanted.has(role)) contributions.push({ role, value, from: { name: material.name, slot: slot.name, tier: ledger?.items?.[use.ref]?.tier ?? material.tier, priority: 0 } });
       contributions.push(...tagContributions({ recipe, slot, ref: use.ref, registry, ledger }));
     }
   }

@@ -86,3 +86,25 @@ Slot kinds, `tagOverrides`, `bySlot` sets, the frozen store and its contents are
 
 ## UNVERIFIED
 That Foundry fires `deleteItem` for an item deleted along with its actor (the prune is the safety net); `foundry.utils.randomID` as the freeze id on the real client (the fake returns a short id); the commission path was changed the same way as the queue path but is covered by the same freeze helper, not by a commission-specific test.
+
+# Slice 3a: a crafted item as an ingredient
+
+## What it does
+- A crafted item that has a frozen record (Slice 2b) is an ingredient under its own reference `crafted:<freezeId>` (first in the item's reference candidates, `adapter/pf2e.js`). It is a stack like any other and can fill a tagged slot.
+- Its tags are the ones it was crafted WITH: `native` (the GM's recipe-id ledger tags) now; `inherited` (Slice 3b) later. A ledger entry for a `crafted:` reference is ignored. Its tier is the record's tier, and each tag counts at that tier (`tagTiers`, `tags/ledger.js`).
+- Record tier: the GM's ledger tier for the recipe id, else the craft's `baseTier` (the power role), else the highest input tier (a recipe with no base role). NOT the crafter's level.
+- A craft freezes when it has a tagged slot, a crafted ingredient, or a ledger entry for its recipe id. The record also holds `depth`: 1 + the deepest crafted ingredient.
+- Depth limit: GM setting `limits.maxDepth` (default `TAGS.maxDepth` = 3, whole number 1-6, in the Item tags window's caps panel). Checked in `planCraft`, so it refuses in plain words before anything is spent.
+- The outer record keeps a small provenance copy of each crafted ingredient (`uses[i].from`: recipe id, name, tier, depth, native, inherited, uses), so deleting the inner item (and its record) does not break the outer record.
+- An old crafted item (no freeze id) or one whose record is gone is simply not an ingredient.
+
+## Escrow
+- Queueing a craft takes the crafted item out of the bag. The queued action (an actor flag) carries the item's data and its opaque `freezeId` ONLY. The frozen record stays in the GM-only store, marked `held` (so the delete hook and `pruneFrozen` leave it alone).
+- Cancel, reject or a failed craft: THE ITEM comes back (same name, same crafted flag) and its record is released. A used-up ingredient takes its held record with it. This also fixes a Slice 1 gap: a returned tagged ordinary item used to come back as a stand-in material.
+- Commission path: freezes the same way; rollback of a crafted ingredient inside a commission craft is not covered (UNVERIFIED).
+
+## Players
+- Nothing new reaches a player: the `fits` entry for a crafted ingredient is an opaque reference and the item's name. `findTagLeaks` now also forbids `inherited`, `passCap`, `outputTags` and `native`; the wiring test scans definitions, previews, queue rows, the Compendium, actor and item flags and chat with canaries.
+
+## UNVERIFIED
+- Nothing here has run against real Foundry. Held records across a real reload, and a crafted item dragged between actors, are untested.

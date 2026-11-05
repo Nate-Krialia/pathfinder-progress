@@ -12,6 +12,7 @@ import { gpText } from "../commissions/commission.js";
 import { rawList } from "../research/store.js";
 import { ensureMaterials, whileHandled } from "../compendium/store.js";
 import { refusal } from "./relay.js";
+import * as tagState from "../tags/state.js";
 
 export const flagKey = key => `flags.${MODULE_ID}.${key}`;
 export const pendingOf = actor => rawList(actor, QUEUE_KEYS.pendingFlag);
@@ -84,6 +85,9 @@ export async function takeEscrow(actor, byStack, feeCopper) {
       const item = actor.items.get(stackId);
       if (!item) throw new Error(`${actor.name} no longer has that stack of materials`);
       const snapshot = { quantity: item.system?.quantity ?? 1, data: item.toObject() };
+      const freezeId = item.getFlag?.(MODULE_ID, "crafted")?.freezeId;             // Slice 3: a crafted ingredient's frozen record goes with the item and comes back with it
+      const hold = freezeId ? await tagState.holdFrozen(freezeId) : null;           // the record stays in the GM-only store, marked held, while the item is in escrow
+      if (hold) undos.push({ what: "the hold on a crafted ingredient's record", run: () => hold.undo() });
       await adapter.consumeMaterialStacks(actor, { [stackId]: units });
       undos.push({
         what: `materials on ${actor.name}`,
@@ -115,6 +119,15 @@ export async function giveBack(actor, units, feeCopper = 0) {
   try {
     await whileHandled(actor.id, units.map(u => u.materialId), async () => {
       for (const u of units) {
+        if (u.itemData) {
+          // not a material (an ordinary item the GM tagged, or a crafted item): hand back THE ITEM it was, with its crafted flag, and release its frozen record (kept, held, in the GM-only store)
+          const data = structuredClone(u.itemData);
+          data.system = { ...(data.system ?? {}), quantity: u.freezeId ? 1 : u.units };
+          const created = await adapter.createItemOnActor(actor, data);
+          const released = u.freezeId ? await tagState.releaseFrozen(u.freezeId) : false;
+          undos.push({ what: `${u.units}x ${u.name ?? u.materialId} on ${actor.name}`, run: async () => { if (released) await tagState.holdFrozen(u.freezeId); await created.delete(); } });
+          continue;
+        }
         const before = adapter.getMaterialStacks(actor).find(s => s.materialId === u.materialId)?.quantity ?? 0;
         const item = await adapter.giveMaterial(actor, { id: u.materialId, name: u.name ?? u.materialId, tier: u.tier }, u.units);
         undos.push({
@@ -135,7 +148,8 @@ export async function giveBack(actor, units, feeCopper = 0) {
 
 /** After an operation that handed `units` back has committed: record any material the character has no entry for. Best-effort. */
 export function recordReturned(actor, units) {
-  return units?.length ? ensureMaterials(actor, units.map(u => ({ id: u.materialId, name: u.name, tier: u.tier }))) : undefined;
+  const materials = (units ?? []).filter(u => !u.itemData);          // an ordinary or crafted item is not a material to record
+  return materials.length ? ensureMaterials(actor, materials.map(u => ({ id: u.materialId, name: u.name, tier: u.tier }))) : undefined;
 }
 
 export { ownerIds, whisper, gmIds } from "../chat.js";

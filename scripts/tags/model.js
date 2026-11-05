@@ -29,7 +29,7 @@ const tierOptions = selected => [opt("", "(its own)", selected === "" || selecte
 export const tagList = registry => [...(registry.tag?.values() ?? [])].sort((a, b) => a.name.localeCompare(b.name)).map(t => ({ id: t.id, name: t.name, theme: t.theme, priority: t.priority ?? 0 }));
 
 /** @param {object} ui the window's state; registry/ledger from the GM client */
-export function taggerModel(ui, registry, ledger, caps) {
+export function taggerModel(ui, registry, ledger, caps, limits) {
   const tags = tagList(registry);
   const nameOfTag = id => registry.tag?.get(id)?.name ?? id;
   const refs = [...new Set([...Object.keys(ledger.items), ...[...registry.material.values()].filter(m => m.tag).map(m => m.id)])];
@@ -37,7 +37,7 @@ export function taggerModel(ui, registry, ledger, caps) {
     .sort((a, b) => a.name.localeCompare(b.name));
   const recipes = [...registry.recipe.values()].sort((a, b) => a.name.localeCompare(b.name));
   const recipe = recipes.find(r => r.id === ui.recipeId) ?? null;
-  return { ui, caps, tags, items, recipes, recipe, materials: [...registry.material.values()].sort((a, b) => a.name.localeCompare(b.name)) };
+  return { ui, caps, limits, tags, items, recipes, recipe, materials: [...registry.material.values()].sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
 function itemsTab(m) {
@@ -140,7 +140,8 @@ function capsPanel(m) {
     `<label>${esc(role)} ${esc(name)} <input type="number" min="1" step="1" data-field="cap" data-role="${role}" data-name="${name}" value="${esc(m.ui.capsDraft?.[role]?.[name] ?? v)}"></label>`));
   return `<fieldset data-part="caps"><legend>Caps</legend>
     <p class="pfp-hint">Each cap clamps only its own role, after everything has been added up. What a cap cuts is noted in your GM log, never to players.</p>
-    ${rows.join("")}<button type="button" data-action="caps-save">Save caps</button> <button type="button" data-action="caps-reset">Back to the defaults</button></fieldset>`;
+    ${rows.join("")}<label>Nesting depth (crafted items made of crafted items) <input type="number" min="1" max="6" step="1" data-field="limit" data-name="maxDepth" value="${esc(m.ui.limitsDraft?.maxDepth ?? m.limits?.maxDepth ?? TAGS.maxDepth)}"></label>
+    <button type="button" data-action="caps-save">Save caps</button> <button type="button" data-action="caps-reset">Back to the defaults</button></fieldset>`;
 }
 
 export function renderTagger(m) {

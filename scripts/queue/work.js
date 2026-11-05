@@ -160,7 +160,17 @@ export function submitCraft(api, actor, user, params, days) {
     const reserved = planSubmit(counter, needed);
     if (!reserved.ok) throw refusal(`Not enough free downtime days: this craft takes ${needed} and ${actor.name} has ${daysFrom(counter)} free.`);
 
-    const { escrow, byStack } = escrowFromPlan({ plan, days: needed, tierOf: id => api.definitions.material.get(id)?.tier });
+    const { escrow, byStack } = escrowFromPlan({
+      plan, days: needed, tierOf: id => api.definitions.material.get(id)?.tier,
+      // anything that is not a material (an ordinary item the GM tagged, a crafted item) is kept whole in escrow; a crafted item's frozen record stays held in the GM-only store
+      heldOf: use => {
+        if (api.definitions.material.has(use.materialId)) return null;
+        const item = actor.items.get(use.from?.[0]?.stackId);
+        if (!item) return null;
+        const freezeId = item.getFlag(MODULE_ID, "crafted")?.freezeId;
+        return { itemData: item.toObject(), ...(freezeId ? { freezeId } : {}) };      // only the opaque id: the record itself stays in the GM-only store (the queued action is an actor flag)
+      }
+    });
     if (adapter.getCopper(actor) < escrow.feeCopper) {
       throw refusal(`${actor.name} cannot afford the ${gpText(escrow.feeCopper)} station fee (has ${gpText(adapter.getCopper(actor))}).`);
     }
@@ -266,7 +276,7 @@ export async function resolveCraft(api, actor, action, pending, { chat, degree: 
   if (!recipe) return dropAction(actor, action, pending, `The recipe "${recipeName ?? action.params.recipe}" no longer exists`);
 
   // Everything is checked against what is in escrow, exactly as at submit.
-  const preview = previewCraft(actor, recipe.id, action.params.selection, api, action.params.stationId, { stacks: virtualStacks(escrow) });
+  const preview = previewCraft(actor, recipe.id, action.params.selection, api, action.params.stationId, { stacks: virtualStacks(escrow), crafted: Object.fromEntries(escrow.units.filter(u => u.freezeId && tagState.getFrozenStore().items[u.freezeId]).map(u => [u.freezeId, tagState.getFrozenStore().items[u.freezeId]])) });
   if (!preview.ok) return dropAction(actor, action, pending, `This craft can no longer be made: ${preview.errors.join("; ")}`);
   const { plan } = preview;
   if (Math.round((plan.fee ?? 0) * 100) !== escrow.feeCopper) {
@@ -310,6 +320,8 @@ export async function resolveCraft(api, actor, action, pending, { chat, degree: 
     await undoThenThrow(undos, error);
   }
 
+  // a crafted ingredient that was used up takes its held record with it (one that came back was released by giveBack)
+  for (const u of escrow.units) if (u.freezeId && !back.some(b => b.freezeId === u.freezeId)) await tagState.removeFrozen(u.freezeId).catch(error => console.error(`${MODULE_ID} | could not remove a used ingredient's record`, error));
   await recordReturned(actor, back);
   if (outcome.made) await noteCrafted(api.definitions, actor, recipe, plan.uses);     // only a success teaches; best-effort; the crafter learns (a loan teaches the crafter)
   await note(`resolved craft: ${recipe.name} for ${actor.name}: ${outcome.made ? "item made" : "no item"}; ${gpText(escrow.feeCopper)} fee and ${action.daysReserved} day(s) spent; `

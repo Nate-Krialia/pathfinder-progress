@@ -55,23 +55,57 @@ export function entryProblems(ref, entry, registry) {
   return problems;
 }
 
-/** The tags an item carries: its material's single `tag` first (the migration on read), then the ledger's, without repeats. */
-export function effectiveTags(ref, registry, ledger) {
+// A CRAFTED item is an ingredient by its own reference `crafted:<freezeId>` (Slice 3). What it carries comes from its frozen record (the ledger view exposes the records as `ledger.crafted`):
+// its NATIVE tags (the GM's ledger entry for its recipe id, snapshotted when it was made), the tags it INHERITED (each with the tier it was contributed at), and its own tier.
+export const CRAFTED_PREFIX = "crafted:";
+export const isCraftedRef = ref => typeof ref === "string" && ref.startsWith(CRAFTED_PREFIX);
+export const craftedId = ref => String(ref).slice(CRAFTED_PREFIX.length);
+export const craftedRef = freezeId => `${CRAFTED_PREFIX}${freezeId}`;
+const craftedRecord = (ref, ledger) => (isCraftedRef(ref) ? ledger?.crafted?.[craftedId(ref)] ?? null : null);
+
+/** A view of the ledger that also knows some extra crafted records (a queued craft's escrow holds the crafted ingredients it took out of the bag). */
+export function overlayLedger(ledger, records = {}) {
+  const view = { v: ledger?.v, items: ledger?.items ?? {} };
+  Object.defineProperty(view, "crafted", { value: { ...(ledger?.crafted ?? {}), ...records }, enumerable: false });
+  return view;
+}
+
+/**
+ * Every tag an item carries WITH the tier it counts at: [{ tag, tier }]. A material's single `tag` first (the migration on read), then the ledger's, at the item's own tier. A crafted
+ * item: its native tags at its own tier, then the tags it inherited at the tier they were contributed at. A tag appears once (the higher tier wins).
+ */
+export function tagTiers(ref, registry, ledger) {
   const out = [];
-  const add = id => { if (id && !out.includes(id)) out.push(id); };
-  add(registry?.material?.get(ref)?.tag);
-  for (const id of ledger?.items?.[ref]?.tags ?? []) add(id);
+  const add = (tag, tier) => {
+    if (!tag) return;
+    const had = out.find(t => t.tag === tag);
+    if (!had) out.push({ tag, tier }); else if ((tier ?? 0) > (had.tier ?? 0)) had.tier = tier;
+  };
+  const rec = craftedRecord(ref, ledger);
+  if (rec) {
+    for (const tag of rec.native ?? []) add(tag, rec.tier);
+    for (const t of rec.inherited ?? []) add(t.tag, t.tier);
+    return out;
+  }
+  const own = effectiveTier(ref, registry, ledger);
+  add(registry?.material?.get(ref)?.tag, own);
+  for (const id of ledger?.items?.[ref]?.tags ?? []) add(id, own);
   return out;
 }
 
-/** The tier an item counts as: the ledger's (the GM's word), else the material's own, else null. */
+/** The tags an item carries: its material's single `tag` first (the migration on read), then the ledger's, without repeats. A crafted item: native, then inherited. */
+export const effectiveTags = (ref, registry, ledger) => tagTiers(ref, registry, ledger).map(t => t.tag);
+
+/** The tier an item counts as: the ledger's (the GM's word), else the material's own, else null. A crafted item: the tier it was given when it was made. */
 export function effectiveTier(ref, registry, ledger) {
+  const rec = craftedRecord(ref, ledger);
+  if (rec) return Number.isInteger(rec.tier) ? rec.tier : null;
   const own = ledger?.items?.[ref]?.tier;
   return Number.isInteger(own) ? own : (registry?.material?.get(ref)?.tier ?? null);
 }
 
-/** What to call an item: the material's name, else the ledger's. */
-export const itemName = (ref, registry, ledger) => registry?.material?.get(ref)?.name ?? ledger?.items?.[ref]?.name ?? ref;
+/** What to call an item: the material's name, else the ledger's, else (a crafted item) the name it was made under. */
+export const itemName = (ref, registry, ledger) => craftedRecord(ref, ledger)?.name ?? registry?.material?.get(ref)?.name ?? ledger?.items?.[ref]?.name ?? ref;
 
 /** A slot that matches by tags. On a player's copy the tags are gone: it carries `fits` (the GM's list of what fits) instead. */
 export const hasNeeds = slot => Boolean(slot?.needs?.all?.length) || Array.isArray(slot?.fits);
@@ -91,7 +125,7 @@ export function slotFit(slot, ref, registry, ledger) {
     return material.tier >= slot.tierFloor ? { ok: true } : { ok: false, reason: `${material.name} is tier ${material.tier} but the slot needs tier ${slot.tierFloor} or higher` };
   }
   const name = itemName(ref, registry, ledger);
-  if (!registry?.material?.has(ref) && !ledger?.items?.[ref]) return { ok: false, reason: `${name} has not been tagged by the GM, so it cannot fill a tagged slot` };
+  if (!registry?.material?.has(ref) && !ledger?.items?.[ref] && !craftedRecord(ref, ledger)) return { ok: false, reason: isCraftedRef(ref) ? `${name} has no record of what it was made of, so it cannot fill a tagged slot` : `${name} has not been tagged by the GM, so it cannot fill a tagged slot` };
   if (tier === null) return { ok: false, reason: `${name} has no tier` };
   const have = new Set(effectiveTags(ref, registry, ledger));
   const missing = slot.needs.all.filter(t => !have.has(t));
@@ -108,6 +142,8 @@ export const fittingRefs = (slot, refs, registry, ledger) => refs.filter(ref => 
  * effects arrive in a later slice, so such an item fills a slot but adds nothing to the item yet.
  */
 export function standInMaterial(ref, ledger) {
+  const rec = craftedRecord(ref, ledger);
+  if (rec) return { kind: "material", id: ref, name: rec.name ?? ref, tier: rec.tier, effects: {}, standIn: true };
   const e = ledger?.items?.[ref];
   return e ? { kind: "material", id: ref, name: e.name ?? ref, tier: e.tier, effects: {}, standIn: true } : null;
 }

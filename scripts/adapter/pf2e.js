@@ -82,11 +82,13 @@ const taggedRefs = () => (globalThis.game?.user?.isGM === false ? taggedProvider
  *      compendium item's uuid, so tagging the compendium item (one shared entry) tags every copy on every actor.
  *   2. `_stats.duplicateSource`: the document this one was duplicated from. UNVERIFIED for a world item dropped onto an actor; when it names another actor's copy it matches nothing.
  *   3. `flags.core.sourceId`: the legacy field that `_stats.compendiumSource` replaced (Foundry v13 migrates it). Kept so older items still match.
+ *   0. (Slice 3) `crafted:<freezeId>` for an item the module crafted: it is an ingredient under its own reference, with the tags it was made with.
  *   4. the item's own `uuid`: a world item tagged by its own uuid ("Item.<id>") matches that exact document, and an actor's own copy tagged by its own uuid matches only itself.
  * The first one that is in the ledger wins.
  */
 export function itemRefCandidates(item) {
-  return [item._stats?.compendiumSource, item._stats?.duplicateSource, item.flags?.core?.sourceId, item.uuid].filter((ref, i, all) => typeof ref === "string" && ref !== "" && all.indexOf(ref) === i);
+  const crafted = item.flags?.[MODULE_ID]?.crafted?.freezeId;          // Slice 3: a crafted item with a frozen record is an ingredient under its own reference
+  return [crafted ? `crafted:${crafted}` : undefined, item._stats?.compendiumSource, item._stats?.duplicateSource, item.flags?.core?.sourceId, item.uuid].filter((ref, i, all) => typeof ref === "string" && ref !== "" && all.indexOf(ref) === i);
 }
 /** The reference to tag an item under (or to match it by): the first candidate that is in `refs`, else the most trusted one. */
 export const itemRefOf = (item, refs = null) => { const c = itemRefCandidates(item); return (refs && c.find(r => refs.has(r))) ?? c[0] ?? null; };
