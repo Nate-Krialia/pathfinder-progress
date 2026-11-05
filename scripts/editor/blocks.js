@@ -39,8 +39,8 @@ export function newBlock(type) {
 
 /** One block as the role value it compiles to, for a material of `tier`. */
 export function blockValue(block, tier) {
-  if (block.type === "damage") return { dice: valueAt(block.dice, tier), type: block.damageType, ...(block.persistent ? { persistent: true } : {}), ...(block.versus ? { versus: block.versus } : {}) };
-  if (block.type === "resistance") return { type: block.damageType, value: valueAt(block.value, tier) };
+  if (block.type === "damage") return { dice: valueAt(block.dice, tier), type: block.damageType, ...(block.persistent ? { persistent: true } : {}), ...(block.versus ? { versus: block.versus } : {}), ...(block.bonusType && block.bonusType !== "untyped" ? { bonusType: block.bonusType } : {}) };
+  if (block.type === "resistance") return { type: block.damageType, value: valueAt(block.value, tier), ...(block.bonusType && block.bonusType !== "untyped" ? { bonusType: block.bonusType } : {}) };
   if (block.type === "ability") return { title: block.title, text: block.text, ...(block.on ? { on: block.on } : {}) };
   if (block.type === "condition") return { condition: block.condition, ...(EFFECT_CONDITIONS[block.condition]?.valued ? { value: valueAt(block.value, tier) } : {}), save: block.save };
   throw new RangeError(`blockValue: unknown block type "${block.type}"`);
@@ -99,8 +99,8 @@ export function decompileRoles(roles = {}, itemClass) {
   const set = { blocks: [], extra: {} };
   for (const [role, value] of Object.entries(roles)) {
     if (role === powerRole(itemClass) && /^T[1-5]$/.test(String(value))) set.power = Number(String(value).slice(1));
-    else if (role === "bonusDamage") set.blocks.push({ type: "damage", dice: flat(value.dice), damageType: value.type, ...(value.persistent ? { persistent: true } : {}), ...(value.versus ? { versus: value.versus } : {}) });
-    else if (role === "resistance") set.blocks.push({ type: "resistance", damageType: value.type, value: flat(value.value) });
+    else if (role === "bonusDamage") set.blocks.push({ type: "damage", dice: flat(value.dice), damageType: value.type, ...(value.bonusType ? { bonusType: value.bonusType } : {}), ...(value.persistent ? { persistent: true } : {}), ...(value.versus ? { versus: value.versus } : {}) });
+    else if (role === "resistance") set.blocks.push({ type: "resistance", damageType: value.type, value: flat(value.value), ...(value.bonusType ? { bonusType: value.bonusType } : {}) });
     else if (role === "applyCondition") for (const e of value) set.blocks.push({ type: "condition", condition: e.condition, ...(e.value !== undefined ? { value: flat(e.value) } : {}), save: e.save });
     else if (role === "specialAbility") set.blocks.push({ type: "ability", title: value.title, text: value.text, ...(value.on ? { on: value.on } : {}) });
     else set.extra[role] = value;

@@ -13,7 +13,8 @@ import { isUuid } from "../data/outputRefs.js";
 import { feeForStation } from "../stations/fees.js";
 import { plainLines } from "../effects/plain.js";
 import { hasNeeds, isOptionalSlot, slotFit, standInMaterial } from "../tags/ledger.js";
-import { getLedger } from "../tags/current.js";
+import { getCaps, getLedger } from "../tags/current.js";
+import { stackedCraft, stackingRolesFor } from "../tags/contributions.js";
 
 const emptyDescription = () => ({
   baseTier: null,
@@ -52,7 +53,7 @@ export function resolveSlotEffects(recipe, slot, material) {
   return { resolved, missing };
 }
 
-export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING, mechanical = false, ledger = getLedger() }) {
+export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING, mechanical = false, ledger = getLedger(), caps = getCaps() }) {
   const errors = [];
   const remaining = new Map(stacks.map(s => [s.stackId, s.quantity]));
   const customRoles = mechanical ? [] : [...registry.customRole.values()];
@@ -122,6 +123,8 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
 
     const source = { slot: slot.name, materialId };
     for (const [role, value] of Object.entries(resolved)) {
+      // In a tagged slot the five stacking roles are added up with the tags' effects after the loop (tags/stack.js); everything else is applied here as before.
+      if (tagged && stackingRolesFor(baseRole).includes(role)) continue;
       if (role === baseRole) description.baseTier = parseTier(value);
       else if (role === "bonusDamage") description.damageBonuses.push({ ...value, label: material.name, source });
       else if (role === "specialAbility") description.abilities.push({ on: "hit", ...value, source });
@@ -133,6 +136,20 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
         if (custom) description.fields.push({ path: custom.modifies, value, source });
       }
     }
+  }
+
+  // Slice 2a: what the TAGGED slots contribute (the materials' own effects and every tag's, each at its contributor's tier), stacked and capped. Old slots never read a tag.
+  let capNotes = [];
+  if (!mechanical && !errors.length) {
+    const stacked = stackedCraft({ recipe, uses: uses.map(u => ({ slot: u.slot, ref: u.materialId })), registry, ledger, caps, baseRole, resolveEffects: resolveSlotEffects });
+    const source = { stacked: true };
+    const r = stacked.roles;
+    if (baseRole && r[baseRole]) description.baseTier = parseTier(r[baseRole]);          // exactly one slot drives the power role, so the stack is the only source of the tier when that slot is tagged
+    for (const e of r.bonusDamage ?? []) description.damageBonuses.push({ ...e, source });
+    for (const e of r.specialAbility ?? []) description.abilities.push({ on: "hit", ...e, source });
+    for (const e of r.resistance ?? []) description.resistances.push({ ...e, source });
+    if (r.applyCondition?.length) for (const plain of plainLines(r.applyCondition)) description.conditions.push({ plain, source });
+    capNotes = stacked.notes;
   }
 
   if (mechanical) {
@@ -168,6 +185,7 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       outputUuid,
       uses,
       description,
+      capNotes,           // GM-only text about what a cap cut (never shown to a player; the craft logs it to the GM log)
       station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null,
       // A workshop the party built charges no station fee; every other station charges its tier's fee.
       fee: station ? feeForStation(station) : null,

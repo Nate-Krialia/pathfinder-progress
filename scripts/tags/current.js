@@ -3,3 +3,10 @@ import { emptyLedger } from "./ledger.js";
 let current = emptyLedger();
 export const getLedger = () => current;
 export const setCurrentLedger = ledger => { current = ledger ?? emptyLedger(); };
+
+// The GM's cap table (Slice 2a): null means "the defaults". Held here so pure code (the craft plan, the effects engine) can read it.
+import { mergeCaps } from "./stack.js";
+let caps = null;
+export const getCapsTable = () => caps;
+export const getCaps = () => mergeCaps(caps);
+export const setCurrentCaps = table => { caps = table ?? null; };

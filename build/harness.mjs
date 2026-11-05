@@ -144,6 +144,10 @@ export const SCENES = {
   taggerItems: taggerScene({ tab: "items", draft: { source: "item", ref: "", uuid: "Compendium.pf2e.equipment-srd.Item.AAAAAAAAAAAAAAAA", name: "A Very Long Item Name That Keeps Going To See How The Form Wraps In A Narrow Window", tags: ["gate-tag-1"], tier: "", editing: false }, message: "An item without a material record has no tier of its own: give it one (the tag effects will scale by it)." }),
   taggerMaterial: taggerScene({ tab: "items", draft: { source: "material", ref: "gate-m4", uuid: "", name: "", tags: ["gate-tag-0", "gate-tag-2"], tier: 3, editing: true } }),
   taggerSlots: taggerScene({ tab: "slots", recipeId: "gate-r7", slotDrafts: {} }),
+  taggerFx: taggerScene({ tab: "tags", fx: { tagId: "gate-tag-1", cls: "weapon", message: "", draft: { general: { power: 2, blocks: [{ type: "ability", title: "A very long ability title that keeps going", text: "And text that is also rather long, to see how the field wraps in a narrow window." }] }, byClass: { weapon: { blocks: [
+    { type: "damage", dice: { byTier: { 1: "1d4", 2: "1d6", 3: "1d8", 4: "1d10", 5: "1d12" } }, damageType: "poison", persistent: true, versus: "undead-with-a-long-trait", bonusType: "item" },
+    { type: "resistance", damageType: "fire", value: { all: 5 }, bonusType: "status" },
+    { type: "condition", condition: "frightened", value: { byTier: { 1: 1, 2: 1, 3: 2, 4: 3, 5: 4 } }, save: "will" }] } } } } }),
   taggerTags: taggerScene({ tab: "tags", newTag: { name: "A new tag with a long name", theme: "what it stands for, in a rather long sentence that must wrap" }, priorities: { "gate-tag-1": "12" } }),
   editor300: editorScene("material:gate-m4", { effectClass: "weapon" }),
   editorRows: editorScene("material:gate-m8", { effectClass: "weapon", tweak: d => ({ ...d, fields: { ...d.fields, name: "", tier: "7" }, rows: [{ steps: "4", type: "properties", recipeId: "" }, { steps: "4", type: "formula", recipeId: "" }, { steps: "abc", type: "formula", recipeId: "gate-blade" }] }) }),

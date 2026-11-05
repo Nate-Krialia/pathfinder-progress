@@ -70,7 +70,7 @@ export function stripForPlayer(kind, record, { days, tagKnown = false, hasTrack:
   }
   if (kind === "note") { const hasTrack = trackFlag ?? Boolean(copy.research); return { kind: copy.kind, id: copy.id, name: copy.name, hasTrack }; }
   if (kind === "blueprint") delete copy.researchProject;
-  if (kind === "tag") delete copy.priority;
+  if (kind === "tag") { delete copy.priority; delete copy.effectBlocks; }   // what a tag DOES is GM-only data (Slice 2a)
   if (kind === "recipe") {
     const out = { kind: copy.kind, id: copy.id, name: copy.name, category: copy.category };
     if (copy.baseRole) out.baseRole = copy.baseRole;

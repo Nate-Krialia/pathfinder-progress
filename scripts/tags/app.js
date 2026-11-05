@@ -4,7 +4,8 @@
  */
 import { HUB, MODULE_ID } from "../config.js";
 import { renderTagger, taggerModel, T } from "./model.js";
-import { getLedger } from "./current.js";
+import { getCaps, getLedger } from "./current.js";
+import { fxEdit, fxEmpty, fxProblems } from "./fx.js";
 
 export const TAGGER_ID = `${MODULE_ID}-tagger`;
 let TaggerApp = null;
@@ -26,14 +27,22 @@ export function build() {
         "save-slot"(event, target) { return this.#saveSlot(target.dataset.slot, false); },
         "clear-slot"(event, target) { return this.#saveSlot(target.dataset.slot, true); },
         "create-tag"() { return this.#createTag(); },
-        "save-priority"(event, target) { return this.#savePriority(target.dataset.tag); }
+        "save-priority"(event, target) { return this.#savePriority(target.dataset.tag); },
+        "edit-effects"(event, target) { const tag = this.api.definitions.tag.get(target.dataset.tag); this.ui.fx = { tagId: tag.id, draft: structuredClone(tag.effectBlocks ?? {}), cls: "general", message: "" }; return this.render(); },
+        "fx-class"(event, target) { this.ui.fx.cls = target.dataset.cls; return this.render(); },
+        "fx-add"(event, target) { return this.#fx(d => fxEdit.addBlock(d, target.dataset.cls, target.dataset.type)); },
+        "fx-remove"(event, target) { return this.#fx(d => fxEdit.removeBlock(d, target.dataset.cls, Number(target.dataset.index))); },
+        "fx-discard"() { this.ui.fx = null; return this.render(); },
+        "fx-save"() { return this.#saveFx(); },
+        "caps-save"() { return this.#saveCaps(); },
+        "caps-reset"() { return this.#run(async () => { await this.api.tags.setCaps({ v: 1, roles: {} }); this.ui.capsDraft = {}; return "The caps are back to the defaults."; }); }
       }
     };
 
     constructor(api, options = {}) {
       super(options);
       this.api = api;
-      this.ui = { layout: "wide", tab: "items", draft: blankDraft(), recipeId: "", slotDrafts: {}, newTag: { name: "", theme: "" }, priorities: {}, message: "" };
+      this.ui = { layout: "wide", tab: "items", draft: blankDraft(), recipeId: "", slotDrafts: {}, newTag: { name: "", theme: "" }, priorities: {}, capsDraft: {}, fx: null, message: "" };
     }
     #wired = false;
     #observer = null;
@@ -47,7 +56,30 @@ export function build() {
       return undefined;
     }
 
-    #model() { return taggerModel(this.ui, this.api.definitions, getLedger()); }
+    #model() { return taggerModel(this.ui, this.api.definitions, getLedger(), getCaps()); }
+
+    #fx(fn) { this.ui.fx.draft = fn(this.ui.fx.draft); this.ui.fx.message = ""; return this.render(); }
+
+    #saveFx() {
+      const fx = this.ui.fx;
+      const problems = fxProblems(fx.draft);
+      if (problems.length) { fx.message = problems[0]; return this.render(); }
+      return this.#run(async () => {
+        await this.api.editor.update(`tag:${fx.tagId}`, { effectBlocks: fxEmpty(fx.draft) ? undefined : fx.draft }, { confirmed: true });
+        this.ui.fx = null;
+        return "Saved the tag's effects.";
+      });
+    }
+
+    #saveCaps() {
+      return this.#run(async () => {
+        const roles = {};
+        for (const [role, fields] of Object.entries(this.ui.capsDraft ?? {})) for (const [name, raw] of Object.entries(fields)) { roles[role] ??= {}; roles[role][name] = Number(raw); }
+        await this.api.tags.setCaps({ v: 1, roles: { ...(this.api.tags.caps().table?.roles ?? {}), ...roles } });
+        this.ui.capsDraft = {};
+        return "Saved the caps.";
+      });
+    }
 
     async #run(fn) {
       try { this.ui.message = await fn(); }
@@ -135,6 +167,12 @@ export function build() {
       if (f === "new-tag-name") { this.ui.newTag.name = el.value; return undefined; }
       if (f === "new-tag-theme") { this.ui.newTag.theme = el.value; return undefined; }
       if (f === "priority") { this.ui.priorities[el.dataset.tag] = el.value; return undefined; }
+      if (f === "cap") { (this.ui.capsDraft[el.dataset.role] ??= {})[el.dataset.name] = el.value; return undefined; }
+      const fx = this.ui.fx, cls = el.dataset.cls, index = Number(el.dataset.index);
+      if (fx && f === "fx-power") { fx.draft = fxEdit.setPower(fx.draft, cls, el.value); return this.render(); }
+      if (fx && f === "fx-field") { fx.draft = fxEdit.setField(fx.draft, cls, index, el.dataset.name, el.type === "checkbox" ? el.checked : el.value); return this.render(); }
+      if (fx && f === "fx-tiermode") { fx.draft = fxEdit.setTierMode(fx.draft, cls, index, el.dataset.name, el.value); return this.render(); }
+      if (fx && f === "fx-tiervalue") { fx.draft = fxEdit.setTierValue(fx.draft, cls, index, el.dataset.name, el.dataset.tier === "all" ? "all" : Number(el.dataset.tier), el.value); return this.render(); }
       return undefined;
     }
 

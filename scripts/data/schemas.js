@@ -6,7 +6,7 @@
  * Shapes are "indicative" in the spec; anything it leaves open is noted inline
  * and should be tightened as the owning stage is built.
  */
-import { CRAFT_LEVEL_RANGE, DISCOVERY, EFFECT_CONDITIONS, EFFECT_SAVES, EFFECTS, ID_PATTERN, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
+import { CRAFT_LEVEL_RANGE, DISCOVERY, EFFECT_CONDITIONS, EFFECT_SAVES, EFFECTS, ID_PATTERN, TAGS, ITEM_UUID_PATTERN, QUANTITY_PATTERN, ROLE_ID_PATTERN, TIER_RANGES } from "../config.js";
 import { looksLikeUuid } from "./outputRefs.js";
 import { validateLadder } from "../gathering/ladder.js";
 import { DAMAGE_TYPES, isSkillSlug } from "../adapter/pf2e.js";
@@ -44,8 +44,8 @@ const tierValue = of => obj({ all: optional(of), byTier: optional(record(of)) },
   }
 });
 const effectBlock = variant("type", {
-  damage: { dice: tierValue(str({ pattern: /^[1-9]\d?d(4|6|8|10|12)$/, patternHint: 'must be dice like "1d6"' })), damageType: oneOf(DAMAGE_TYPES), persistent: optional(bool()), versus: optional(str()) },
-  resistance: { damageType: oneOf(DAMAGE_TYPES), value: tierValue(int({ min: 1, max: 50 })) },
+  damage: { dice: tierValue(str({ pattern: /^[1-9]\d?d(4|6|8|10|12)$/, patternHint: 'must be dice like "1d6"' })), damageType: oneOf(DAMAGE_TYPES), persistent: optional(bool()), versus: optional(str()), bonusType: optional(oneOf(TAGS.bonusTypes)) },
+  resistance: { damageType: oneOf(DAMAGE_TYPES), value: tierValue(int({ min: 1, max: 50 })), bonusType: optional(oneOf(TAGS.bonusTypes)) },
   ability: { title: str(), text: str(), on: optional(oneOf(["hit", "criticalHit"])) },
   // v0.22.0: a condition put on the TARGET (weapon, bomb and consumable only; several per class). GM-only data: it never reaches a player. The value is absent for a valueless condition.
   condition: { condition: oneOf(Object.keys(EFFECT_CONDITIONS)), value: optional(tierValue(int({ min: 1, max: EFFECTS.maxValue }))), save: oneOf(Object.keys(EFFECT_SAVES)) }
@@ -85,7 +85,9 @@ const material = obj({
 
 // A tag: the theme a family of materials shares ("Mitflit parts: cowardice, which works with frightened").
 // `priority` (Slice 1 of the tag system) is a GM-set number that later breaks ties between equal-tier tags when tags are passed up in nested crafts. Stored and edited only for now; GM-only (a player copy drops it).
-const tagDef = obj({ kind: kind("tag"), id: idField(), name: str(), theme: str(), worksWith: optional(str()), priority: optional(int({ min: -1000, max: 1000 })) });
+const tagDef = obj({ kind: kind("tag"), id: idField(), name: str(), theme: str(), worksWith: optional(str()), priority: optional(int({ min: -1000, max: 1000 })),
+  // Slice 2a: what the tag DOES when an item carrying it fills a tagged slot, scaled by that item's tier. The same builder blocks as a material (general + per item class). GM-only.
+  effectBlocks: optional(effectBlocks) });
 
 // A note: a Foundry item (flag `note`) that points at a formula. With a research track it offers a lead; without one it does nothing.
 const noteDef = obj({ kind: kind("note"), id: idField(), name: str(), recipeId: idField(), research: optional(track), img: optional(str()), description: optional(str()), bulk: optional(bulkValue), label: optional(str()), retired: optional(bool()), preset: optional(oneOf(["plan", "research"])) });

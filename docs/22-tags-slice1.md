@@ -29,3 +29,34 @@ Never receive the ledger, a tag list, `needs`, a ledger tier or a priority. A pl
 
 ## Out of scope in S1 (unchanged)
 Tag effects, stacking, caps, inheritance in nested crafts, the veto twist, charges, crafter-choice effects, tag-based gathering.
+
+---
+
+# Slice 2a: tag effects, stacking, caps (decisions from Nate, 2026-11)
+
+Scope: tag effect data and its builder, the stacking engine, the GM's caps, the five existing roles (`basePower`/`spellPower`, `bonusDamage`, `resistance`, `specialAbility`, `applyCondition`) in TAGGED slots. NOT in 2a: slot `kind` (2b), the frozen per-craft store and its cleanup (2b), new roles such as heal / AC / thorns / duration (2c), what players learn by crafting (2d), per-recipe caps, tags adding any condition beyond the curated list.
+
+## Data
+- A tag gets `effectBlocks` (`{ general?, byClass? }`, exactly a material's shape: damage, resistance, ability and condition blocks with `{ all }` / `{ byTier }` values, and a base-power `power`). Written through the editor (a patch or a world record), validated at load for every tier T1 to T5. GM-only: a player's copy of a tag drops it (and `priority`).
+- Damage and resistance blocks may carry a PF2e `bonusType` (`untyped` default, `item`, `status`, `circumstance`). In 2a it is stored, validated and carried on the stacked result (mixed types in one group read as untyped); no typed modifier is emitted yet (2c).
+- **Caps**: world setting `tagCaps` = `{ v: 1, roles: { <role>: { <cap>: n } } }`, over the placeholder defaults in `TAGS.defaultCaps`. Caps: `basePower.maxTier`, `bonusDamage.maxDicePerType`, `resistance.maxValue`, `specialAbility.maxCount`, `applyCondition.maxValue` / `maxCount`. GM only (`api.tags.caps()` / `setCaps()`); edited in the Item tags window. One world-wide table; per-recipe overrides are a later slice.
+
+## What contributes (scripts/tags/contributions.js)
+In a slot with `needs`, each ingredient contributes ONCE (quantity is a cost, not a multiplier): its OWN effects (a material's, as before) AND the effects of every tag it carries, each tag at the ingredient's tier (ledger tier, else the material's), for the roles the slot `drives` only. Within one tag the item class's set beats the general set per role. A slot without `needs` never reads a tag and keeps its old one-entry-per-material behaviour; the tagged slots' contributions are merged with each other, not with the old slots'.
+
+## Stacking (scripts/tags/stack.js), then the cap for that role
+- power: the HIGHEST tier wins (tiers pick the output item; they do not add).
+- damage: same type, die size, persistence and versus: dice counts add (1d4 + 1d4 = 2d4); other die sizes or types stay separate. Cap: dice per damage type; the biggest die is kept first.
+- resistance: same type adds. Cap: value per type.
+- abilities: all apply; the same title once. Cap: count (first in slot order).
+- conditions: all apply; the same condition twice keeps the HIGHER value (and its save). Cap: value per condition and count.
+- A cap clamps only its own role. What a cap cut is a GM-only text in `plan.capNotes`, written to the GM log when the craft resolves (`gm.log()`), never to chat.
+
+## Where the result goes
+`planCraft` puts the stack into the same `description` buckets (damage dice and rule elements, abilities, resistances, plain condition lines, base tier), so the item, the chat summary and the adapter are unchanged. The effects engine (`effects/resolve.js`) uses the SAME `stackedCraft` for a tagged slot's conditions, resolved again from the CURRENT registry, ledger and caps (2b freezes them per craft).
+
+## Players
+The crafted item shows its own final stacked numbers, like any material today. Tag lists, tiers, tier tables, caps, effect sets, contributions, priorities and DCs stay GM-only. The canary tests (`tests/tags-wiring.test.js`, `findCanaries`) put odd values into a used tag's other tiers, an unused tag and the caps table and prove none appears in the player's definitions, preview, queue rows, Compendium, actor flags, chat or the crafted item's flags; a planted leak must be found.
+
+## UNVERIFIED
+How PF2e treats several `DamageDice` rule elements from one item (the mechanism is the existing one); the use card applying stacked conditions on a real canvas (the S2a gate); typed PF2e bonuses (nothing is emitted yet).

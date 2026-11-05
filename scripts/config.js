@@ -361,6 +361,17 @@ export const EFFECTS = {
 /** The tag system (Slice 1, docs/22-tags-slice1.md). The ledger is GM-only world data: item reference -> { tags, tier, name }. */
 export const TAGS = {
   ledgerSetting: "tagLedger",
+  capsSetting: "tagCaps",                // Slice 2a: the GM-set cap per role (one world-wide table)
+  // PF2e bonus types a tag effect may carry (GM-set per effect; "untyped" is the default and means none). Stored and carried on the stacked result; 2a emits no typed modifier yet.
+  bonusTypes: ["untyped", "item", "status", "circumstance"],
+  // Caps are placeholders the GM overrides in the tag window. Each clamps ONLY its own role, after everything has been added up. A role with no entry has no cap.
+  defaultCaps: {
+    basePower: { maxTier: 5 },                          // the stacked power tier (the highest wins; it never adds)
+    bonusDamage: { maxDicePerType: 4 },                 // dice per damage type, all die sizes together
+    resistance: { maxValue: 10 },                       // per damage type
+    specialAbility: { maxCount: 4 },                    // how many abilities
+    applyCondition: { maxValue: 3, maxCount: 4 }        // a condition's value; how many conditions
+  },
   ledgerVersion: 1,
   priorityRange: { min: -1000, max: 1000 }
 };

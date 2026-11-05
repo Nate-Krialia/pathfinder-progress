@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DAGGER, M, as, craft, env, getApi, makeActor, resolve, world } from "./fake-world.js";
-import { asPage, findTagLeaks, seedRecords } from "./helpers.js";
+import { asPage, findCanaries, findTagLeaks, seedRecords } from "./helpers.js";
 import { getLedger } from "../scripts/tags/current.js";
 import { loadLedger } from "../scripts/tags/state.js";
 
@@ -236,4 +236,82 @@ test("REF: the candidates are listed in the documented order, without repeats or
   assert.deepEqual(itemRefCandidates({ _stats: { compendiumSource: "A", duplicateSource: "A" }, uuid: "" }), ["A"]);
   assert.deepEqual(itemRefCandidates({}), []);
   assert.equal(itemRefOf(item), "A"); assert.equal(itemRefOf(item, new Set(["C"])), "C"); assert.equal(itemRefOf({}), null);
+});
+
+// Slice 2a: tag effects through the real main.js, and the canary leak scan ---------------------------------------------------------
+
+const CANARIES = ["5d10", "6d10", "7d12", "CANARY-GHOST-TEXT", '"priority":913', '"maxValue":83', "effectBlocks", "byTier", "capNotes", "tagCaps", "contributions", '"needs"', '"tagLedger"'];
+const allText = x => JSON.stringify(x, (k, v) => (v instanceof Map ? [...v.values()] : v instanceof Set ? [...v] : v));
+
+async function effectsWorld() {
+  const w = await tagged();
+  await give(w.ann, "Wolf Tooth", TOOTH, 2);
+  await as(w.gm, async () => {
+    // the tag the craft uses: canary entries at the tiers nobody uses, an ability with a canary text, a GM priority
+    await api().editor.update("tag:venom-tooth", {
+      priority: 913,
+      effectBlocks: { byClass: { weapon: { blocks: [
+        { type: "damage", dice: { byTier: { 1: "1d4", 2: "2d6", 3: "1d8", 4: "5d10", 5: "6d10" } }, damageType: "poison" },
+        { type: "ability", title: "Venom Bite", text: "CANARY-USED-TEXT" }
+      ] } } }
+    }, { confirmed: true });
+    // a tag nothing here carries: all its numbers and words are canaries
+    await api().editor.create("tag", { name: "Ghost", theme: "boo", effectBlocks: { general: { blocks: [{ type: "damage", dice: { all: "7d12" }, damageType: "fire" }, { type: "ability", title: "Boo", text: "CANARY-GHOST-TEXT" }] } } }, { makeItem: false });
+    await api().editor.update("material:spider-fang", { tag: "venom-tooth" }, { confirmed: true });     // so a player holding it may be sent the tag's record
+    await api().tags.setEntry(TOOTH, { tags: ["venom-tooth"], tier: 2, name: "Wolf Tooth" });
+    await api().tags.setSlotNeeds(DAGGER, "fang", { all: ["venom-tooth"] });
+    await api().tags.setCaps({ v: 1, roles: { resistance: { maxValue: 83 }, bonusDamage: { maxDicePerType: 1 } } });
+  });
+  await as(w.annUser, () => api().definitions.refresh());
+  return w;
+}
+
+test("S2a END TO END: the tag's effect is scaled by the ingredient's tier, the GM's cap clamps it, and the clamp is noted for the GM only", async () => {
+  const w = await effectsWorld();
+  const pv = await as(w.gm, () => api().previewCraft(w.ann, DAGGER, { blade: "iron", fang: TOOTH }, "oakhaven-forge"));
+  assert.ok(pv.ok, pv.errors?.join(" | "));
+  assert.deepEqual(pv.plan.description.damageBonuses.map(d => `${d.dice} ${d.type}`), ["1d6 poison"], "tier 2 gives 2d6; the cap of 1 die per type clamps it; tiers 4 and 5 (the canaries) are not used");
+  assert.deepEqual(pv.plan.capNotes, ["capped bonusDamage (poison): 2 dice became 1"]);
+  assert.deepEqual(pv.plan.description.abilities.map(a => a.title), ["Venom Bite"]);
+  const queued = await craft(w, w.annUser, w.ann, { selection: { blade: "iron", fang: TOOTH } });
+  await as(w.gm, () => resolve(w.ann, queued.id, { chat: true }));
+  const made = w.ann.items.find(i => i.getFlag(M, "crafted"));
+  assert.ok(made, "the item was made");
+  assert.match(made.system.description.value, /\+1d6 poison/); assert.match(made.system.description.value, /Venom Bite/);
+  const log = await as(w.gm, () => api().gm.log());
+  assert.ok(log.some(e => /capped bonusDamage \(poison\): 2 dice became 1/.test(e.text)), "the GM log has the clamp");
+  assert.ok(!env.chat.some(m => /capped/i.test(m.content ?? "")), "no chat message mentions a cap");
+});
+
+test("S2a CANARIES: nothing the GM authored for tag effects, caps or priority reaches anything a player can read", async () => {
+  const w = await effectsWorld();
+  const ann = w.annUser;
+  const registry = await as(ann, () => api().definitions);
+  const tagRecord = registry.tag.get("venom-tooth");
+  assert.ok(tagRecord, "the player may hold the tag's record (the discovery system sends it with spider-fang)");
+  assert.equal("effectBlocks" in tagRecord, false); assert.equal("priority" in tagRecord, false);
+  const preview = await as(ann, () => api().previewCraft(w.ann, DAGGER, { blade: "iron", fang: TOOTH }, "oakhaven-forge"));
+  assert.ok(preview.ok, preview.errors?.join(" | "));
+  const queued = await craft(w, ann, w.ann, { selection: { blade: "iron", fang: TOOTH } });
+  const queueRows = await as(ann, () => api().queue.list([w.ann]));
+  const compendium = await as(ann, () => api().compendium.view(w.ann));
+  const before = { definitions: allText(registry), preview: allText(preview), queue: allText(queueRows), compendium: allText(compendium), actorFlags: allText(w.ann.rawFlags()), tagRecord: allText(tagRecord) };
+  const noUsedText = [...CANARIES, "CANARY-USED-TEXT"];
+  assert.deepEqual(findCanaries(before, noUsedText), [], "before the craft");
+  await as(w.gm, () => resolve(w.ann, queued.id, { chat: true }));
+  const made = w.ann.items.find(i => i.getFlag(M, "crafted"));
+  const after = { chat: allText(env.chat), actorFlags: allText(w.ann.rawFlags()), craftedFlag: allText(made.flags[M]), compendium: allText(await as(ann, () => api().compendium.view(w.ann))), definitions: allText(await as(ann, () => api().definitions)) };
+  assert.deepEqual(findCanaries(after, CANARIES), [], "after the craft (the item's own final stats may carry its own numbers, never the tag's tables)");
+});
+
+test("S2a CANARIES: the scan itself fails when a tag effect is planted in a player copy (a scan that cannot fail proves nothing)", async () => {
+  const w = await effectsWorld();
+  const registry = await as(w.annUser, () => api().definitions);
+  const planted = structuredClone(registry.tag.get("venom-tooth"));
+  planted.effectBlocks = { general: { blocks: [{ type: "damage", dice: { byTier: { 4: "5d10" } } }] } };
+  assert.ok(findCanaries({ tag: allText(planted) }, CANARIES).length >= 2);
+  const slot = structuredClone(registry.recipe.get(DAGGER).slots.find(s => s.name === "fang"));
+  slot.needs = { all: ["venom-tooth"] };
+  assert.ok(findCanaries({ slot: allText(slot) }, CANARIES).length >= 1);
+  assert.ok(findTagLeaks([{ data: planted }], {}).length >= 1);
 });

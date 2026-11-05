@@ -68,7 +68,7 @@ export const chatLeaks = messages => messages.filter(m => CHAT_LEAK.test(m.conte
  */
 export function findTagLeaks(payload, { ledgerOnlyRefs = [], neededTags = [] } = {}) {
   const leaks = [];
-  const forbidden = new Set(["needs", "tags", "tagLedger", "ledger", "priority"]);
+  const forbidden = new Set(["needs", "tags", "tagLedger", "ledger", "priority", "effectBlocks", "effectSets", "caps", "tagCaps", "contributions", "capNotes"]);
   const walk = (node, path) => {
     if (node instanceof Map) return walk([...node.values()], path);
     if (Array.isArray(node)) return node.forEach((x, i) => walk(x, `${path}[${i}]`));
@@ -88,4 +88,17 @@ export function findTagLeaks(payload, { ledgerOnlyRefs = [], neededTags = [] } =
   };
   walk(Array.isArray(payload) ? payload.map(r => r?.data ?? r) : payload, "payload");
   return leaks;
+}
+
+/**
+ * The canary scan (Slice 2a): author GM-only tag data with CANARY values nobody would write by accident (a resistance of 37, an ability text, a die count nobody uses), then
+ * prove none of them appears anywhere a player can read. `payloads` is { name: anything JSON-able }; returns the places where a canary showed up.
+ */
+export function findCanaries(payloads, canaries) {
+  const hits = [];
+  for (const [name, payload] of Object.entries(payloads)) {
+    const text = typeof payload === "string" ? payload : JSON.stringify(payload ?? null);
+    for (const canary of canaries) if (text.includes(String(canary))) hits.push(`${name} contains ${canary}`);
+  }
+  return hits;
 }

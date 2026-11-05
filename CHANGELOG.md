@@ -6,7 +6,8 @@
 - Players never receive the ledger, tags, `needs`, tiers or priorities: a tagged slot reaches them as `optional` + `fits` (ids and names of their own items that fit). Hub slot lists use `fits`.
 - New **Item tags** window (scene controls; header button on any Item sheet) and `api.tags`.
 - An ordinary item is matched by `_stats.compendiumSource` first (then `_stats.duplicateSource`, the legacy `flags.core.sourceId`, its own uuid). `tierFloor` is now optional on every recipe slot (default 1).
-- Not yet: tag effects, stacking, caps, nested inheritance, the veto twist, charges.
+- Not yet: nested inheritance, the veto twist, charges.
+- **Tag effects, Slice 2a** (docs/22): a tag can carry effects (the effect builder's blocks, scaled by the ingredient's tier). In a recipe slot that matches by tag, an ingredient's own effects and its tags' effects stack: dice of the same type and size add, resistances add, power takes the highest, abilities all apply, a repeated condition keeps the higher value. A GM-set cap per role clamps the total; a clamp is noted in the GM log only. The Item tags window gets an effects builder and a caps table. Old slots ignore tags.
 
 ## 0.22.0
 

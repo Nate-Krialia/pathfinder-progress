@@ -9,6 +9,7 @@
  *
  * Every error names the pack, the entry, and the field.
  */
+import { setProblems } from "../editor/blocks.js";
 import { COMMISSIONS, SINGLE_SLOT_ROLES } from "../config.js";
 import { DEFINITION_KINDS, DEFINITION_SCHEMAS, LIVE_SCHEMAS } from "./schemas.js";
 import { BUILT_IN_ROLES, baseRoleFor, parseTier, roleSpec, rolesForCategory, slotRoles } from "./roles.js";
@@ -151,7 +152,16 @@ export function loadDefinitions(sources) {
       checkTrack(rec, d.research, { flag, recipeIds, allow: "note", fixedRecipe: d.recipeId });
     }
 
-    if (rec.kind === "tag") { /* the schema is all there is to check */ }
+    if (rec.kind === "tag" && d.effectBlocks) {
+      // Slice 2a: a tag's effects are the same blocks a material has. Every tier from T1 to T5 must make a valid value (an item of any tier can carry the tag).
+      const sets = [["general", d.effectBlocks.general], ...Object.entries(d.effectBlocks.byClass ?? {}).map(([cls, set]) => [cls, set])];
+      for (const [cls, set] of sets) {
+        const path = cls === "general" ? "effectBlocks.general" : `effectBlocks.byClass.${cls}`;
+        if (cls !== "general" && !BUILT_IN_ROLES[cls]) { flag(rec, path, `"${cls}" is not an item class (known: ${Object.keys(BUILT_IN_ROLES).join(", ")})`); continue; }
+        const seen = new Set();
+        for (let t = 1; t <= 5; t++) for (const problem of setProblems(set, cls, t)) if (!seen.has(problem)) { seen.add(problem); flag(rec, path, problem); }
+      }
+    }
 
     if (rec.kind === "recipe") {
       validateRecipe(rec, { customRoles, materials, materialIds, flag, flagAll });

@@ -7,9 +7,10 @@ import { MODULE_ID, TAGS } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { logWorldEvent } from "../audit/store.js";
 import { emptyLedger, entryProblems, ledgerProblems } from "./ledger.js";
-import { getLedger, setCurrentLedger } from "./current.js";
+import { getCaps, getCapsTable, getLedger, setCurrentCaps, setCurrentLedger } from "./current.js";
+import { capsProblems } from "./stack.js";
 
-export { getLedger };
+export { getLedger, getCaps };
 /** Tests and the loader put a ledger in memory directly (and tell the adapter which items are tagged). */
 export function setLedger(ledger) {
   setCurrentLedger(ledger);
@@ -30,6 +31,29 @@ export function loadLedger() {
   setLedger(problems.length ? emptyLedger() : structuredClone(raw));
   return { problems };
 }
+
+/** GM, at ready: read the GM's cap table (a damaged one is reported and ignored: the defaults apply). */
+export function loadCaps() {
+  if (!game.user?.isGM) { setCurrentCaps(null); return { problems: [] }; }
+  const raw = game.settings.get(MODULE_ID, TAGS.capsSetting);
+  if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0)) { setCurrentCaps(null); return { problems: [] }; }
+  const problems = capsProblems(raw);
+  setCurrentCaps(problems.length ? null : structuredClone(raw));
+  return { problems };
+}
+
+/** GM: replace the cap table: { v: 1, roles: { <role>: { <cap>: n } } }. Anything left out keeps its default. Players never see it. */
+export async function setCaps(table) {
+  requireGM("tags.setCaps");
+  const clean = { v: 1, roles: structuredClone(table?.roles ?? {}) };
+  const problems = capsProblems(clean);
+  if (problems.length) throw new TagError(problems.join(" "), { problems });
+  await game.settings.set(MODULE_ID, TAGS.capsSetting, clean);
+  setCurrentCaps(clean);
+  await logWorldEvent("tags: changed the caps");
+  return { table: structuredClone(clean), effective: getCaps() };
+}
+export const capsNow = () => { requireGM("tags.caps"); return { table: structuredClone(getCapsTable()), effective: getCaps() }; };
 
 async function commit(api, next, what) {
   await game.settings.set(MODULE_ID, TAGS.ledgerSetting, next);

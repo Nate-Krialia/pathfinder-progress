@@ -169,6 +169,7 @@ Hooks.once("init", () => {
   game.settings.register(MODULE_ID, EDITOR_SETTING, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   // The tag ledger (Slice 1): item reference -> tags and tier. GM data, read only by the GM client; never sent to a player.
   game.settings.register(MODULE_ID, TAGS.ledgerSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
+  game.settings.register(MODULE_ID, TAGS.capsSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });   // the GM-set cap per role (Slice 2a); GM data
   game.settings.register(MODULE_ID, DISCOVERY.overlaySetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
 
   game.settings.register(MODULE_ID, "extraPacks", {
@@ -423,6 +424,8 @@ Hooks.once("ready", async () => {
       tagsOf: ref => { if (!game.user.isGM) throw new Error("tags.tagsOf: GM only"); return effectiveTags(ref, api.definitions, tagState.getLedger()); },
       tierOf: ref => { if (!game.user.isGM) throw new Error("tags.tierOf: GM only"); return effectiveTier(ref, api.definitions, tagState.getLedger()); },
       fits: (recipeId, slotName, ref) => { if (!game.user.isGM) throw new Error("tags.fits: GM only"); const slot = api.definitions.recipe.get(recipeId)?.slots.find(s => s.name === slotName); return slot ? slotFit(slot, ref, api.definitions, tagState.getLedger()) : { ok: false, reason: "no such slot" }; },
+      caps: () => tagState.capsNow(),
+      setCaps: table => tagState.setCaps(table),
       open: () => openTagger(api)
     },
     /**
@@ -507,7 +510,7 @@ Hooks.once("ready", async () => {
     if (game.user.isGM) ui.notifications.warn(`${MODULE_ID}: ${warning}`);
   }
 
-  try { tagState.loadLedger(); } catch (err) { console.error(`${MODULE_ID} | could not read the tag ledger`, err); }
+  try { tagState.loadLedger(); tagState.loadCaps(); } catch (err) { console.error(`${MODULE_ID} | could not read the tag ledger`, err); }
   try {
     await api.reload();
   } catch (err) {

@@ -286,6 +286,8 @@ export async function resolveCraft(api, actor, action, pending, { chat, degree: 
   if (outcome.made) {
     const base = await adapter.loadItemSource(plan.outputUuid);
     itemData = adapter.buildCraftedItemData(base, plan.description, { ...plan.provenance, crafter: actor.id, degree: outcome.degree }, { name: plan.resultName ?? undefined });
+    // What a GM-set cap cut from the stacked tag effects (Slice 2a) goes to the GM log only: never to chat, never to the players.
+    if (plan.capNotes?.length) gmLog.record({ kind: "craft", actorId: actor.id, actorName: actor.name, text: `${actor.name}'s ${recipe.name}: ${plan.capNotes.join("; ")}`, detail: { recipeId: recipe.id, capNotes: plan.capNotes } });
   }
   const undos = [];
   let created = null;

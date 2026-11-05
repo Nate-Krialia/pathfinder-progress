@@ -2,7 +2,7 @@
  * The role vocabulary: which roles exist per recipe category, and the exact
  * value shape each role accepts. No Foundry globals (testable in Node).
  */
-import { BASE_ROLE_BY_CATEGORY, EFFECT_CONDITIONS, EFFECT_SAVES, EFFECTS, TIER_RANGES, TRAIT_SLUG_PATTERN } from "../config.js";
+import { BASE_ROLE_BY_CATEGORY, EFFECT_CONDITIONS, EFFECT_SAVES, EFFECTS, TAGS, TIER_RANGES, TRAIT_SLUG_PATTERN } from "../config.js";
 import { DAMAGE_TYPES } from "../adapter/pf2e.js";
 import { arr, bool, int, obj, oneOf, optional, scalar, str } from "./schema.js";
 
@@ -41,14 +41,15 @@ export const ROLE_SPECS = {
     dice: str({ pattern: /^[1-9]\d?d(4|6|8|10|12)$/, patternHint: 'must be dice like "1d4" or "2d6"' }),
     type: damageType(),
     persistent: optional(bool()),
-    versus: optional(str({ pattern: TRAIT_SLUG_PATTERN, patternHint: 'must be a trait slug like "fiend"' }))
+    versus: optional(str({ pattern: TRAIT_SLUG_PATTERN, patternHint: 'must be a trait slug like "fiend"' })),
+    bonusType: optional(oneOf(TAGS.bonusTypes))
   }),
   specialAbility: obj({
     title: str(),
     text: str(),
     on: optional(oneOf(["hit", "criticalHit"]))
   }),
-  resistance: obj({ type: damageType(), value: int({ min: 1, max: 50 }) }),
+  resistance: obj({ type: damageType(), value: int({ min: 1, max: 50 }), bonusType: optional(oneOf(TAGS.bonusTypes)) }),
   // v0.22.0: conditions put on the target (GM-only; value absent for a valueless condition). An array: several per item class.
   applyCondition: arr(obj({ condition: oneOf(Object.keys(EFFECT_CONDITIONS)), value: optional(int({ min: 1, max: EFFECTS.maxValue })), save: oneOf(Object.keys(EFFECT_SAVES)) }), { min: 1 }),
   // Stage 2 records this in the item description and flags only.

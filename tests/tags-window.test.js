@@ -114,3 +114,86 @@ test("MODEL: the markup escapes names (a hostile item name cannot inject markup)
   assert.ok(!html.includes("<img src=x"), html);
   assert.match(html, /&lt;img src=x/);
 });
+
+// The effect builder and the caps (Slice 2a) -------------------------------------------------------------------------------
+const makeTag = async (name = "Venom Tooth") => as(getApiGm(), () => api().editor.create("tag", { name, theme: "x" }, { makeItem: false }));
+
+test("BUILDER: open a tag's effects, add a damage block, fill the dice by tier, and save it as an editor patch the registry reads", async () => {
+  const { click, set, text, el } = await windowFor();
+  await makeTag();
+  await click("tab", '[data-tab="tags"]');
+  await click("edit-effects", '[data-tag="venom-tooth"]');
+  assert.match(text(), /What Venom Tooth does/);
+  await click("fx-add", '[data-type="damage"]');
+  await set('[data-field="fx-tiervalue"][data-name="dice"][data-tier="all"]', "1d8");
+  await set('[data-field="fx-field"][data-name="damageType"]', "poison");
+  await set('[data-field="fx-field"][data-name="bonusType"]', "item");
+  assert.match(text(), /1d8/, "the preview shows the dice");
+  await set('[data-field="fx-tiermode"][data-name="dice"]', "table");
+  await set('[data-field="fx-tiervalue"][data-name="dice"][data-tier="5"]', "3d8");
+  assert.ok(el().querySelector('[data-part="fx-preview"]').textContent.includes("3d8"));
+  await click("fx-save");
+  assert.match(text(), /Saved the tag's effects/);
+  const saved = api().definitions.tag.get("venom-tooth").effectBlocks;
+  assert.equal(saved.general.blocks[0].bonusType, "item"); assert.equal(saved.general.blocks[0].dice.byTier[5], "3d8");
+  assert.ok(api().editor.records()["tag:venom-tooth"].fields.effectBlocks, "stored in the world editor, not the packs");
+});
+test("BUILDER: a draft with a problem names it and cannot be saved", async () => {
+  const { click, text } = await windowFor();
+  await makeTag();
+  await click("tab", '[data-tab="tags"]');
+  await click("edit-effects", '[data-tag="venom-tooth"]');
+  await click("fx-class", '[data-cls="armor"]');
+  await click("fx-add", '[data-type="damage"]');
+  assert.match(text(), /armor: Add damage does not apply to armor items|does not apply to armor/);
+  await click("fx-save");
+  assert.equal(api().definitions.tag.get("venom-tooth").effectBlocks, undefined, "nothing was saved");
+  assert.match(text(), /does not apply to armor/);
+});
+test("BUILDER: Any item has no 'Apply a condition' button (it belongs to a weapon, bomb or consumable)", async () => {
+  const { click, el } = await windowFor();
+  await makeTag();
+  await click("tab", '[data-tab="tags"]');
+  await click("edit-effects", '[data-tag="venom-tooth"]');
+  assert.equal(el().querySelector('[data-action="fx-add"][data-type="condition"]'), null);
+  await click("fx-class", '[data-cls="weapon"]');
+  assert.ok(el().querySelector('[data-action="fx-add"][data-type="condition"]'));
+});
+test("BUILDER: Discard throws the draft away; removing every block takes the effects off the tag", async () => {
+  const { click, text } = await windowFor();
+  await makeTag();
+  await api().editor.update("tag:venom-tooth", { effectBlocks: { general: { blocks: [{ type: "damage", dice: { all: "1d4" }, damageType: "fire" }] } } }, { confirmed: true });
+  await click("tab", '[data-tab="tags"]');
+  await click("edit-effects", '[data-tag="venom-tooth"]');
+  await click("fx-remove", '[data-index="0"]');
+  await click("fx-discard");
+  assert.ok(api().definitions.tag.get("venom-tooth").effectBlocks, "discard changed nothing");
+  await click("edit-effects", '[data-tag="venom-tooth"]');
+  await click("fx-remove", '[data-index="0"]');
+  await click("fx-save");
+  assert.match(text(), /Saved the tag's effects/);
+  assert.equal(api().definitions.tag.get("venom-tooth").effectBlocks, undefined);
+});
+test("CAPS: the window shows the defaults, saves a changed cap, refuses a bad one, and goes back to the defaults", async () => {
+  const { click, set, text } = await windowFor();
+  await click("tab", '[data-tab="tags"]');
+  assert.match(text(), /Caps/);
+  await set('[data-field="cap"][data-role="resistance"][data-name="maxValue"]', "20");
+  await click("caps-save");
+  assert.match(text(), /Saved the caps/);
+  assert.equal(env.values.tagCaps.roles.resistance.maxValue, 20);
+  assert.equal(await as(getApiGm(), () => api().tags.caps().effective.resistance.maxValue), 20);
+  await set('[data-field="cap"][data-role="resistance"][data-name="maxValue"]', "0");
+  await click("caps-save");
+  assert.match(text(), /whole number from 1 to 99/);
+  assert.equal(env.values.tagCaps.roles.resistance.maxValue, 20, "the bad value was not saved");
+  await click("caps-reset");
+  assert.match(text(), /back to the defaults/);
+  assert.equal(await as(getApiGm(), () => api().tags.caps().effective.resistance.maxValue), 10);
+});
+test("CAPS: only a GM can read or write them", async () => {
+  const w = await world({ perClientDefinitions: true });
+  await assert.rejects(as(w.annUser, () => api().tags.setCaps({ v: 1, roles: { resistance: { maxValue: 3 } } })), /tags\.setCaps: GM only/);
+  await assert.rejects(as(w.annUser, async () => api().tags.caps()), /tags\.caps: GM only/);
+  assert.equal(env.values.tagCaps, undefined, "nothing was written");
+});
