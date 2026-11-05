@@ -37,6 +37,7 @@ import { submitShare } from "../compendium/share.js";
 import { submitBuild } from "../workshop/build.js";
 import { stationReductions } from "../workshop/rules.js";
 import * as gmLog from "../gm-log.js";
+import * as tagState from "../tags/state.js";
 import { GENERIC_FAILURE, refusal, unwrap } from "./relay.js";
 import { appendAction, assertOwner, callerOf, flagKey, gmIds, giveBack, note, ownerIds, pendingOf, recordReturned, takeEscrow, undoAll, undoThenThrow, whisper } from "./common.js";
 
@@ -283,13 +284,17 @@ export async function resolveCraft(api, actor, action, pending, { chat, degree: 
 
   // Load what the item needs BEFORE writing anything; then write with an undo for each step.
   let itemData = null;
+  let frozenRef = null;
   if (outcome.made) {
     const base = await adapter.loadItemSource(plan.outputUuid);
-    itemData = adapter.buildCraftedItemData(base, plan.description, { ...plan.provenance, crafter: actor.id, degree: outcome.degree }, { name: plan.resultName ?? undefined });
+    // Slice 2b: a craft with tagged slots freezes what it was made of and what it stacked to (GM-only store); the item carries only an opaque id.
+    frozenRef = await tagState.freezeCraft(plan);
+    itemData = adapter.buildCraftedItemData(base, plan.description, { ...plan.provenance, crafter: actor.id, degree: outcome.degree, ...(frozenRef ? { freezeId: frozenRef.id } : {}) }, { name: plan.resultName ?? undefined });
     // What a GM-set cap cut from the stacked tag effects (Slice 2a) goes to the GM log only: never to chat, never to the players.
     if (plan.capNotes?.length) gmLog.record({ kind: "craft", actorId: actor.id, actorName: actor.name, text: `${actor.name}'s ${recipe.name}: ${plan.capNotes.join("; ")}`, detail: { recipeId: recipe.id, capNotes: plan.capNotes } });
   }
   const undos = [];
+  if (frozenRef) undos.push({ what: "the frozen tag result", run: () => frozenRef.undo() });
   let created = null;
   try {
     if (itemData) {

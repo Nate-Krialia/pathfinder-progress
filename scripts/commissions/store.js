@@ -29,6 +29,7 @@ import { ledgerChanges } from "./changes.js";
 import { affordabilityErrors, buildSteps } from "./escrow.js";
 import { addLoan, dropLoan } from "./loans.js";
 import { readCommissions, writeCommissions } from "./list.js";
+import * as tagState from "../tags/state.js";
 
 /** A request that can never succeed as stated (wrong status, missing record). The queue removes these. */
 export class CommissionRefused extends Error {}
@@ -435,10 +436,12 @@ async function craftLocked(api, id, options) {
 
   // ---- The steps that move gold and items ----
   let itemData = null;
+  let frozenRef = null;
   if (outcome.made && patronActor) {
     const base = await adapter.loadItemSource(plan.outputUuid);
+    frozenRef = await tagState.freezeCraft(plan);        // Slice 2b: the tagged part of the craft, frozen on the GM client (the item carries only an opaque id)
     itemData = adapter.buildCraftedItemData(base, plan.description, {
-      ...plan.provenance, crafter: crafter.id, degree: outcome.degree, commission: c.id, patron: patronActor.id
+      ...plan.provenance, crafter: crafter.id, degree: outcome.degree, commission: c.id, patron: patronActor.id, ...(frozenRef ? { freezeId: frozenRef.id } : {})
     }, { name: plan.resultName ?? undefined });
   }
   const supplier = c.materialsFrom === "npc" ? { kind: "npc" } : { kind: c.materialsFrom, actorId: ready.ctx.supplierActor.id };
@@ -462,6 +465,7 @@ async function craftLocked(api, id, options) {
   // ---- Writes ----
   const actors = new Map([[crafter.id, crafter], ...(patronActor ? [[patronActor.id, patronActor]] : [])]);
   const undos = await applySteps(steps, actors);
+  if (frozenRef) undos.push({ what: "the frozen tag result", run: () => frozenRef.undo() });
   try {
     await withRecord(next, () => commitCrafter(crafter, { formulas, projects, extra: options.extraUpdate, note: `commission ${c.id}` }));
   } catch (error) {

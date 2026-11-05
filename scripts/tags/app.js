@@ -28,10 +28,10 @@ export function build() {
         "clear-slot"(event, target) { return this.#saveSlot(target.dataset.slot, true); },
         "create-tag"() { return this.#createTag(); },
         "save-priority"(event, target) { return this.#savePriority(target.dataset.tag); },
-        "edit-effects"(event, target) { const tag = this.api.definitions.tag.get(target.dataset.tag); this.ui.fx = { tagId: tag.id, draft: structuredClone(tag.effectBlocks ?? {}), cls: "general", message: "" }; return this.render(); },
+        "edit-effects"(event, target) { const tag = this.api.definitions.tag.get(target.dataset.tag); this.ui.fx = { tagId: tag.id, draft: structuredClone(tag.effectBlocks ?? {}), cls: "general", kind: "", message: "" }; return this.render(); },
         "fx-class"(event, target) { this.ui.fx.cls = target.dataset.cls; return this.render(); },
-        "fx-add"(event, target) { return this.#fx(d => fxEdit.addBlock(d, target.dataset.cls, target.dataset.type)); },
-        "fx-remove"(event, target) { return this.#fx(d => fxEdit.removeBlock(d, target.dataset.cls, Number(target.dataset.index))); },
+        "fx-add"(event, target) { return this.#fx(d => fxEdit.addBlock(d, target.dataset.cls, target.dataset.type, this.ui.fx.kind ?? "")); },
+        "fx-remove"(event, target) { return this.#fx(d => fxEdit.removeBlock(d, target.dataset.cls, Number(target.dataset.index), this.ui.fx.kind ?? "")); },
         "fx-discard"() { this.ui.fx = null; return this.render(); },
         "fx-save"() { return this.#saveFx(); },
         "caps-save"() { return this.#saveCaps(); },
@@ -42,7 +42,7 @@ export function build() {
     constructor(api, options = {}) {
       super(options);
       this.api = api;
-      this.ui = { layout: "wide", tab: "items", draft: blankDraft(), recipeId: "", slotDrafts: {}, newTag: { name: "", theme: "" }, priorities: {}, capsDraft: {}, fx: null, message: "" };
+      this.ui = { layout: "wide", tab: "items", draft: blankDraft(), recipeId: "", slotDrafts: {}, newTag: { name: "", theme: "" }, priorities: {}, capsDraft: {}, slotKinds: {}, fx: null, message: "" };
     }
     #wired = false;
     #observer = null;
@@ -122,7 +122,9 @@ export function build() {
         const recipe = this.api.definitions.recipe.get(this.ui.recipeId);
         const current = recipe.slots.find(s => s.name === slotName);
         const needs = clear ? null : { all: draft.all ?? current.needs?.all ?? [], optional: draft.optional ?? Boolean(current.needs?.optional) };
-        await this.api.tags.setSlotNeeds(this.ui.recipeId, slotName, needs);
+        const kindOnly = !clear && !this.ui.slotDrafts[slotName] && this.ui.slotKinds && slotName in this.ui.slotKinds;     // only the kind was changed: leave the slot's needs alone
+        if (!kindOnly) await this.api.tags.setSlotNeeds(this.ui.recipeId, slotName, needs);
+        if (this.ui.slotKinds && slotName in this.ui.slotKinds) { await this.api.tags.setSlotKind(this.ui.recipeId, slotName, this.ui.slotKinds[slotName]); delete this.ui.slotKinds[slotName]; }
         delete this.ui.slotDrafts[slotName];
         return clear ? `${slotName} goes back to the tier rule.` : `Saved ${slotName}.`;
       });
@@ -167,12 +169,14 @@ export function build() {
       if (f === "new-tag-name") { this.ui.newTag.name = el.value; return undefined; }
       if (f === "new-tag-theme") { this.ui.newTag.theme = el.value; return undefined; }
       if (f === "priority") { this.ui.priorities[el.dataset.tag] = el.value; return undefined; }
+      if (f === "slot-kind") { (this.ui.slotKinds ??= {})[el.dataset.slot] = el.value; return undefined; }
+      if (f === "fx-kind" && this.ui.fx) { this.ui.fx.kind = el.value.trim(); return this.render(); }
       if (f === "cap") { (this.ui.capsDraft[el.dataset.role] ??= {})[el.dataset.name] = el.value; return undefined; }
       const fx = this.ui.fx, cls = el.dataset.cls, index = Number(el.dataset.index);
-      if (fx && f === "fx-power") { fx.draft = fxEdit.setPower(fx.draft, cls, el.value); return this.render(); }
-      if (fx && f === "fx-field") { fx.draft = fxEdit.setField(fx.draft, cls, index, el.dataset.name, el.type === "checkbox" ? el.checked : el.value); return this.render(); }
-      if (fx && f === "fx-tiermode") { fx.draft = fxEdit.setTierMode(fx.draft, cls, index, el.dataset.name, el.value); return this.render(); }
-      if (fx && f === "fx-tiervalue") { fx.draft = fxEdit.setTierValue(fx.draft, cls, index, el.dataset.name, el.dataset.tier === "all" ? "all" : Number(el.dataset.tier), el.value); return this.render(); }
+      if (fx && f === "fx-power") { fx.draft = fxEdit.setPower(fx.draft, cls, el.value, fx.kind ?? ""); return this.render(); }
+      if (fx && f === "fx-field") { fx.draft = fxEdit.setField(fx.draft, cls, index, el.dataset.name, el.type === "checkbox" ? el.checked : el.value, fx.kind ?? ""); return this.render(); }
+      if (fx && f === "fx-tiermode") { fx.draft = fxEdit.setTierMode(fx.draft, cls, index, el.dataset.name, el.value, fx.kind ?? ""); return this.render(); }
+      if (fx && f === "fx-tiervalue") { fx.draft = fxEdit.setTierValue(fx.draft, cls, index, el.dataset.name, el.dataset.tier === "all" ? "all" : Number(el.dataset.tier), el.value, fx.kind ?? ""); return this.render(); }
       return undefined;
     }
 

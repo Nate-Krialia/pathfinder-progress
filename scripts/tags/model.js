@@ -61,14 +61,16 @@ function itemsTab(m) {
 function slotsTab(m) {
   const picker = `<label>Recipe <select data-field="recipe">${opt("", "Pick a recipe…", !m.recipe)}${m.recipes.map(r => opt(r.id, r.name, m.recipe?.id === r.id)).join("")}</select></label>`;
   if (!m.recipe) return picker;
+  const hint = '<p class="pfp-hint" id="kind-hint">A kind is a shared key for what sort of part a slot is (blade, decoration...). A tag can do different things in different kinds. Left empty, the kind is the slot\'s own name.</p>';
   const rows = m.recipe.slots.map(slot => {
     const draft = m.ui.slotDrafts?.[slot.name] ?? { all: slot.needs?.all ?? [], optional: Boolean(slot.needs?.optional) };
     return `<fieldset data-part="slot" data-slot="${esc(slot.name)}"><legend>${esc(slot.name)} <span class="pfp-badge">tier ${esc(slot.tierFloor)}+</span> <span class="pfp-badge">${slot.needs ? "by tag" : "any material"}</span></legend>
       <div role="group" aria-label="Tags the ${esc(slot.name)} slot needs">${m.tags.map(t => `<label class="pfp-check"><input type="checkbox" data-field="slot-tag" data-slot="${esc(slot.name)}" data-tag="${esc(t.id)}"${draft.all.includes(t.id) ? " checked" : ""}> ${esc(t.name)}</label>`).join(" ") || "<em>No tags yet.</em>"}</div>
+      <label>Kind <input type="text" data-field="slot-kind" data-slot="${esc(slot.name)}" value="${esc(m.ui.slotKinds?.[slot.name] ?? slot.kind ?? "")}" placeholder="${esc(slot.name)}" aria-describedby="kind-hint"></label>
       <label class="pfp-check"><input type="checkbox" data-field="slot-optional" data-slot="${esc(slot.name)}"${draft.optional ? " checked" : ""}> May stay empty</label>
       <button type="button" data-action="save-slot" data-slot="${esc(slot.name)}">Save this slot</button>${slot.needs ? `<button type="button" data-action="clear-slot" data-slot="${esc(slot.name)}">Back to the tier rule</button>` : ""}</fieldset>`;
   }).join("");
-  return picker + rows;
+  return picker + hint + rows;
 }
 
 function tagsTab(m) {
@@ -114,13 +116,14 @@ function blockHtml(b, cls, i) {
 function fxPanel(m) {
   const fx = m.ui.fx, tag = m.tags.find(t => t.id === fx.tagId);
   if (!tag) return "";
-  const set = fxSet(fx.draft, fx.cls);
+  const set = fxSet(fx.draft, fx.cls, fx.kind ?? "");
   const problems = fxProblems(fx.draft);
   const classes = CLASSES.map(c => `<button type="button" data-action="fx-class" data-cls="${c}" aria-pressed="${fx.cls === c}">${c === "general" ? "Any item" : c}</button>`).join(" ");
   const adds = BLOCK_TYPES.filter(t => fx.cls !== "general" || t !== "condition").map(t => `<button type="button" data-action="fx-add" data-cls="${esc(fx.cls)}" data-type="${t}">Add: ${esc(BLOCK_LABELS[t])}</button>`).join(" ");
-  const prev = fxPreview(tag.name, fx.draft, fx.cls).map(p => `<li><strong>Tier ${p.tier}</strong> ${p.lines.length ? p.lines.map(esc).join("; ") : "<em>nothing</em>"}</li>`).join("");
+  const prev = fxPreview(tag.name, fx.draft, fx.cls, fx.kind ?? "").map(p => `<li><strong>Tier ${p.tier}</strong> ${p.lines.length ? p.lines.map(esc).join("; ") : "<em>nothing</em>"}</li>`).join("");
   return `<fieldset data-part="fx"><legend>What ${esc(tag.name)} does</legend>
     <p class="pfp-hint">Applies only in a recipe slot that matches by tag, at the tier of the ITEM that carries the tag, and only for the roles that slot drives. Amounts from different ingredients are added up, then the caps below clamp them. Players never see any of this.</p>
+    <label>Only in slots of kind <input type="text" data-field="fx-kind" value="${esc(fx.kind ?? "")}" placeholder="(any slot)"></label>
     <div role="group" aria-label="Item class">${classes}</div>
     <label>Base power tier ${sel("fx-power", set.power ?? "", [["", "none"], ...[1, 2, 3, 4, 5].map(n => [n, `Tier ${n}`])], `data-cls="${esc(fx.cls)}"`)}</label>
     ${(set.blocks ?? []).map((b, i) => blockHtml(b, fx.cls, i)).join("")}

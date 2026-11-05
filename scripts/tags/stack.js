@@ -18,6 +18,9 @@ import { EFFECTS, TAGS } from "../config.js";
 
 const DIE = /^(\d+)d(\d+)$/;
 const tierOf = ref => Number(String(ref).slice(1));
+/** Who is kept first when a cap cuts abilities or conditions: the HIGHEST tier, then the higher tag priority, then alphabetical (by tag, else by ingredient), then the order given. */
+const rank = (a, b) => (b.from?.tier ?? 0) - (a.from?.tier ?? 0) || (b.from?.priority ?? 0) - (a.from?.priority ?? 0) || String(a.from?.tagName ?? a.from?.name ?? "").localeCompare(String(b.from?.tagName ?? b.from?.name ?? ""));
+const ranked = items => items.map((item, order) => ({ item, order })).sort((x, y) => rank(x.item, y.item) || x.order - y.order).map(x => x.item);
 const names = list => [...new Set(list.filter(Boolean))].join(" + ");
 
 /** A bonus type for a group: the one every contributor named, else untyped (undefined). */
@@ -99,18 +102,19 @@ function stackResistance(items, cap, notes) {
 
 function stackAbilities(items, cap, notes) {
   const seen = new Set(), out = [];
-  for (const { value } of items) { const key = `${value.title}|${value.on ?? "hit"}`; if (seen.has(key)) continue; seen.add(key); out.push({ ...value }); }
+  for (const { value } of ranked(items)) { const key = `${value.title}|${value.on ?? "hit"}`; if (seen.has(key)) continue; seen.add(key); out.push({ ...value }); }
   if (cap?.maxCount !== undefined && out.length > cap.maxCount) { notes.push(`capped specialAbility: ${out.length} abilities became ${cap.maxCount}`); return out.slice(0, cap.maxCount); }
   return out;
 }
 
 function stackConditions(items, cap, notes) {
   const byCondition = new Map();
-  for (const { value } of items) for (const e of Array.isArray(value) ? value : []) {
+  for (const { value, from } of ranked(items)) for (const e of Array.isArray(value) ? value : []) {
     const had = byCondition.get(e.condition);
-    if (!had || (e.value ?? 0) > (had.value ?? 0)) byCondition.set(e.condition, { ...e });
+    if (!had || (e.value ?? 0) > (had.entry.value ?? 0)) byCondition.set(e.condition, { entry: { ...e }, from });
   }
-  let out = [...byCondition.values()];
+  // the entries come out best contributor first, so a count cap keeps the highest-tier conditions
+  let out = [...byCondition.values()].sort((x, y) => rank({ from: x.from }, { from: y.from })).map(x => x.entry);
   if (cap?.maxValue !== undefined) out = out.map(e => { if (e.value !== undefined && e.value > cap.maxValue) { notes.push(`capped applyCondition (${e.condition}): value ${e.value} became ${cap.maxValue}`); return { ...e, value: cap.maxValue }; } return e; });
   if (cap?.maxCount !== undefined && out.length > cap.maxCount) { notes.push(`capped applyCondition: ${out.length} conditions became ${cap.maxCount}`); out = out.slice(0, cap.maxCount); }
   return out;

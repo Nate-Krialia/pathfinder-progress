@@ -12,7 +12,7 @@ import { resolveMaterialEffect } from "../data/resolver.js";
 import { isUuid } from "../data/outputRefs.js";
 import { feeForStation } from "../stations/fees.js";
 import { plainLines } from "../effects/plain.js";
-import { hasNeeds, isOptionalSlot, slotFit, standInMaterial } from "../tags/ledger.js";
+import { effectiveTags, effectiveTier, hasNeeds, isOptionalSlot, itemName, slotFit, standInMaterial } from "../tags/ledger.js";
 import { getCaps, getLedger } from "../tags/current.js";
 import { stackedCraft, stackingRolesFor } from "../tags/contributions.js";
 
@@ -140,6 +140,7 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
 
   // Slice 2a: what the TAGGED slots contribute (the materials' own effects and every tag's, each at its contributor's tier), stacked and capped. Old slots never read a tag.
   let capNotes = [];
+  let frozen = null;
   if (!mechanical && !errors.length) {
     const stacked = stackedCraft({ recipe, uses: uses.map(u => ({ slot: u.slot, ref: u.materialId })), registry, ledger, caps, baseRole, resolveEffects: resolveSlotEffects });
     const source = { stacked: true };
@@ -150,6 +151,15 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
     for (const e of r.resistance ?? []) description.resistances.push({ ...e, source });
     if (r.applyCondition?.length) for (const plain of plainLines(r.applyCondition)) description.conditions.push({ plain, source });
     capNotes = stacked.notes;
+    // Slice 2b: what the tagged slots were made of and what they stacked to, for the GM-only frozen store (written when the craft resolves, never read from here by a player).
+    if (stacked.taggedSlots.size) {
+      frozen = {
+        recipeId: recipe.id,
+        uses: uses.filter(u => stacked.taggedSlots.has(u.slot)).map(u => ({ slot: u.slot, ref: u.materialId, name: itemName(u.materialId, registry, ledger), tier: effectiveTier(u.materialId, registry, ledger), tags: effectiveTags(u.materialId, registry, ledger) })),
+        roles: stacked.roles,
+        contributions: stacked.contributions.map(c => ({ role: c.role, value: c.value, from: c.from }))
+      };
+    }
   }
 
   if (mechanical) {
@@ -185,6 +195,7 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       outputUuid,
       uses,
       description,
+      frozen,             // GM-only: the tagged part of the craft, to be frozen when it resolves (tags/frozen.js)
       capNotes,           // GM-only text about what a cap cut (never shown to a player; the craft logs it to the GM log)
       station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null,
       // A workshop the party built charges no station fee; every other station charges its tier's fee.

@@ -197,3 +197,46 @@ test("CAPS: only a GM can read or write them", async () => {
   await assert.rejects(as(w.annUser, async () => api().tags.caps()), /tags\.caps: GM only/);
   assert.equal(env.values.tagCaps, undefined, "nothing was written");
 });
+
+// Slice 2b: slot kinds, the kind scope of the effects builder, and recipe overrides ----------------------------------------------------
+test("KIND (window): set a slot's kind alone, without touching its needs; the kind scope of the builder writes a bySlot set", async () => {
+  const { click, set, text } = await windowFor();
+  await makeTag();
+  await click("tab", '[data-tab="slots"]');
+  await set('[data-field="recipe"]', DAGGER);
+  await set('[data-field="slot-kind"][data-slot="fang"]', "decoration");
+  await click("save-slot", '[data-slot="fang"]');
+  assert.match(text(), /Saved fang/);
+  const fang = api().definitions.recipe.get(DAGGER).slots.find(s => s.name === "fang");
+  assert.equal(fang.kind, "decoration"); assert.equal(fang.needs, undefined, "the needs were left alone");
+  await click("tab", '[data-tab="tags"]');
+  await click("edit-effects", '[data-tag="venom-tooth"]');
+  await set('[data-field="fx-kind"]', "decoration");
+  await click("fx-add", '[data-type="damage"]');
+  await set('[data-field="fx-tiervalue"][data-name="dice"][data-tier="all"]', "1d8");
+  assert.match(text(), /1d8/);
+  await click("fx-save");
+  const saved = api().definitions.tag.get("venom-tooth").effectBlocks;
+  assert.equal(saved.bySlot.decoration.general.blocks[0].dice.all, "1d8"); assert.equal(saved.general, undefined, "not written as an any-slot set");
+});
+test("KIND (api): setSlotKind and setTagOverride are GM only, validated, and revertable", async () => {
+  const w = await world({ perClientDefinitions: true });
+  api().baseSources = seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }));
+  api().editorLeftovers = [];
+  await as(w.gm, () => api().editor.create("tag", { name: "Venom Tooth", theme: "x" }, { makeItem: false }));
+  await assert.rejects(as(w.annUser, () => api().tags.setSlotKind(DAGGER, "fang", "decoration")), /tags\.setSlotKind: GM only/);
+  await assert.rejects(as(w.annUser, () => api().tags.setTagOverride(DAGGER, "venom-tooth", "fang", { blocks: [] })), /tags\.setTagOverride: GM only/);
+  await as(w.gm, async () => {
+    await assert.rejects(api().tags.setSlotKind(DAGGER, "fang", "Bad Kind!"), /lowercase letters/);
+    await assert.rejects(api().tags.setSlotKind(DAGGER, "nope", "x"), /has no slot "nope"/);
+    assert.equal((await api().tags.setSlotKind(DAGGER, "fang", "decoration")).kind, "decoration");
+    await assert.rejects(api().tags.setTagOverride(DAGGER, "ghost", "decoration", { blocks: [{ type: "damage", dice: { all: "1d4" }, damageType: "fire" }] }), /unknown tag "ghost"/);
+    await assert.rejects(api().tags.setTagOverride(DAGGER, "venom-tooth", "nowhere", { blocks: [{ type: "damage", dice: { all: "1d4" }, damageType: "fire" }] }), /not a slot kind of this recipe/);
+    const list = await api().tags.setTagOverride(DAGGER, "venom-tooth", "decoration", { blocks: [{ type: "damage", dice: { all: "2d6" }, damageType: "fire" }] });
+    assert.equal(list.length, 1);
+    assert.equal((await api().tags.setTagOverride(DAGGER, "venom-tooth", "decoration", { blocks: [{ type: "damage", dice: { all: "3d6" }, damageType: "fire" }] })).length, 1, "the same pair is replaced, not doubled");
+    assert.deepEqual(await api().tags.removeTagOverride(DAGGER, "venom-tooth", "decoration"), []);
+    assert.equal(api().definitions.recipe.get(DAGGER).tagOverrides, undefined);
+    assert.equal((await api().tags.setSlotKind(DAGGER, "fang", null)).kind, undefined, "back to the slot's own name");
+  });
+});

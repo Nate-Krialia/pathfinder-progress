@@ -153,10 +153,15 @@ export function loadDefinitions(sources) {
     }
 
     if (rec.kind === "tag" && d.effectBlocks) {
-      // Slice 2a: a tag's effects are the same blocks a material has. Every tier from T1 to T5 must make a valid value (an item of any tier can carry the tag).
-      const sets = [["general", d.effectBlocks.general], ...Object.entries(d.effectBlocks.byClass ?? {}).map(([cls, set]) => [cls, set])];
-      for (const [cls, set] of sets) {
-        const path = cls === "general" ? "effectBlocks.general" : `effectBlocks.byClass.${cls}`;
+      // Slice 2a/2b: a tag's effects are the same blocks a material has, for any item, per item class, per slot kind, per kind and class. Every tier T1 to T5 must make a valid value.
+      const e = d.effectBlocks;
+      const sets = [["general", "effectBlocks.general", e.general], ...Object.entries(e.byClass ?? {}).map(([cls, set]) => [cls, `effectBlocks.byClass.${cls}`, set])];
+      for (const [kind, k] of Object.entries(e.bySlot ?? {})) {
+        sets.push(["general", `effectBlocks.bySlot.${kind}.general`, k.general]);
+        for (const [cls, set] of Object.entries(k.byClass ?? {})) sets.push([cls, `effectBlocks.bySlot.${kind}.byClass.${cls}`, set]);
+      }
+      for (const [cls, path, set] of sets) {
+        if (!set) continue;
         if (cls !== "general" && !BUILT_IN_ROLES[cls]) { flag(rec, path, `"${cls}" is not an item class (known: ${Object.keys(BUILT_IN_ROLES).join(", ")})`); continue; }
         const seen = new Set();
         for (let t = 1; t <= 5; t++) for (const problem of setProblems(set, cls, t)) if (!seen.has(problem)) { seen.add(problem); flag(rec, path, problem); }
@@ -166,6 +171,18 @@ export function loadDefinitions(sources) {
     if (rec.kind === "recipe") {
       validateRecipe(rec, { customRoles, materials, materialIds, flag, flagAll });
       // A slot that matches by tags (Slice 1) may only name tags that exist.
+      // Slice 2b: this recipe's override of what a tag does in one slot KIND: the tag and the kind must exist, once each, and every tier must make a valid value.
+      const kinds = new Set(d.slots.map(sl => sl.kind ?? sl.name));
+      const seenOverride = new Set();
+      (d.tagOverrides ?? []).forEach((o, i) => {
+        const at = `tagOverrides[${i}]`;
+        if (!tagIds.has(o.tag)) flag(rec, `${at}.tag`, `refers to unknown tag "${o.tag}" (known: ${[...tagIds].join(", ") || "none"})`);
+        if (!kinds.has(o.slot)) flag(rec, `${at}.slot`, `"${o.slot}" is not a slot kind of this recipe (kinds: ${[...kinds].join(", ")})`);
+        if (seenOverride.has(`${o.tag}|${o.slot}`)) flag(rec, at, `overrides ${o.tag} in "${o.slot}" twice`);
+        seenOverride.add(`${o.tag}|${o.slot}`);
+        const seen = new Set();
+        for (let t = 1; t <= 5; t++) for (const problem of setProblems({ power: o.power, blocks: o.blocks }, d.category, t)) if (!seen.has(problem)) { seen.add(problem); flag(rec, at, problem); }
+      });
       d.slots.forEach((slot, i) => {
         for (const t of slot.needs?.all ?? []) if (!tagIds.has(t)) flag(rec, `slots[${i}].needs.all`, `refers to unknown tag "${t}" (known: ${[...tagIds].join(", ") || "none"}); define it with a "tag" definition`);
         const dup = (slot.needs?.all ?? []).find((t, j, all) => all.indexOf(t) !== j);

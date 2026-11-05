@@ -60,3 +60,29 @@ The crafted item shows its own final stacked numbers, like any material today. T
 
 ## UNVERIFIED
 How PF2e treats several `DamageDice` rule elements from one item (the mechanism is the existing one); the use card applying stacked conditions on a real canvas (the S2a gate); typed PF2e bonuses (nothing is emitted yet).
+
+---
+
+# Slice 2b: slot kinds, recipe overrides, frozen craft results, clamp order (decisions from Nate, 2026-11)
+
+## Slot kind
+A recipe slot may carry `kind` (a lowercase key such as `blade` or `decoration`); left out, the kind is the slot's own name. A tag's `effectBlocks` gain `bySlot: { <kind>: { general?, byClass? } }`. For one tag, one item class and one slot kind the sets are layered, MOST SPECIFIC FIRST, with ONE WINNER PER ROLE: the recipe's own override, then `bySlot[kind].byClass[class]`, `bySlot[kind].general`, `byClass[class]`, `general` (`scripts/tags/contributions.js` `tagRoles`). Old recipes have no kinds and no `bySlot`, so nothing changes for them. Players never receive a slot's `kind` (the player copy lists its fields by name).
+
+## Recipe override per (tag, slot kind)
+`recipe.tagOverrides: [{ tag, slot: <kind>, power?, blocks }]` (the effect builder's blocks): this recipe's own word on what that tag does in that slot kind. It beats the tag's own sets for the roles it names; a role it does not name falls through to the tag's sets. Validated at load: the tag exists, the kind is one of the recipe's slot kinds, a (tag, kind) pair once, every tier T1 to T5 makes a valid value. GM API: `api.tags.setSlotKind`, `setTagOverride`, `removeTagOverride` (editor patches of the recipe: validated, revertable). There is no window for overrides yet; the tag window sets a slot's kind and a tag's per-kind sets.
+
+## Frozen craft results
+When a craft with at least one TAGGED slot resolves (the queue and the commission path), the GM client writes `{ recipeId, at, uses[{slot, ref, name, tier, tags}], roles, contributions }` to the GM-only world setting `tagCrafted`, keyed by an OPAQUE id (`freezeId`) that the crafted item carries in its `crafted` flag (nothing else about tags or tiers is on the item). The effects engine (`effects/resolve.js` `effectsOf`) reads the conditions from that record: editing a tag, the ledger or the caps afterwards does not change an item that exists. The write is undone with the rest of the craft if the item cannot be created.
+- **Cleanup:** the active GM client removes a record when the last item carrying its id is deleted (hook `deleteItem`). `api.tags.pruneFrozen()` (GM, by hand) removes records no item in the world carries; it searches actors and world items, not unlinked token actors, so it is never automatic.
+- **A missing record** (cleaned up, a restored world, an edited setting): the item's tagged conditions are skipped, nothing throws, and the GM log says so once per id.
+- **Items made before this slice** have no `freezeId` and keep being worked out live from the current registry, ledger and caps.
+- Crafts with no tagged slot are not frozen and get no id.
+
+## Clamp order (a change from 2a)
+When a cap cuts abilities or conditions, the contributors kept first are the HIGHEST tier, then the higher tag priority, then alphabetical (by tag name, else ingredient name), then slot order. A repeated condition is ranked by the contributor whose value won. The dice rule is unchanged: the biggest die is kept first.
+
+## Players
+Slot kinds, `tagOverrides`, `bySlot` sets, the frozen store and its contents are GM-only. `findTagLeaks` and `findCanaries` cover them; the canary test puts odd values in a kind, an override and a tier table and finds none in a player's definitions, preview, queue rows, Compendium, actor flags, item flags or chat.
+
+## UNVERIFIED
+That Foundry fires `deleteItem` for an item deleted along with its actor (the prune is the safety net); `foundry.utils.randomID` as the freeze id on the real client (the fake returns a short id); the commission path was changed the same way as the queue path but is covered by the same freeze helper, not by a commission-specific test.

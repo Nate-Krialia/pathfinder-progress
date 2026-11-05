@@ -52,6 +52,8 @@ const effectBlock = variant("type", {
 });
 const effectSet = obj({ power: optional(int({ min: 1, max: 5 })), blocks: arr(effectBlock), extra: optional(record(any())) });
 const effectBlocks = obj({ general: optional(effectSet), byClass: optional(record(effectSet)) });
+// A TAG's effects (Slice 2a/2b): a material's shape plus `bySlot`: the same sets for one slot KIND (blade, decoration...). Most specific wins per role: slot+class, slot, class, any.
+const tagEffectBlocks = obj({ general: optional(effectSet), byClass: optional(record(effectSet)), bySlot: optional(record(obj({ general: optional(effectSet), byClass: optional(record(effectSet)) }))) });
 const bulkValue = str({ pattern: /^(L|[1-9]\d?)$/, patternHint: 'must be "L" (light) or a whole number' });
 // A per-recipe override the editor writes on the MATERIAL side; the loader copies it onto that recipe's overrides (the recipe schema is unchanged).
 const recipeOverride = obj({ recipeId: idField(), slot: str(), block: effectBlock });
@@ -87,7 +89,7 @@ const material = obj({
 // `priority` (Slice 1 of the tag system) is a GM-set number that later breaks ties between equal-tier tags when tags are passed up in nested crafts. Stored and edited only for now; GM-only (a player copy drops it).
 const tagDef = obj({ kind: kind("tag"), id: idField(), name: str(), theme: str(), worksWith: optional(str()), priority: optional(int({ min: -1000, max: 1000 })),
   // Slice 2a: what the tag DOES when an item carrying it fills a tagged slot, scaled by that item's tier. The same builder blocks as a material (general + per item class). GM-only.
-  effectBlocks: optional(effectBlocks) });
+  effectBlocks: optional(tagEffectBlocks) });
 
 // A note: a Foundry item (flag `note`) that points at a formula. With a research track it offers a lead; without one it does nothing.
 const noteDef = obj({ kind: kind("note"), id: idField(), name: str(), recipeId: idField(), research: optional(track), img: optional(str()), description: optional(str()), bulk: optional(bulkValue), label: optional(str()), retired: optional(bool()), preset: optional(oneOf(["plan", "research"])) });
@@ -141,6 +143,8 @@ const recipe = obj({
     tierFloor: optional(tier(TIER_RANGES.material)),
     qty: int({ min: 1 }),
     lossChance: optional(int({ min: 0, max: 100 })),
+    // Slice 2b: a shared key for "what kind of part this is" (blade, decoration...). A tag's effects can differ by kind. Left out it is the slot's own name.
+    kind: optional(idField()),
     // Slice 1 of the tag system: the slot takes any item carrying ALL these tags (and at or above tierFloor). `optional` slots may stay empty. A slot without `needs` is exactly as before.
     needs: optional(obj({ all: arr(idField(), { min: 1 }), optional: optional(bool()) }))
   }), {
@@ -155,6 +159,8 @@ const recipe = obj({
   }),
   // `role` is only needed when the slot drives more than one role.
   overrides: optional(arr(obj({ materialId: idField(), slot: str(), role: optional(str()), effect: any() }))),
+  // Slice 2b: this recipe's own word on what a TAG does in one slot KIND of this recipe (beats the tag's own sets for that slot). Same blocks as a tag's set.
+  tagOverrides: optional(arr(obj({ tag: idField(), slot: idField(), power: optional(int({ min: 1, max: 5 })), blocks: arr(effectBlock) }))),
   stationCategory: str(),
   stationTierMin: tier(TIER_RANGES.station),
   skillWhitelist: arr(str(), { min: 1 }),

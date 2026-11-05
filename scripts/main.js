@@ -169,6 +169,7 @@ Hooks.once("init", () => {
   game.settings.register(MODULE_ID, EDITOR_SETTING, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   // The tag ledger (Slice 1): item reference -> tags and tier. GM data, read only by the GM client; never sent to a player.
   game.settings.register(MODULE_ID, TAGS.ledgerSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
+  game.settings.register(MODULE_ID, TAGS.frozenSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });   // what each crafted item was made of (Slice 2b); GM data
   game.settings.register(MODULE_ID, TAGS.capsSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });   // the GM-set cap per role (Slice 2a); GM data
   game.settings.register(MODULE_ID, DISCOVERY.overlaySetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
 
@@ -424,6 +425,11 @@ Hooks.once("ready", async () => {
       tagsOf: ref => { if (!game.user.isGM) throw new Error("tags.tagsOf: GM only"); return effectiveTags(ref, api.definitions, tagState.getLedger()); },
       tierOf: ref => { if (!game.user.isGM) throw new Error("tags.tierOf: GM only"); return effectiveTier(ref, api.definitions, tagState.getLedger()); },
       fits: (recipeId, slotName, ref) => { if (!game.user.isGM) throw new Error("tags.fits: GM only"); const slot = api.definitions.recipe.get(recipeId)?.slots.find(s => s.name === slotName); return slot ? slotFit(slot, ref, api.definitions, tagState.getLedger()) : { ok: false, reason: "no such slot" }; },
+      setSlotKind: (recipeId, slotName, kind) => tagState.setSlotKind(api, recipeId, slotName, kind),
+      setTagOverride: (recipeId, tagId, slotKind, set) => tagState.setTagOverride(api, recipeId, tagId, slotKind, set),
+      removeTagOverride: (recipeId, tagId, slotKind) => tagState.setTagOverride(api, recipeId, tagId, slotKind, null),
+      frozen: freezeId => tagState.frozenResult(freezeId),
+      pruneFrozen: () => tagState.pruneFrozen(),
       caps: () => tagState.capsNow(),
       setCaps: table => tagState.setCaps(table),
       open: () => openTagger(api)
@@ -496,6 +502,7 @@ Hooks.once("ready", async () => {
   const effects = createEffects({ adapter: pf2eEffects, registry: () => api.definitions, chat: { create: data => ChatMessage.create(data), get: id => game.messages.get(id), gmIds }, log: gmLog.record, levelDC: adapter.levelDC, notify: ui.notifications });
   const gmOnly = fn => (...args) => { if (!game.user.isGM) throw new Error("effects: GM only"); return fn(...args); };
   api.effects = { handle: gmOnly(m => effects.handle(m)), applyCard: gmOnly((id, options) => effects.applyCard(id, options)), skipCard: gmOnly(id => effects.skipCard(id)), adapter: pf2eEffects };
+  tagState.installFrozenHooks();
   installEffectsHooks(effects, { isActiveGM: () => game.user.isGM && game.users.activeGM?.id === game.user.id, isGM: () => game.user.isGM });
   queueStore.bind(api);
   workshop.bind(api);
@@ -510,7 +517,7 @@ Hooks.once("ready", async () => {
     if (game.user.isGM) ui.notifications.warn(`${MODULE_ID}: ${warning}`);
   }
 
-  try { tagState.loadLedger(); tagState.loadCaps(); } catch (err) { console.error(`${MODULE_ID} | could not read the tag ledger`, err); }
+  try { tagState.loadLedger(); tagState.loadCaps(); tagState.loadFrozen(); } catch (err) { console.error(`${MODULE_ID} | could not read the tag ledger`, err); }
   try {
     await api.reload();
   } catch (err) {
