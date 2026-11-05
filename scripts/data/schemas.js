@@ -146,7 +146,9 @@ const recipe = obj({
     // Slice 2b: a shared key for "what kind of part this is" (blade, decoration...). A tag's effects can differ by kind. Left out it is the slot's own name.
     kind: optional(idField()),
     // Slice 1 of the tag system: the slot takes any item carrying ALL these tags (and at or above tierFloor). `optional` slots may stay empty. A slot without `needs` is exactly as before.
-    needs: optional(obj({ all: arr(idField(), { min: 1 }), optional: optional(bool()) }))
+    needs: optional(obj({ all: arr(idField(), { min: 1 }), optional: optional(bool()) })),
+    // Slice 3b: the slot hands the tags of what fills it up to the item this craft makes, at most this many (true = the default, TAGS.passCap). Left out, the slot inherits nothing.
+    passCap: optional(union([bool(), int({ min: 1, max: TAGS.maxPassCap })], { hint: "must be true or a whole number from 1 to " + TAGS.maxPassCap }))
   }), {
     min: 1,
     refine(slots, path, errors) {

@@ -14,6 +14,7 @@ import { feeForStation } from "../stations/fees.js";
 import { plainLines } from "../effects/plain.js";
 import { effectiveTags, effectiveTier, hasNeeds, isCraftedRef, craftedId, isOptionalSlot, itemName, slotFit, standInMaterial } from "../tags/ledger.js";
 import { embedRecord } from "../tags/frozen.js";
+import { inheritedTags, slotPassCap } from "../tags/inherit.js";
 import { getCaps, getLedger, getLimits } from "../tags/current.js";
 import { stackedCraft, stackingRolesFor } from "../tags/contributions.js";
 
@@ -161,7 +162,8 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
     // Slice 2b/3: what the craft was made of and what it stacked to, for the GM-only frozen store (written when the craft resolves, never read from here by a player). A craft is frozen when it has a
     // tagged slot, or its recipe has a ledger entry (the GM tagged what it makes), so the item it makes can be an ingredient later.
     const native = ledger?.items?.[recipe.id]?.tags ?? [];
-    if (stacked.taggedSlots.size || native.length || ledger?.items?.[recipe.id]) {
+    const passing = new Set(recipe.slots.filter(s => slotPassCap(s)).map(s => s.name));
+    if (stacked.taggedSlots.size || native.length || ledger?.items?.[recipe.id] || passing.size) {
       const inputTiers = uses.map(u => effectiveTier(u.materialId, registry, ledger)).filter(Number.isInteger);
       frozen = {
         recipeId: recipe.id,
@@ -170,8 +172,8 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
         tier: ledger?.items?.[recipe.id]?.tier ?? description.baseTier ?? (inputTiers.length ? Math.max(...inputTiers) : null),
         depth,
         native: [...native],
-        inherited: [],
-        uses: uses.filter(u => stacked.taggedSlots.has(u.slot) || isCraftedRef(u.materialId)).map(u => ({
+        inherited: inheritedTags({ recipe, uses, registry, ledger }),
+        uses: uses.filter(u => stacked.taggedSlots.has(u.slot) || passing.has(u.slot) || isCraftedRef(u.materialId)).map(u => ({
           slot: u.slot, ref: u.materialId, name: itemName(u.materialId, registry, ledger), tier: effectiveTier(u.materialId, registry, ledger), tags: effectiveTags(u.materialId, registry, ledger),
           ...(isCraftedRef(u.materialId) ? { from: embedRecord(ledger?.crafted?.[craftedId(u.materialId)]) } : {})
         })),

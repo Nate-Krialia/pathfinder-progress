@@ -9,22 +9,25 @@ const api = () => getApi();
 const text = x => JSON.stringify(x, (k, v) => (v instanceof Map ? [...v.values()] : v instanceof Set ? [...v] : v));
 const ref = id => `crafted:${id}`;
 
-async function nestedWorld({ extraDagger = false } = {}) {
+async function nestedWorld({ pass } = {}) {
   const dagger = seedRecords().map(r => r.data).find(d => d.id === DAGGER);
   const mount = {
     ...structuredClone(dagger), id: "mount-blade", name: "Mount Blade", resultName: "Mounted Blade", category: "weapon",
     slots: [{ name: "edge", drives: "basePower", tierFloor: 1, qty: 1 }, { name: "mount", drives: "bonusDamage", qty: 1, needs: { all: ["metal-bit"] } }]
   };
-  delete mount.overrides;
+  if (pass !== undefined) mount.slots[1].passCap = pass;
+  const grand = { ...structuredClone(mount), id: "grand-blade", name: "Grand Blade", resultName: "Grand Blade" };
+  grand.slots[1] = { name: "mount", drives: "bonusDamage", qty: 1, needs: { all: ["metal-bit"] } };
+  delete mount.overrides; delete grand.overrides;
   const w = await world({ perClientDefinitions: true, downtime: 30, iron: 8, fang: 4 });
-  api().baseSources = [...seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) })), { pack: "t", entry: "mount-blade", text: asPage(mount) }];
+  api().baseSources = [...seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) })), { pack: "t", entry: "mount-blade", text: asPage(mount) }, { pack: "t", entry: "grand-blade", text: asPage(grand) }];
   api().editorLeftovers = [];
   await as(w.gm, async () => {
     await api().editor.create("tag", { name: "Metal Bit", theme: "bits", effectBlocks: { general: { blocks: [{ type: "damage", dice: { byTier: { 1: "1d4", 2: "1d6", 3: "1d8", 4: "1d10", 5: "1d12" } }, damageType: "poison" }] } } }, { makeItem: false });   // also rebuilds the registry with the extra recipe
     await api().tags.setEntry(DAGGER, { tags: ["metal-bit"], tier: 2, name: "Spider Fang Dagger" });
-    await api().grantFormula(w.ann, "mount-blade");
+    await api().grantFormula(w.ann, "mount-blade"); await api().grantFormula(w.ann, "grand-blade");
   });
-  api().resolvedOutputs.set("mount-blade", { "1": UUID, "2": UUID_2, "3": UUID });
+  for (const id of ["mount-blade", "grand-blade"]) api().resolvedOutputs.set(id, { "1": UUID, "2": UUID_2, "3": UUID });
   await as(w.annUser, () => api().definitions.refresh());
   return w;
 }
@@ -137,4 +140,46 @@ test("3a: players see a crafted ingredient only as a fits entry (opaque referenc
   assert.deepEqual(findCanaries(payloads, C), []);
   assert.deepEqual(findTagLeaks(registry, { neededTags: ["metal-bit"] }), []);
   void fireHookAs;
+});
+
+const lastCrafted = w => w.ann.items.filter(i => i.getFlag(M, "crafted")).at(-1);
+test("3b: a slot with passCap hands the dagger's tags up; the mount blade then fills a metal-bit slot of a THIRD recipe, at the dagger's tier, three deep", async () => {
+  const w = await nestedWorld({ pass: true });
+  const dagger = await craftDagger(w);
+  const did = dagger.getFlag(M, "crafted").freezeId;
+  await resolve(w.ann, (await craft(w, w.annUser, w.ann, mountSel(did))).id, { chat: true });
+  const blade = lastCrafted(w);
+  const bid = blade.getFlag(M, "crafted").freezeId;
+  const rec = env.values.tagCrafted.items[bid];
+  assert.deepEqual(rec.inherited, [{ tag: "metal-bit", tier: 2 }], "the dagger's tag, at the dagger's tier");
+  assert.deepEqual(rec.native, [], "the GM tagged only the dagger recipe");
+  const pv = await as(w.gm, () => api().previewCraft(w.ann, "grand-blade", { edge: "iron", mount: ref(bid) }, "oakhaven-forge"));
+  assert.ok(pv.ok, pv.errors?.join(" | "));
+  assert.deepEqual(pv.plan.description.damageBonuses.map(d => d.dice), ["1d6"], "the inherited tag counts at its ORIGINAL tier 2, not the blade's");
+  await resolve(w.ann, (await craft(w, w.annUser, w.ann, { recipe: "grand-blade", selection: { edge: "iron", mount: ref(bid) } })).id, { chat: true });
+  assert.equal(env.values.tagCrafted.items[lastCrafted(w).getFlag(M, "crafted").freezeId].depth, 3);
+});
+test("3b: without passCap the mount blade carries nothing up, so it cannot fill the third recipe's tagged slot", async () => {
+  const w = await nestedWorld();
+  const dagger = await craftDagger(w);
+  await resolve(w.ann, (await craft(w, w.annUser, w.ann, mountSel(dagger.getFlag(M, "crafted").freezeId))).id, { chat: true });
+  const bid = lastCrafted(w).getFlag(M, "crafted").freezeId;
+  assert.deepEqual(env.values.tagCrafted.items[bid]?.inherited ?? [], []);
+  const pv = await as(w.gm, () => api().previewCraft(w.ann, "grand-blade", { edge: "iron", mount: ref(bid) }, "oakhaven-forge"));
+  assert.equal(pv.ok, false);
+});
+test("3b: nothing about inheritance reaches a player (passCap, inherited tags, tiers, the embedded provenance)", async () => {
+  const w = await nestedWorld({ pass: true });
+  const dagger = await craftDagger(w);
+  await resolve(w.ann, (await craft(w, w.annUser, w.ann, mountSel(dagger.getFlag(M, "crafted").freezeId))).id, { chat: true });
+  const blade = lastCrafted(w);
+  await as(w.annUser, () => api().definitions.refresh());
+  const registry = await as(w.annUser, () => api().definitions);
+  const slot = registry.recipe.get("mount-blade").slots.find(s => s.name === "mount");
+  assert.equal("passCap" in slot, false);
+  assert.deepEqual(findTagLeaks(registry, { neededTags: ["metal-bit"] }), []);
+  const rows = await as(w.annUser, () => api().queue.list([w.ann]));
+  const C = ["metal-bit", "Metal Bit", '"inherited"', '"native"', '"passCap"', "tagCrafted", "effectBlocks", '"depth"', '"contributions"'];
+  const payloads = { definitions: text(registry), queue: text(rows), compendium: text(await as(w.annUser, () => api().compendium.view(w.ann))), actorFlags: text(w.ann.rawFlags()), itemFlags: text(blade.flags[M]), chat: text(env.chat) };
+  assert.deepEqual(findCanaries(payloads, C), []);
 });

@@ -361,6 +361,8 @@ export const EFFECTS = {
 /** The tag system (Slice 1, docs/22-tags-slice1.md). The ledger is GM-only world data: item reference -> { tags, tier, name }. */
 export const TAGS = {
   ledgerSetting: "tagLedger",
+  passCap: 2,                            // Slice 3b: tags a filled slot passes up when the slot says `passCap: true` (a number says its own)
+  maxPassCap: 6,
   maxDepth: 3,                           // Slice 3: how many crafted items may be nested inside each other (a GM setting in the caps table overrides it)
   frozenSetting: "tagCrafted",           // Slice 2b: GM-only record of what each crafted item was made of (tags, tiers, the stacked result), keyed by an opaque id on the item
   capsSetting: "tagCaps",                // Slice 2a: the GM-set cap per role (one world-wide table)

@@ -108,3 +108,20 @@ That Foundry fires `deleteItem` for an item deleted along with its actor (the pr
 
 ## UNVERIFIED
 - Nothing here has run against real Foundry. Held records across a real reload, and a crafted item dragged between actors, are untested.
+
+# Slice 3b: tag inheritance
+
+## Rules (Nate's answers)
+- Opt-in per recipe slot: `passCap: true` (the default, `TAGS.passCap` = 2) or a whole number 1-6. A slot without it inherits nothing. A slot can only pass what actually fills it (an empty optional slot passes nothing).
+- The cap is per INPUT slot. Each filled slot offers its ingredient's tags, best first: highest tier, then tag `priority`, then alphabetical by tag name; the first `passCap` go up. `scripts/tags/inherit.js` (pure).
+- Only TAGS pass, never a stacked effect. Each keeps the tier of the ingredient that brought it; a crafted ingredient passes its own native and inherited tags at THEIR tiers (native at its tier, inherited at the tier stored with them).
+- The same tag from two slots is kept once, at the higher tier. A tag the registry no longer has is dropped.
+- The GM's recipe-id ledger tags (`native`) sit ON TOP of the cap: they are not counted against it.
+- Where it lands: the frozen record's `inherited: [{ tag, tier }]` (GM-only). A craft with a `passCap` slot is frozen even if nothing else is tagged. The item's inherited tags matter when IT is used as an ingredient (its `tagTiers` = native, then inherited); they do not re-apply in the craft that made it.
+- `outputTags` (tags a recipe gives its item outright) is deferred to Slice 3c; a load-time cycle warning too.
+
+## Players
+- `passCap` is stripped from player recipe copies (the strip builds slots field by field); inherited tags, their tiers and the embedded provenance never leave the GM-only store. `findTagLeaks` and the canary scan cover them.
+
+## UNVERIFIED
+- Not run against real Foundry. No editor UI for `passCap`: recipes are authored as text (like `needs`).
