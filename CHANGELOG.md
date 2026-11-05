@@ -5,6 +5,7 @@
 - Recipe slots can say `needs: { all: [tags], optional }`; a slot without `needs` is exactly as before. Required tagged slots must be filled, optional ones may stay empty; `tierFloor` still applies. Tag definitions get a numeric `priority` (stored and edited only).
 - Players never receive the ledger, tags, `needs`, tiers or priorities: a tagged slot reaches them as `optional` + `fits` (ids and names of their own items that fit). Hub slot lists use `fits`.
 - New **Item tags** window (scene controls; header button on any Item sheet) and `api.tags`.
+- An ordinary item is matched by `_stats.compendiumSource` first (then `_stats.duplicateSource`, the legacy `flags.core.sourceId`, its own uuid). `tierFloor` is now optional on every recipe slot (default 1).
 - Not yet: tag effects, stacking, caps, nested inheritance, the veto twist, charges.
 
 ## 0.22.0

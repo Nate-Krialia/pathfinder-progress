@@ -83,6 +83,8 @@ export function loadDefinitions(sources) {
     }
     const recordErrors = validateRecord(kind, result.data, ctx);
     errors.push(...recordErrors);
+    // A slot with no tierFloor has no floor: make it 1 here, once, so no other code has to know the field can be missing.
+    if (kind === "recipe" && !recordErrors.length) for (const slot of result.data.slots) slot.tierFloor ??= 1;
     parsed.push({ kind, data: result.data, ctx, invalid: recordErrors.length > 0 });
   }
 

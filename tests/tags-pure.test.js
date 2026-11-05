@@ -180,3 +180,19 @@ test("PLAYER COPY (pure): a tag loses its priority; a recipe slot with needs kee
   assert.deepEqual(copy.slots[1], { name: "old", drives: "basePower", tierFloor: 1, qty: 1 });
   assert.deepEqual(findTagLeaks([{ data: copy }], { neededTags: ["blade-tag-never-in-slot"] }), []);
 });
+
+// tierFloor is optional: left out it is 1 (no floor) ------------------------------------------------------------------------
+test("TIERFLOOR: a slot may leave it out; the loader makes it 1; with and without needs; existing recipes are unchanged", () => {
+  const free = { name: "free", drives: "basePower", qty: 1 };
+  const { registry, errors } = defs(tag("blade"), tag("hilt"), mat("ironbar", 1, { tag: "blade" }), needsRecipe([free, { name: "hilt", drives: "specialAbility", qty: 1, needs: { all: ["blade"] } }, { ...HILT, name: "x", tierFloor: 3 }]));
+  assert.deepEqual(errors.map(e => `${e.entry} ${e.field} ${e.message}`), []);
+  const slots = registry.recipe.get("tagged-sword").slots;
+  assert.deepEqual(slots.map(s => s.tierFloor), [1, 1, 3]);
+  assert.equal(defs().registry.recipe.get("dagger-spider-fang").slots.find(s => s.name === "fang").tierFloor, 2, "a seed recipe keeps its floor");
+});
+test("TIERFLOOR: a slot with no floor takes a tier-1 material and the plan works; a bad value is still refused", () => {
+  const reg = defs(tag("blade"), mat("ironbar", 1, { tag: "blade" }), needsRecipe([{ name: "free", drives: "basePower", qty: 1 }])).registry;
+  const r = basePlanCraft({ recipe: reg.recipe.get("tagged-sword"), registry: reg, selection: { free: "ironbar" }, stacks: [{ stackId: "s", materialId: "ironbar", quantity: 1 }], outputs: { "1": UUID }, station: { id: "f", name: "F", category: RECIPE.stationCategory, tier: 1 }, ledger: emptyLedger() });
+  assert.ok(r.ok, r.errors?.join(" | "));
+  for (const bad of [0, 6, "2", 1.5]) assert.ok(defs(tag("blade"), needsRecipe([{ name: "free", drives: "basePower", qty: 1, tierFloor: bad }])).errors.length > 0, String(bad));
+});

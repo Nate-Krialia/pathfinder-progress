@@ -135,7 +135,8 @@ const recipe = obj({
     name: str(),
     // One role, or several (e.g. a spider fang can drive bonusDamage AND specialAbility).
     drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }),
-    tierFloor: tier(TIER_RANGES.material),
+    // The lowest material tier the slot accepts. Optional: left out it is 1 (no floor); the loader fills the 1 in, so everything downstream always sees a number.
+    tierFloor: optional(tier(TIER_RANGES.material)),
     qty: int({ min: 1 }),
     lossChance: optional(int({ min: 0, max: 100 })),
     // Slice 1 of the tag system: the slot takes any item carrying ALL these tags (and at or above tierFloor). `optional` slots may stay empty. A slot without `needs` is exactly as before.

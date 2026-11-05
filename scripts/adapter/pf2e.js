@@ -76,10 +76,20 @@ const taggedProviders = { gm: () => new Set(), player: () => new Set() };
 export const setTaggedRefProvider = (fn, { player = false } = {}) => { taggedProviders[player ? "player" : "gm"] = typeof fn === "function" ? fn : () => new Set(); };
 const taggedRefs = () => (globalThis.game?.user?.isGM === false ? taggedProviders.player() : taggedProviders.gm());
 
-/** The ledger reference of an ordinary item: the UUID of what it was copied from (a world or compendium item), else its own. UNVERIFIED against a real PF2e actor item. */
-export function itemRefOf(item) {
-  return item._stats?.compendiumSource ?? item.flags?.core?.sourceId ?? item.uuid ?? null;
+/**
+ * Every reference an ordinary item could be tagged under, most trusted first (Slice 1):
+ *   1. `_stats.compendiumSource`: Foundry's field for "the compendium document this was imported from" (v14 DocumentStats). A copy dragged from a compendium keeps the
+ *      compendium item's uuid, so tagging the compendium item (one shared entry) tags every copy on every actor.
+ *   2. `_stats.duplicateSource`: the document this one was duplicated from. UNVERIFIED for a world item dropped onto an actor; when it names another actor's copy it matches nothing.
+ *   3. `flags.core.sourceId`: the legacy field that `_stats.compendiumSource` replaced (Foundry v13 migrates it). Kept so older items still match.
+ *   4. the item's own `uuid`: a world item tagged by its own uuid ("Item.<id>") matches that exact document, and an actor's own copy tagged by its own uuid matches only itself.
+ * The first one that is in the ledger wins.
+ */
+export function itemRefCandidates(item) {
+  return [item._stats?.compendiumSource, item._stats?.duplicateSource, item.flags?.core?.sourceId, item.uuid].filter((ref, i, all) => typeof ref === "string" && ref !== "" && all.indexOf(ref) === i);
 }
+/** The reference to tag an item under (or to match it by): the first candidate that is in `refs`, else the most trusted one. */
+export const itemRefOf = (item, refs = null) => { const c = itemRefCandidates(item); return (refs && c.find(r => refs.has(r))) ?? c[0] ?? null; };
 
 /** Every material stack an actor owns, with its quantity; and (Slice 1) every item the GM tagged in the ledger, counted like a material (materialId = the item reference). */
 export function getMaterialStacks(actor) {
@@ -96,8 +106,8 @@ export function getMaterialStacks(actor) {
   if (refs.size) {
     for (const item of actor.items) {
       if (getMaterialFlags(item)) continue;
-      const ref = itemRefOf(item);
-      if (ref && refs.has(ref)) stacks.push({ item, materialId: ref, tier: undefined, quantity: item.system?.quantity ?? 1, tagged: true });
+      const ref = itemRefCandidates(item).find(r => refs.has(r));
+      if (ref) stacks.push({ item, materialId: ref, tier: undefined, quantity: item.system?.quantity ?? 1, tagged: true });
     }
   }
   return stacks;

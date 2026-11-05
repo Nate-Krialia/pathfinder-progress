@@ -87,7 +87,7 @@ function makeScene(name, data = {}) {
 
 function makeItem(actor, data) {
   const item = {
-    id: newId("item"), parent: actor, name: data.name, img: data.img, folder: data.folder ?? null, type: data.type, system: clone(data.system ?? {}), flags: clone(data.flags ?? {}),
+    id: newId("item"), parent: actor, name: data.name, img: data.img, folder: data.folder ?? null, type: data.type, system: clone(data.system ?? {}), _stats: clone(data._stats ?? {}), flags: clone(data.flags ?? {}),
     getFlag: (scope, key) => clone(item.flags[scope]?.[key]),
     toObject: () => clone({ name: item.name, type: item.type, system: item.system, flags: item.flags }),
     // Dotted keys like real Foundry ("name", "img", "system.price.value", "flags.<module>.material.tier"); objects merge.

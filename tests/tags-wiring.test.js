@@ -173,3 +173,67 @@ test("PLAYERS: tagging a new item after the player has loaded refreshes their li
   assert.equal((await fits()).includes("Compendium.pf2e.equipment-srd.Item.UUUUUUUUUUUUUUUU"), true);
   void makeActor; void gm;
 });
+
+// Item references: which field names an ordinary item ---------------------------------------------------------------------
+const WORLD_ITEM = "Item.WWWWWWWWWWWWWWWW";
+const stackIds = async actor => (await import("../scripts/adapter/pf2e.js")).getMaterialStacks(actor).map(s => s.materialId);
+const giveWith = (actor, name, extra) => actor.createEmbeddedDocuments("Item", [{ name, type: "equipment", system: { quantity: 1 }, ...extra }]);
+const tagRef = (w, ref) => as(w.gm, () => api().tags.setEntry(ref, { tags: ["venom-tooth"], tier: 2, name: "Thing" }));
+
+test("REF 1 (primary): a copy made from a COMPENDIUM item matches the compendium item's uuid via _stats.compendiumSource", async () => {
+  const w = await tagged();
+  await giveWith(w.ann, "Copy", { _stats: { compendiumSource: TOOTH } });
+  await tagRef(w, TOOTH);
+  assert.ok((await stackIds(w.ann)).includes(TOOTH));
+});
+test("REF 1: the compendium item is ONE shared entry: every actor's copy of it counts once it is tagged", async () => {
+  const w = await tagged();
+  await giveWith(w.ann, "Copy", { _stats: { compendiumSource: TOOTH } });
+  await giveWith(w.bob, "Copy", { _stats: { compendiumSource: TOOTH } });
+  await tagRef(w, TOOTH);
+  assert.ok((await stackIds(w.ann)).includes(TOOTH)); assert.ok((await stackIds(w.bob)).includes(TOOTH));
+});
+test("REF 1 beats the fallbacks: when compendiumSource AND the legacy flag name different tagged items, compendiumSource wins", async () => {
+  const w = await tagged();
+  await giveWith(w.ann, "Both", { _stats: { compendiumSource: TOOTH }, flags: { core: { sourceId: STRAP } } });
+  await tagRef(w, TOOTH); await tagRef(w, STRAP);
+  const ids = (await stackIds(w.ann)).filter(x => x === TOOTH || x === STRAP);
+  assert.deepEqual(ids, [TOOTH]);
+});
+test("REF 2: _stats.duplicateSource matches a world item that was copied onto an actor (UNVERIFIED that Foundry sets it on a drop)", async () => {
+  const w = await tagged();
+  await giveWith(w.ann, "Copy of a world item", { _stats: { duplicateSource: WORLD_ITEM } });
+  assert.ok(!(await stackIds(w.ann)).includes(WORLD_ITEM), "untagged: not a stack");
+  await tagRef(w, WORLD_ITEM);
+  assert.ok((await stackIds(w.ann)).includes(WORLD_ITEM));
+});
+test("REF 3 (legacy fallback): flags.core.sourceId still matches an item that has no _stats source", async () => {
+  const w = await tagged();
+  await giveWith(w.ann, "Old copy", { flags: { core: { sourceId: TOOTH } } });
+  await tagRef(w, TOOTH);
+  assert.ok((await stackIds(w.ann)).includes(TOOTH));
+});
+test("REF 4 (own uuid): an item tagged by its OWN uuid matches only that document, not its siblings", async () => {
+  const w = await tagged();
+  const [one] = await giveWith(w.ann, "One", {}); const [two] = await giveWith(w.ann, "Two", {});
+  Object.defineProperty(one, "uuid", { value: "Actor.ann.Item.one" }); Object.defineProperty(two, "uuid", { value: "Actor.ann.Item.two" });
+  await tagRef(w, "Actor.ann.Item.one");
+  const ids = await stackIds(w.ann);
+  assert.ok(ids.includes("Actor.ann.Item.one")); assert.ok(!ids.includes("Actor.ann.Item.two"));
+});
+test("REF: an item with none of these fields in the ledger is not a stack, and a duplicate whose duplicateSource is another actor's copy still matches by its compendiumSource", async () => {
+  const w = await tagged();
+  await giveWith(w.ann, "Dup", { _stats: { compendiumSource: TOOTH, duplicateSource: "Actor.other.Item.copy" } });
+  await giveWith(w.ann, "Stranger", { _stats: { compendiumSource: STRAP } });
+  await tagRef(w, TOOTH);
+  const ids = await stackIds(w.ann);
+  assert.ok(ids.includes(TOOTH)); assert.ok(!ids.includes(STRAP));
+});
+test("REF: the candidates are listed in the documented order, without repeats or blanks", async () => {
+  const { itemRefCandidates, itemRefOf } = await import("../scripts/adapter/pf2e.js");
+  const item = { _stats: { compendiumSource: "A", duplicateSource: "B" }, flags: { core: { sourceId: "C" } }, uuid: "D" };
+  assert.deepEqual(itemRefCandidates(item), ["A", "B", "C", "D"]);
+  assert.deepEqual(itemRefCandidates({ _stats: { compendiumSource: "A", duplicateSource: "A" }, uuid: "" }), ["A"]);
+  assert.deepEqual(itemRefCandidates({}), []);
+  assert.equal(itemRefOf(item), "A"); assert.equal(itemRefOf(item, new Set(["C"])), "C"); assert.equal(itemRefOf({}), null);
+});
