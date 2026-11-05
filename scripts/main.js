@@ -15,7 +15,7 @@ import * as downtime from "./downtime/store.js";
 import { installSocketHooks, socketStatus } from "./socket.js";
 import { suggestPayout } from "./commissions/commission.js";
 import { feeForTier } from "./stations/fees.js";
-import { AUDIT, COMMISSIONS, DISCOVERY, HUB, COMPENDIUM, DEFINITIONS_SYNC, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
+import { AUDIT, COMMISSIONS, DISCOVERY, TAGS, HUB, COMPENDIUM, DEFINITIONS_SYNC, DOWNTIME, EXPLORATION, NODE_ACTOR, QUEUE_KEYS, STATION_KEYS, WORKSHOP } from "./config.js";
 import * as playerDefs from "./data/playerDefs.js";
 import * as events from "./events.js";
 import * as gmLog from "./gm-log.js";
@@ -30,6 +30,10 @@ import * as editorStore from "./editor/store.js";
 import { defaultTrack } from "./discovery/track.js";
 import { openEditor } from "./editor/app.js";
 import { EDITOR_SETTING } from "./editor/setting.js";
+import * as tagState from "./tags/state.js";
+import { openTagger } from "./tags/app.js";
+import { installTagEntryPoints } from "./tags/entry.js";
+import { effectiveTags, effectiveTier, slotFit } from "./tags/ledger.js";
 import { installEditorEntryPoints } from "./editor/entry.js";
 import { asGM } from "./queue/work.js";
 import { UPGRADE_KINDS } from "./workshop/rules.js";
@@ -65,6 +69,7 @@ Hooks.once("init", () => {
   game.settings.register(MODULE_ID, HUB.displaySetting, { scope: "client", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   installEntryPoints(() => game.modules.get(MODULE_ID).api);
   installEditorEntryPoints(() => game.modules.get(MODULE_ID).api);
+  installTagEntryPoints(() => game.modules.get(MODULE_ID).api);
 
   // Downtime system
   game.settings.register(MODULE_ID, "itemPacks", {
@@ -162,6 +167,8 @@ Hooks.once("init", () => {
   // The Discovery tracks window's edits (GM data, Stage 11c): { "<kind>:<id>": track }, merged over the definitions' own tracks.
   // The item editor's world definitions (Stage 11d): new materials and notes, and patches over the packs' ones. GM data; see scripts/editor/layer.js.
   game.settings.register(MODULE_ID, EDITOR_SETTING, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
+  // The tag ledger (Slice 1): item reference -> tags and tier. GM data, read only by the GM client; never sent to a player.
+  game.settings.register(MODULE_ID, TAGS.ledgerSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   game.settings.register(MODULE_ID, DISCOVERY.overlaySetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
 
   game.settings.register(MODULE_ID, "extraPacks", {
@@ -405,6 +412,20 @@ Hooks.once("ready", async () => {
       slugify: editorStore.slugify
     },
     /**
+     * The tag system (Slice 1, docs/22-tags-slice1.md; GM only): tag any item with several tags and a tier, set what a recipe slot needs, open the window.
+     * Players never receive the ledger.
+     */
+    tags: {
+      ledger: () => { if (!game.user.isGM) throw new Error("tags.ledger: GM only"); return structuredClone(tagState.getLedger()); },
+      setEntry: (ref, entry) => tagState.setEntry(api, ref, entry),
+      removeEntry: ref => tagState.removeEntry(api, ref),
+      setSlotNeeds: (recipeId, slotName, needs) => tagState.setSlotNeeds(api, recipeId, slotName, needs),
+      tagsOf: ref => { if (!game.user.isGM) throw new Error("tags.tagsOf: GM only"); return effectiveTags(ref, api.definitions, tagState.getLedger()); },
+      tierOf: ref => { if (!game.user.isGM) throw new Error("tags.tierOf: GM only"); return effectiveTier(ref, api.definitions, tagState.getLedger()); },
+      fits: (recipeId, slotName, ref) => { if (!game.user.isGM) throw new Error("tags.fits: GM only"); const slot = api.definitions.recipe.get(recipeId)?.slots.find(s => s.name === slotName); return slot ? slotFit(slot, ref, api.definitions, tagState.getLedger()) : { ok: false, reason: "no such slot" }; },
+      open: () => openTagger(api)
+    },
+    /**
      * The discovery chain (Stage 11c, docs/11c-discovery-addendum.md). Tracks are GM-only data: tracks.get/set/clear read and write the Discovery tracks window's
      * overlay. propertiesOpen(actor, materialId): do they know what it is good for (so may they craft with it)?
      */
@@ -486,6 +507,7 @@ Hooks.once("ready", async () => {
     if (game.user.isGM) ui.notifications.warn(`${MODULE_ID}: ${warning}`);
   }
 
+  try { tagState.loadLedger(); } catch (err) { console.error(`${MODULE_ID} | could not read the tag ledger`, err); }
   try {
     await api.reload();
   } catch (err) {

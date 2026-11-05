@@ -153,6 +153,12 @@ export function loadDefinitions(sources) {
 
     if (rec.kind === "recipe") {
       validateRecipe(rec, { customRoles, materials, materialIds, flag, flagAll });
+      // A slot that matches by tags (Slice 1) may only name tags that exist.
+      d.slots.forEach((slot, i) => {
+        for (const t of slot.needs?.all ?? []) if (!tagIds.has(t)) flag(rec, `slots[${i}].needs.all`, `refers to unknown tag "${t}" (known: ${[...tagIds].join(", ") || "none"}); define it with a "tag" definition`);
+        const dup = (slot.needs?.all ?? []).find((t, j, all) => all.indexOf(t) !== j);
+        if (dup !== undefined) flag(rec, `slots[${i}].needs.all`, `lists "${dup}" twice`);
+      });
       if (d.requiresTag !== undefined && !tagIds.has(d.requiresTag)) flag(rec, "requiresTag", `refers to unknown tag "${d.requiresTag}"`);
       if ((d.requiresTag !== undefined || d.requiresCount !== undefined) && (d.version ?? 1) < 2) flag(rec, "version", "must be 2 or higher for a recipe that requires tagged materials");
       if (d.requiresCount !== undefined && d.requiresTag === undefined) flag(rec, "requiresCount", "needs requiresTag");

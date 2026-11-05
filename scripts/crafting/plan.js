@@ -12,6 +12,8 @@ import { resolveMaterialEffect } from "../data/resolver.js";
 import { isUuid } from "../data/outputRefs.js";
 import { feeForStation } from "../stations/fees.js";
 import { plainLines } from "../effects/plain.js";
+import { hasNeeds, isOptionalSlot, slotFit, standInMaterial } from "../tags/ledger.js";
+import { getLedger } from "../tags/current.js";
 
 const emptyDescription = () => ({
   baseTier: null,
@@ -50,7 +52,7 @@ export function resolveSlotEffects(recipe, slot, material) {
   return { resolved, missing };
 }
 
-export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING, mechanical = false }) {
+export function planCraft({ recipe, registry, selection, stacks, outputs, station, config = CRAFTING, mechanical = false, ledger = getLedger() }) {
   const errors = [];
   const remaining = new Map(stacks.map(s => [s.stackId, s.quantity]));
   const customRoles = mechanical ? [] : [...registry.customRole.values()];
@@ -64,11 +66,19 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
 
   for (const slot of recipe.slots) {
     const materialId = selection?.[slot.name];
-    if (!materialId) { errors.push(`slot "${slot.name}": no material selected`); continue; }
+    // A tagged slot (Slice 1) marked optional may stay empty; every other slot must be filled, as before.
+    if (!materialId) { if (isOptionalSlot(slot)) continue; errors.push(`slot "${slot.name}": no material selected`); continue; }
 
-    const material = registry.material.get(materialId);
-    if (!material) { errors.push(`slot "${slot.name}": unknown material "${materialId}"`); continue; }
-    if (material.tier < slot.tierFloor) {
+    const tagged = hasNeeds(slot);
+    let material = registry.material.get(materialId);
+    // An item that only the tag ledger knows (an ordinary PF2e item the GM tagged) stands in as a material with no effects. A player's preview gets the name from the slot's `fits`.
+    if (!material && tagged) material = mechanical ? (() => { const f = (slot.fits ?? []).find(x => x.id === materialId); return f ? { id: materialId, name: f.name, effects: {}, standIn: true } : null; })() : standInMaterial(materialId, ledger);
+    if (!material) { errors.push(`slot "${slot.name}": ${tagged ? `${materialId} cannot fill this slot (the GM has not tagged it)` : `unknown material "${materialId}"`}`); continue; }
+    if (tagged) {
+      // The GM checks tags and tier. A player's preview only has the GM's list of what fits (never the tags themselves).
+      const fit = mechanical ? ((slot.fits ?? []).some(x => x.id === materialId) ? { ok: true } : { ok: false, reason: `${material.name} does not fit this slot` }) : slotFit(slot, materialId, registry, ledger);
+      if (!fit.ok) { errors.push(`slot "${slot.name}": ${fit.reason}`); continue; }
+    } else if (material.tier < slot.tierFloor) {
       errors.push(`slot "${slot.name}": ${material.name} is tier ${material.tier} but the slot needs tier ${slot.tierFloor} or higher`);
       continue;
     }
@@ -78,8 +88,9 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
     let resolved = {};
     if (!mechanical) {
       const found = resolveSlotEffects(recipe, slot, material);
-      for (const role of found.missing) errors.push(`slot "${slot.name}": ${material.name} has no effect for role "${role}"`);
-      if (found.missing.length) continue;
+      // In a tagged slot an item with no effect for a role simply adds nothing for it yet (tag effects arrive in a later slice); anywhere else it is still an error.
+      if (!tagged) for (const role of found.missing) errors.push(`slot "${slot.name}": ${material.name} has no effect for role "${role}"`);
+      if (!tagged && found.missing.length) continue;
       resolved = found.resolved;
     }
 

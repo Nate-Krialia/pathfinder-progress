@@ -112,12 +112,15 @@ function unitsNeeded(recipe, picks, materialId) {
 }
 
 /** The materials that may be offered for a slot: in the bag, met in the Compendium, at or above the slot's floor. */
+/** Does an item belong in a slot's list? A tag-matched slot (Slice 1) lists exactly what the GM said fits (and the tier floor for a real material); an old slot is the tier rule. */
+const fitsSlot = (slot, material, id) => (Array.isArray(slot.fits) ? slot.fits.some(f => f.id === id) && (material.standIn || material.tier >= slot.tierFloor) : material.tier >= slot.tierFloor);
+
 function optionsFor(facts, recipe, slot, picks) {
   const met = new Set(facts.met);
   return Object.keys(facts.inventory)
-    .filter(id => facts.inventory[id] > 0 && met.has(id) && facts.materials[id] && facts.materials[id].tier >= slot.tierFloor && facts.open?.[id] !== false)
+    .filter(id => facts.inventory[id] > 0 && met.has(id) && facts.materials[id] && fitsSlot(slot, facts.materials[id], id) && facts.open?.[id] !== false)
     .map(id => facts.materials[id])
-    .sort((a, b) => a.tier - b.tier || a.name.localeCompare(b.name))
+    .sort((a, b) => (a.tier ?? 0) - (b.tier ?? 0) || a.name.localeCompare(b.name))
     .map(material => {
       const have = facts.inventory[material.id] ?? 0;
       const need = unitsNeeded(recipe, { ...picks, [slot.name]: material.id }, material.id);
@@ -125,7 +128,7 @@ function optionsFor(facts, recipe, slot, picks) {
       const fact = facts.learned[learnedKey(recipe.id, slot.name, material.id)];
       const effects = effectLines(material.name, fact, recipe);
       return {
-        id: material.id, name: material.name, tier: material.tier, tierText: S.tierText(material.tier),
+        id: material.id, name: material.name, tier: material.tier, tierText: Number.isInteger(material.tier) ? S.tierText(material.tier) : "",
         worth: Number.isFinite(material.value) ? S.worthEach(material.value) : null,
         stock: { have, need, short, text: short ? S.stockShort(need, have) : S.stockOk(need, have), word: short ? S.stockShortWord : "" },
         effect: effects ? { known: true, effects } : { known: false, text: S.effectUnknown },
@@ -138,7 +141,7 @@ function optionsFor(facts, recipe, slot, picks) {
 function lockedFor(facts, slot) {
   const met = new Set(facts.met);
   return Object.keys(facts.inventory)
-    .filter(id => facts.inventory[id] > 0 && met.has(id) && facts.materials[id] && facts.materials[id].tier >= slot.tierFloor && facts.open?.[id] === false)
+    .filter(id => facts.inventory[id] > 0 && met.has(id) && facts.materials[id] && fitsSlot(slot, facts.materials[id], id) && facts.open?.[id] === false)
     .map(id => facts.materials[id].name).sort();
 }
 
@@ -167,7 +170,7 @@ export function stationChoices(stations, stationId) {
   };
 }
 
-export const allSlotsPicked = (recipe, picks) => recipe.slots.every(slot => Boolean(picks[slot.name]));
+export const allSlotsPicked = (recipe, picks) => recipe.slots.every(slot => Boolean(picks[slot.name]) || (slot.optional === true && Array.isArray(slot.fits)));
 
 function craftDays(recipe, stationId, preview) {
   if (preview?.ok && Number.isFinite(preview.plan?.days)) return preview.plan.days;

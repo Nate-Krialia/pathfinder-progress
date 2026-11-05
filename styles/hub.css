@@ -273,3 +273,22 @@
 .pfp-hub.pfp-fx-card .pfp-fx-actions { display: flex !important; flex-direction: row; flex-wrap: wrap; gap: 0.5em; }
 .pfp-hub.pfp-fx-card .pfp-fx-results li { display: block; }
 .pfp-hub.pfp-fx-card button.pfp-fx-btn:disabled { opacity: 0.6; cursor: not-allowed; border-style: dashed !important; }
+
+/* Item tags window (Slice 1, GM only): one scrolling column of tabs, lists and forms; every control is a comfortable size and nothing overflows when narrow */
+.pfp-hub.pfp-tagger { height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 0.6em; padding: 0.6em; box-sizing: border-box; }
+.pfp-hub.pfp-tagger nav[role="tablist"] { display: flex; flex-wrap: wrap; gap: 0.4em; }
+.pfp-hub.pfp-tagger fieldset { min-width: 0; display: flex; flex-direction: column; gap: 0.5em; border: 1px solid var(--pfp-border); padding: 0.6em; margin: 0; }
+.pfp-hub.pfp-tagger label { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; min-width: 0; }
+.pfp-hub.pfp-tagger label.pfp-check { display: inline-flex; min-height: 44px; }
+.pfp-hub.pfp-tagger input[type="text"], .pfp-hub.pfp-tagger input[type="number"], .pfp-hub.pfp-tagger select { min-height: 44px; min-width: 0; max-width: 100%; box-sizing: border-box; flex: 1 1 12em; }
+.pfp-hub.pfp-tagger button { min-height: 44px; max-width: 100%; }
+.pfp-hub.pfp-tagger .pfp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4em; }
+.pfp-hub.pfp-tagger .pfp-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4em; min-width: 0; overflow-wrap: anywhere; }
+.pfp-hub.pfp-tagger [data-part="tag-pick"] { display: flex; flex-wrap: wrap; gap: 0.4em 0.8em; }
+.pfp-hub.pfp-tagger > * { flex: 0 0 auto; min-width: 0; }
+.pfp-hub.pfp-tagger button { min-width: 44px; }
+.pfp-hub.pfp-tagger .pfp-row-buttons { display: flex; flex-wrap: wrap; gap: 0.4em; }
+.pfp-hub.pfp-tagger .pfp-row > span:first-child { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3em 0.4em; flex: 1 1 12em; min-width: 0; }
+.pfp-hub.pfp-tagger .pfp-row > span:first-child > strong { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+/* a tag's name is free text and can be long: its chip wraps instead of forcing the row wider */
+.pfp-hub.pfp-tagger .pfp-tagchip { display: inline-block; max-width: 100%; box-sizing: border-box; padding: 0.1em 0.6em; border: 1px solid var(--pfp-border); border-radius: 1em; overflow-wrap: anywhere; white-space: normal; }

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased (tag system, Slice 1; the module version is NOT bumped)
+- New GM-only **tag ledger** (world setting `tagLedger`): item reference -> several tags and a tier. A material's single `tag` is read as its first tag. A PF2e item with no material record can fill a slot only when tagged WITH a tier (and a name); the editor refuses otherwise.
+- Recipe slots can say `needs: { all: [tags], optional }`; a slot without `needs` is exactly as before. Required tagged slots must be filled, optional ones may stay empty; `tierFloor` still applies. Tag definitions get a numeric `priority` (stored and edited only).
+- Players never receive the ledger, tags, `needs`, tiers or priorities: a tagged slot reaches them as `optional` + `fits` (ids and names of their own items that fit). Hub slot lists use `fits`.
+- New **Item tags** window (scene controls; header button on any Item sheet) and `api.tags`.
+- Not yet: tag effects, stacking, caps, nested inheritance, the veto twist, charges.
+
 ## 0.22.0
 
 Stage 11d, second half (part 1): effects that act on a TARGET, GM-assisted. (`docs/11d-item-editor-addendum.md`, "v0.22.0 decisions"; the real-Foundry probe that settled PF2e 8.6.1's shapes is `docs/probes/11d-targets-probe.md`. Adjust and the trinket are 0.22.1; afflictions are out.)

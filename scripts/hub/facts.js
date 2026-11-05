@@ -55,9 +55,13 @@ export function readFacts(api, actor, state) {
   const inventory = attempt("the bag", () => inventoryOf(actor), {});
   const materials = {};
   for (const id of Object.keys(inventory)) { const material = defs?.material.get(id); if (material) materials[id] = material; }
-  const met = Object.keys(materials).filter(id => attempt("the Compendium", () => api.compendium.hasMaterial(actor, id), false));
+  // Items the GM tagged (Slice 1) that the GM says fit one of this formula's slots: named, with no tier or price, open to crafting, nothing else known about them.
+  const fitting = new Map();
+  for (const recipe of Object.values(recipes)) for (const slot of recipe.slots) for (const f of slot.fits ?? []) if ((inventory[f.id] ?? 0) > 0 && !defs?.material.has(f.id)) fitting.set(f.id, f.name);
+  for (const [id, name] of fitting) materials[id] = { kind: "material", id, name, standIn: true };
+  const met = Object.keys(materials).filter(id => materials[id].standIn || attempt("the Compendium", () => api.compendium.hasMaterial(actor, id), false));
   // Materials with a study the character has not done are not open to crafting (a plain yes/no per material).
-  const open = Object.fromEntries(Object.keys(materials).map(id => [id, attempt("what you have studied", () => api.discovery.propertiesOpen(actor, id), true)]));
+  const open = Object.fromEntries(Object.keys(materials).map(id => [id, materials[id].standIn ? true : attempt("what you have studied", () => api.discovery.propertiesOpen(actor, id), true)]));
 
   const town = attempt("the party location", () => game.settings.get(MODULE_ID, STATION_KEYS.partyLocationSetting), "") || null;
   const reachable = attempt("the workshops", () => api.stationsFor(actor), []).filter(s => s.reachable);

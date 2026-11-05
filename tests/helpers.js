@@ -56,3 +56,36 @@ export const openDowntime = ids => ({ open: true, days: 99, startedAt: 1, partic
  */
 export const CHAT_LEAK = /vs DC|\bDC\b|GM only|\bnatural\b|d100|d20=|Perception total|total \d|\d\s?%|\bodds\b|\bchance\b/i;
 export const chatLeaks = messages => messages.filter(m => CHAT_LEAK.test(m.content ?? "")).map(m => m.content);
+
+/**
+ * The tag leak scan (Slice 1): what in a PLAYER payload (the records the GM relays, or a whole player registry) must never be there.
+ *   - any `needs`, `tags`, `tagLedger`, `ledger` or `priority` key anywhere;
+ *   - a `tier` on a record whose id is an item only the ledger knows (PF2e items have no tier of their own; the GM's word stays on the GM client);
+ *   - an entry of a slot's `fits` with anything but { id, name };
+ *   - a needed tag's id anywhere in a recipe slot outside `fits`.
+ * @param {object[]|object} payload  records ([{ kind, data }] or bare records) or a registry of Maps
+ * @param {{ ledgerOnlyRefs?: string[], neededTags?: string[] }} known  what the GM actually holds
+ */
+export function findTagLeaks(payload, { ledgerOnlyRefs = [], neededTags = [] } = {}) {
+  const leaks = [];
+  const forbidden = new Set(["needs", "tags", "tagLedger", "ledger", "priority"]);
+  const walk = (node, path) => {
+    if (node instanceof Map) return walk([...node.values()], path);
+    if (Array.isArray(node)) return node.forEach((x, i) => walk(x, `${path}[${i}]`));
+    if (!node || typeof node !== "object") return undefined;
+    if (typeof node.id === "string" && ledgerOnlyRefs.includes(node.id) && "tier" in node) leaks.push(`${path}.tier (a ledger item's tier)`);
+    for (const [k, v] of Object.entries(node)) {
+      if (forbidden.has(k)) leaks.push(`${path}.${k}`);
+      if (k === "slots" && Array.isArray(v)) v.forEach((slot, i) => {
+        const { fits, ...rest } = slot;
+        const text = JSON.stringify(rest);
+        for (const t of neededTags) if (text.includes(`"${t}"`)) leaks.push(`${path}.slots[${i}] names the needed tag "${t}"`);
+        for (const f of fits ?? []) if (Object.keys(f).sort().join() !== "id,name") leaks.push(`${path}.slots[${i}].fits has more than id and name`);
+      });
+      walk(v, `${path}.${k}`);
+    }
+    return undefined;
+  };
+  walk(Array.isArray(payload) ? payload.map(r => r?.data ?? r) : payload, "payload");
+  return leaks;
+}

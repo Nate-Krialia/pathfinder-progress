@@ -70,9 +70,21 @@ export async function giveNote(actor, note) {
   return created;
 }
 
-/** Every material stack an actor owns, with its quantity. */
+// Items the GM tagged in the tag ledger (Slice 1): ordinary PF2e items that can fill a tagged slot. The tag module hands the adapter the set of item references (UUIDs) it knows.
+// A GM client knows them from the ledger; a player client only from the GM's lists of what fits its slots (ids, never tags). One provider per kind of client.
+const taggedProviders = { gm: () => new Set(), player: () => new Set() };
+export const setTaggedRefProvider = (fn, { player = false } = {}) => { taggedProviders[player ? "player" : "gm"] = typeof fn === "function" ? fn : () => new Set(); };
+const taggedRefs = () => (globalThis.game?.user?.isGM === false ? taggedProviders.player() : taggedProviders.gm());
+
+/** The ledger reference of an ordinary item: the UUID of what it was copied from (a world or compendium item), else its own. UNVERIFIED against a real PF2e actor item. */
+export function itemRefOf(item) {
+  return item._stats?.compendiumSource ?? item.flags?.core?.sourceId ?? item.uuid ?? null;
+}
+
+/** Every material stack an actor owns, with its quantity; and (Slice 1) every item the GM tagged in the ledger, counted like a material (materialId = the item reference). */
 export function getMaterialStacks(actor) {
-  return actor.items
+  const refs = taggedRefs();
+  const stacks = actor.items
     .map(item => ({ item, flags: getMaterialFlags(item) }))
     .filter(entry => entry.flags)
     .map(({ item, flags }) => ({
@@ -81,6 +93,14 @@ export function getMaterialStacks(actor) {
       tier: flags.tier,
       quantity: item.system?.quantity ?? 1
     }));
+  if (refs.size) {
+    for (const item of actor.items) {
+      if (getMaterialFlags(item)) continue;
+      const ref = itemRefOf(item);
+      if (ref && refs.has(ref)) stacks.push({ item, materialId: ref, tier: undefined, quantity: item.system?.quantity ?? 1, tagged: true });
+    }
+  }
+  return stacks;
 }
 
 // Creatures (for corpse yields, later stages) ------------------------------

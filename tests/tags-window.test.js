@@ -1,0 +1,116 @@
+/** The tag window (Slice 1, GM only) on the strict ApplicationV2 fake: tag a material and an item, refuse an item without a tier, create a tag, set a priority, set a slot's needs. */
+import test from "node:test";
+import assert from "node:assert/strict";
+import { DAGGER, as, env, getApi, world } from "./fake-world.js";
+import { asPage, seedRecords } from "./helpers.js";
+import { installFakeApplication } from "./fake-application.js";
+import { build } from "../scripts/tags/app.js";
+import { renderTagger, taggerModel } from "../scripts/tags/model.js";
+import { emptyLedger } from "../scripts/tags/ledger.js";
+
+const api = () => getApi();
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const ITEM = "Compendium.pf2e.equipment-srd.Item.TTTTTTTTTTTTTTTT";
+
+async function windowFor() {
+  const w = await world({ perClientDefinitions: true, downtime: 0, iron: 0, fang: 0 });
+  api().baseSources = seedRecords().map(({ file, data }) => ({ pack: "seed", entry: file, text: asPage(data) }));
+  api().editorLeftovers = [];
+  installFakeApplication();
+  const app = new (build())(api());
+  await as(w.gm, () => app.render({ force: true }));
+  const el = () => app.element;
+  const text = () => el().textContent.replace(/\s+/g, " ");
+  const click = async (action, where = "") => { const t = [...el().querySelectorAll(`[data-action="${action}"]${where}`)][0]; assert.ok(t, `${action}${where} is on the page`); await as(w.gm, async () => { t.click(); await wait(30); }); };
+  const set = async (selector, value) => {
+    const input = el().querySelector(selector);
+    assert.ok(input, `${selector} exists`);
+    if (input.type === "checkbox") input.checked = value; else input.value = value;
+    await as(w.gm, async () => { input.dispatchEvent(new window.Event("change", { bubbles: true })); await wait(30); });
+  };
+  return { w, app, el, text, click, set };
+}
+
+test("WINDOW: GM only", async () => {
+  const w = await world({ perClientDefinitions: true });
+  installFakeApplication();
+  const app = new (build())(api());
+  await as(w.annUser, () => app.render({ force: true }));
+  assert.match(app.element.textContent, /GM only/);
+});
+
+test("WINDOW: create a tag, give it a priority, tag a material with two tags, see it listed", async () => {
+  const { w, text, click, set } = await windowFor();
+  await click("tab", '[data-tab="tags"]');
+  await set('[data-field="new-tag-name"]', "Venom Tooth");
+  await click("create-tag");
+  assert.match(text(), /Made the tag Venom Tooth/);
+  assert.ok(api().definitions.tag.has("venom-tooth"));
+  assert.equal(api().definitions.tag.get("venom-tooth").theme, "Venom Tooth", "the theme defaults to the name");
+  await set('[data-field="new-tag-name"]', "Sharp Edge"); await set('[data-field="new-tag-theme"]', "cutting");
+  await click("create-tag");
+  await set('[data-field="priority"][data-tag="venom-tooth"]', "7");
+  await click("save-priority", '[data-tag="venom-tooth"]');
+  assert.match(text(), /Saved the priority/);
+  assert.equal(api().definitions.tag.get("venom-tooth").priority, 7);
+  await click("tab", '[data-tab="items"]');
+  await set('[data-field="material"]', "spider-fang");
+  await set('[data-field="tag"][data-tag="venom-tooth"]', true);
+  await set('[data-field="tag"][data-tag="sharp-edge"]', true);
+  await click("save-entry");
+  assert.match(text(), /Saved Spider Fang/);
+  assert.deepEqual(env.values.tagLedger.items["spider-fang"].tags, ["venom-tooth", "sharp-edge"]);
+  assert.match(text(), /Spider Fang[\s\S]*Venom Tooth[\s\S]*Sharp Edge/);
+  void w;
+});
+
+test("WINDOW: an item that is not a material cannot be saved without a tier; with one it is", async () => {
+  const { click, set, text } = await windowFor();
+  await as(getApiGm(), () => api().editor.create("tag", { name: "Venom Tooth", theme: "x" }, { makeItem: false }));
+  await click("tab", '[data-tab="items"]');
+  await set('[data-field="source"]', "item");
+  await set('[data-field="uuid"]', ITEM);
+  await set('[data-field="name"]', "Wolf Tooth");
+  await set('[data-field="tag"][data-tag="venom-tooth"]', true);
+  await click("save-entry");
+  assert.match(text(), /no tier of its own: give it one/);
+  assert.equal(env.values.tagLedger, undefined, "nothing was saved");
+  await set('[data-field="tier"]', "2");
+  await click("save-entry");
+  assert.match(text(), /Saved Wolf Tooth/);
+  assert.deepEqual(env.values.tagLedger.items[ITEM], { tags: ["venom-tooth"], tier: 2, name: "Wolf Tooth" });
+  await click("remove-entry", `[data-ref="${ITEM}"]`);
+  assert.match(text(), /Wolf Tooth is no longer tagged/);
+});
+const getApiGm = () => globalThis.game.users.get("gm1");
+
+test("WINDOW: set what a recipe slot needs, then take it back to the tier rule", async () => {
+  const { click, set, text } = await windowFor();
+  await as(getApiGm(), () => api().editor.create("tag", { name: "Venom Tooth", theme: "x" }, { makeItem: false }));
+  await click("tab", '[data-tab="slots"]');
+  await set('[data-field="recipe"]', DAGGER);
+  await set('[data-field="slot-tag"][data-slot="fang"][data-tag="venom-tooth"]', true);
+  await set('[data-field="slot-optional"][data-slot="fang"]', true);
+  await click("save-slot", '[data-slot="fang"]');
+  assert.match(text(), /Saved fang/);
+  assert.deepEqual(api().definitions.recipe.get(DAGGER).slots.find(s => s.name === "fang").needs, { all: ["venom-tooth"], optional: true });
+  assert.match(text(), /by tag/);
+  await click("clear-slot", '[data-slot="fang"]');
+  assert.equal(api().definitions.recipe.get(DAGGER).slots.find(s => s.name === "fang").needs, undefined);
+});
+
+test("WINDOW: saving a slot with no tag ticked says so instead of saving", async () => {
+  const { click, set, text } = await windowFor();
+  await click("tab", '[data-tab="slots"]');
+  await set('[data-field="recipe"]', DAGGER);
+  await set('[data-field="slot-optional"][data-slot="fang"]', true);
+  await click("save-slot", '[data-slot="fang"]');
+  assert.match(text(), /Pick at least one tag/);
+});
+
+test("MODEL: the markup escapes names (a hostile item name cannot inject markup)", () => {
+  const reg = { material: new Map(), tag: new Map([["x", { id: "x", name: "<img src=x onerror=1>", theme: "t" }]]), recipe: new Map() };
+  const html = renderTagger(taggerModel({ tab: "tags", draft: { source: "material", tags: [] } }, reg, emptyLedger()));
+  assert.ok(!html.includes("<img src=x"), html);
+  assert.match(html, /&lt;img src=x/);
+});

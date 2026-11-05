@@ -81,6 +81,7 @@ export function previewCraft(actor, recipeId, selection, api, stationId, { stack
 function studyGate(actor, selection, api, prepared) {
   const errors = [];
   for (const materialId of new Set(Object.values(selection ?? {}))) {
+    if (!api.definitions?.material?.has(materialId)) continue;     // an ordinary item the GM tagged (Slice 1) has no study
     let open = true;
     try { open = propertiesOpen(api, actor, materialId); } catch (error) { console.error(`${MODULE_ID} | could not check whether ${actor.name} has studied "${materialId}"`, error); }
     if (!open) errors.push(W.notStudied(api.definitions?.material.get(materialId)?.name ?? materialId));

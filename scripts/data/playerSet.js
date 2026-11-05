@@ -57,7 +57,7 @@ export const factsKey = facts => JSON.stringify(normalizeFacts(facts));
 // Fields the item editor adds (Stage 11d): the effect builder's source and the item's presentation. A player's item already carries its own name, image and price.
 const EDITOR_ONLY_FIELDS = ["img", "description", "bulk", "label", "retired", "effectBlocks", "recipeOverrides"];
 
-export function stripForPlayer(kind, record, { days, tagKnown = false, hasTrack: trackFlag } = {}) {
+export function stripForPlayer(kind, record, { days, tagKnown = false, hasTrack: trackFlag, fits } = {}) {
   const copy = structuredClone(record);
   if (kind === "region") { delete copy.spawnTable; delete copy.explorationDC; }
   if (kind === "nodeType") { delete copy.ladders; delete copy.charges; }
@@ -70,10 +70,13 @@ export function stripForPlayer(kind, record, { days, tagKnown = false, hasTrack:
   }
   if (kind === "note") { const hasTrack = trackFlag ?? Boolean(copy.research); return { kind: copy.kind, id: copy.id, name: copy.name, hasTrack }; }
   if (kind === "blueprint") delete copy.researchProject;
+  if (kind === "tag") delete copy.priority;
   if (kind === "recipe") {
     const out = { kind: copy.kind, id: copy.id, name: copy.name, category: copy.category };
     if (copy.baseRole) out.baseRole = copy.baseRole;
-    out.slots = copy.slots.map(s => ({ name: s.name, drives: s.drives, tierFloor: s.tierFloor, qty: s.qty }));
+    out.slots = copy.slots.map(s => ({ name: s.name, drives: s.drives, tierFloor: s.tierFloor, qty: s.qty,
+      // Tag-matched slot (Slice 1): never the tags themselves. `fits` is filled by the GM from what the character holds (selectRecords' fitsFor).
+      ...(s.needs ? { optional: Boolean(s.needs.optional), fits: fits?.(copy, s) ?? [] } : {}) }));
     Object.assign(out, { stationCategory: copy.stationCategory, stationTierMin: copy.stationTierMin, skillWhitelist: copy.skillWhitelist, days: days ?? { default: 1, byStation: {} } });
     if (copy.overrides?.length) out.overrideSlots = [...new Set(copy.overrides.map(o => `${o.slot}|${o.materialId}`))].sort();
     return out;
@@ -96,9 +99,9 @@ export function stationIdsFor(rawFacts, registry) {
  * @returns {{ records: Array<{ kind: string, data: object }>, missingRecipes: string[], recipeIds: string[] }}
  *   missingRecipes = formulas held with no recipe in the GM's registry (a truly orphaned formula).
  */
-export function selectRecords(rawFacts, registry, { daysFor, tagKnownFor, hasTrackFor } = {}) {
+export function selectRecords(rawFacts, registry, { daysFor, tagKnownFor, hasTrackFor, fitsFor } = {}) {
   const facts = normalizeFacts(rawFacts);
-  const pick = (kind, ids) => ids.map(id => registry[kind]?.get(id)).filter(Boolean).map(data => ({ kind, data: stripForPlayer(kind, data, { days: kind === "recipe" ? daysFor?.(data) : undefined, tagKnown: kind === "material" ? Boolean(tagKnownFor?.(data)) : false, hasTrack: hasTrackFor ? hasTrackFor(kind, data) : undefined }) }));
+  const pick = (kind, ids) => ids.map(id => registry[kind]?.get(id)).filter(Boolean).map(data => ({ kind, data: stripForPlayer(kind, data, { days: kind === "recipe" ? daysFor?.(data) : undefined, fits: kind === "recipe" ? fitsFor : undefined, tagKnown: kind === "material" ? Boolean(tagKnownFor?.(data)) : false, hasTrack: hasTrackFor ? hasTrackFor(kind, data) : undefined }) }));
   const all = key => unique(facts.actors.flatMap(a => a[key]));
 
   const formulaIds = all("formulas");

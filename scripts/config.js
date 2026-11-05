@@ -357,3 +357,10 @@ export const EFFECTS = {
   cardFlag: "fx",                    // the flag on the GM's card message
   craftedFlag: "crafted"             // the flag on a crafted item (written by buildCraftedItemData)
 };
+
+/** The tag system (Slice 1, docs/22-tags-slice1.md). The ledger is GM-only world data: item reference -> { tags, tier, name }. */
+export const TAGS = {
+  ledgerSetting: "tagLedger",
+  ledgerVersion: 1,
+  priorityRange: { min: -1000, max: 1000 }
+};

@@ -17,6 +17,7 @@ import { renderHubPage, rootAttributes } from "../scripts/hub/render.js";
 import { draftFor, editorModel, renderEditor } from "../scripts/editor/model.js";
 import { doneContent, pendingContent } from "../scripts/effects/card.js";
 import { flat, spread } from "../scripts/editor/blocks.js";
+import { renderTagger, taggerModel } from "../scripts/tags/model.js";
 import { BENCH, BIG_PROJECT, BOOK_ENTRIES, FORGE, LEAD, PROJECT, STAR_EFFECT, STEEL_EFFECT, UPGRADE, compendiumFacts, compendiumState, makeBook, makeFacts, makeState, researchFacts, researchState } from "../tests/hub-fixtures.js";
 
 const cssUrl = pathToFileURL(new URL("../styles/hub.css", import.meta.url).pathname).href;
@@ -111,6 +112,17 @@ const editorRegistry = (n = 300) => {
 };
 const EDITOR_REGISTRY = editorRegistry();
 const RECORDS = { "material:gate-m3": { mode: "new" }, "material:gate-m6": { mode: "patch" }, "material:gate-m4": { mode: "patch" } };
+// The item tags window (Slice 1, GM only): a registry with long tag names and many items, so the form, the tag boxes and the slot rows are checked at every width.
+const taggerRegistry = () => {
+  const reg = { ...EDITOR_REGISTRY, tag: new Map(), recipe: new Map(EDITOR_REGISTRY.recipe) };
+  for (let i = 0; i < 6; i++) reg.tag.set(`gate-tag-${i}`, { kind: "tag", id: `gate-tag-${i}`, name: i === 1 ? "A tag with a really quite long name indeed" : `Gate Tag ${i}`, theme: "a theme", priority: i });
+  reg.recipe.set("gate-r7", { kind: "recipe", id: "gate-r7", name: "Gate Recipe Seven", category: "weapon", slots: [{ name: "blade", drives: "basePower", tierFloor: 1, qty: 1, needs: { all: ["gate-tag-0", "gate-tag-1"], optional: false } }, { name: "a slot with a long name to see it wrap", drives: "specialAbility", tierFloor: 2, qty: 1 }] });
+  return reg;
+};
+const TAGGER_REGISTRY = taggerRegistry();
+const TAGGER_LEDGER = { v: 1, items: { "Compendium.pf2e.equipment-srd.Item.BBBBBBBBBBBBBBBB": { tags: ["gate-tag-1", "gate-tag-2", "gate-tag-3"], tier: 2, name: "Gate Wolf Tooth With A Name That Is Quite Long Indeed" } } };
+const taggerScene = ui => ({ tagger: { ui: { draft: { source: "material", ref: "", uuid: "", name: "", tags: [], tier: "", editing: false }, recipeId: "", slotDrafts: {}, newTag: { name: "", theme: "" }, priorities: {}, message: "", ...ui }, registry: TAGGER_REGISTRY, ledger: TAGGER_LEDGER } });
+
 const editorScene = (key, over = {}) => {
   const base = key ? draftFor(EDITOR_REGISTRY, {}, key) : null;
   const { tweak, ...rest } = over;
@@ -129,6 +141,10 @@ export const SCENES = {
   fxCardPending: { card: pendingContent(CARD_TEXT) },
   fxCardDone: { card: doneContent(CARD_TEXT, [{ name: "Gate Goblin Skirmisher Number Twelve", lines: ["is fearful", "is off guard"] }, { name: "Gate Goblin Archer", lines: ["shrugs it off"] }]) },
   editorEmpty: editorScene(null),
+  taggerItems: taggerScene({ tab: "items", draft: { source: "item", ref: "", uuid: "Compendium.pf2e.equipment-srd.Item.AAAAAAAAAAAAAAAA", name: "A Very Long Item Name That Keeps Going To See How The Form Wraps In A Narrow Window", tags: ["gate-tag-1"], tier: "", editing: false }, message: "An item without a material record has no tier of its own: give it one (the tag effects will scale by it)." }),
+  taggerMaterial: taggerScene({ tab: "items", draft: { source: "material", ref: "gate-m4", uuid: "", name: "", tags: ["gate-tag-0", "gate-tag-2"], tier: 3, editing: true } }),
+  taggerSlots: taggerScene({ tab: "slots", recipeId: "gate-r7", slotDrafts: {} }),
+  taggerTags: taggerScene({ tab: "tags", newTag: { name: "A new tag with a long name", theme: "what it stands for, in a rather long sentence that must wrap" }, priorities: { "gate-tag-1": "12" } }),
   editor300: editorScene("material:gate-m4", { effectClass: "weapon" }),
   editorRows: editorScene("material:gate-m8", { effectClass: "weapon", tweak: d => ({ ...d, fields: { ...d.fields, name: "", tier: "7" }, rows: [{ steps: "4", type: "properties", recipeId: "" }, { steps: "4", type: "formula", recipeId: "" }, { steps: "abc", type: "formula", recipeId: "gate-blade" }] }) }),
   editorFiltered: editorScene("note:gate-n5", { filters: { search: "unbroken", kinds: ["material", "note"], track: "has", retired: true }, collapsed: ["recipe"] }),
@@ -340,7 +356,7 @@ export async function renderState(page, { scene, theme = "parchment", textSize =
   const spec = SCENES[scene];
   const layout = width < HUB.stackBelowPx ? "narrow" : "wide";
   const display = { theme, textSize, font };
-  const html = spec.card ? spec.card.replace('data-layout="narrow"', Object.entries(rootAttributes({ layout, display })).map(([k, v]) => `${k}="${String(v).replace(/"/g, "&quot;")}"`).join(" ")) : spec.editor ? renderEditor(editorModel({ ...spec.editor, layout, display })) : renderHubPage(hubModel(spec.facts, { ...spec.state, layout, display }), announce ? [announce] : []);
+  const html = spec.card ? spec.card.replace('data-layout="narrow"', Object.entries(rootAttributes({ layout, display })).map(([k, v]) => `${k}="${String(v).replace(/"/g, "&quot;")}"`).join(" ")) : spec.tagger ? renderTagger(taggerModel({ ...spec.tagger.ui, layout, display }, spec.tagger.registry, spec.tagger.ledger)) : spec.editor ? renderEditor(editorModel({ ...spec.editor, layout, display })) : renderHubPage(hubModel(spec.facts, { ...spec.state, layout, display }), announce ? [announce] : []);
   const frameHeight = height ?? (layout === "narrow" ? null : 820);
   await page.setViewportSize({ width, height: frameHeight ?? 900 });
   await page.evaluate(({ html, hostileCss, extraCss, frameHeight }) => {

@@ -84,7 +84,8 @@ const material = obj({
 });
 
 // A tag: the theme a family of materials shares ("Mitflit parts: cowardice, which works with frightened").
-const tagDef = obj({ kind: kind("tag"), id: idField(), name: str(), theme: str(), worksWith: optional(str()) });
+// `priority` (Slice 1 of the tag system) is a GM-set number that later breaks ties between equal-tier tags when tags are passed up in nested crafts. Stored and edited only for now; GM-only (a player copy drops it).
+const tagDef = obj({ kind: kind("tag"), id: idField(), name: str(), theme: str(), worksWith: optional(str()), priority: optional(int({ min: -1000, max: 1000 })) });
 
 // A note: a Foundry item (flag `note`) that points at a formula. With a research track it offers a lead; without one it does nothing.
 const noteDef = obj({ kind: kind("note"), id: idField(), name: str(), recipeId: idField(), research: optional(track), img: optional(str()), description: optional(str()), bulk: optional(bulkValue), label: optional(str()), retired: optional(bool()), preset: optional(oneOf(["plan", "research"])) });
@@ -136,7 +137,9 @@ const recipe = obj({
     drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }),
     tierFloor: tier(TIER_RANGES.material),
     qty: int({ min: 1 }),
-    lossChance: optional(int({ min: 0, max: 100 }))
+    lossChance: optional(int({ min: 0, max: 100 })),
+    // Slice 1 of the tag system: the slot takes any item carrying ALL these tags (and at or above tierFloor). `optional` slots may stay empty. A slot without `needs` is exactly as before.
+    needs: optional(obj({ all: arr(idField(), { min: 1 }), optional: optional(bool()) }))
   }), {
     min: 1,
     refine(slots, path, errors) {
@@ -330,7 +333,9 @@ const playerRecipe = obj({
   name: str(),
   category: str(),
   baseRole: optional(oneOf(["basePower", "spellPower"])),
-  slots: arr(obj({ name: str(), drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
+  slots: arr(obj({ name: str(), drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }),
+    // A slot that matches by tags carries NO tags for a player: only whether it may stay empty and which of the character's own items fit it (computed on the GM, names only).
+    optional: optional(bool()), fits: optional(arr(obj({ id: str(), name: str() }))) }), { min: 1 }),
   stationCategory: str(),
   stationTierMin: tier(TIER_RANGES.station),
   skillWhitelist: arr(str(), { min: 1 }),

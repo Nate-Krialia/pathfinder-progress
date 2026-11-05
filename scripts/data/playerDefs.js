@@ -22,6 +22,8 @@ import { stationReductions } from "../workshop/rules.js";
 import { craftDays } from "../crafting/days.js";
 import { overlay, propertiesOpen } from "../discovery/store.js";
 import { itemKey, trackOf } from "../discovery/track.js";
+import { fittingRefs, itemName } from "../tags/ledger.js";
+import { getLedger } from "../tags/current.js";
 
 let boundApi = null;
 export const bind = api => { boundApi = api; };
@@ -127,7 +129,10 @@ export async function runDefinitionsFor(payload, context) {
   const heldBy = facts.actors.map(a => game.actors.get(a.id)).filter(Boolean);
   const tagKnownFor = material => heldBy.some(actor => propertiesOpen(api, actor, material.id));
   const hasTrackFor = (kind, data) => Boolean(trackOf(data, overlay(), itemKey(kind, data.id)));
-  const { records, missingRecipes, recipeIds } = selectRecords(facts, api.definitions, { daysFor, tagKnownFor, hasTrackFor });
+  // Tag-matched slots (Slice 1): which of what the character HOLDS fits each slot. Only the item's id and name leave the GM client, never a tag or a tier.
+  const held = [...new Set(heldBy.flatMap(actor => { try { return adapter.getMaterialStacks(actor).map(st => st.materialId); } catch { return []; } }))];
+  const fitsFor = (recipe, slot) => fittingRefs(slot, held, api.definitions, getLedger()).map(id => ({ id, name: itemName(id, api.definitions, getLedger()) }));
+  const { records, missingRecipes, recipeIds } = selectRecords(facts, api.definitions, { daysFor, tagKnownFor, hasTrackFor, fitsFor });
   return {
     records,
     missingRecipes,
@@ -137,9 +142,10 @@ export async function runDefinitionsFor(payload, context) {
 }
 
 /** A short fingerprint of the GM's registry, so the revision only changes when a definition really did. */
-export function digestOf(registry, uncraftable, trackKeys = []) {
+export function digestOf(registry, uncraftable, trackKeys = [], ledger = null) {
   const text = JSON.stringify([...Object.entries(registry)].sort(([a], [b]) => a.localeCompare(b)).map(([kind, map]) => [kind, [...map.values()].sort((a, b) => a.id.localeCompare(b.id))]))
-    + JSON.stringify([...(uncraftable ?? [])].sort()) + JSON.stringify([...trackKeys].sort());
+    + JSON.stringify([...(uncraftable ?? [])].sort()) + JSON.stringify([...trackKeys].sort())
+    + (ledger && Object.keys(ledger.items ?? {}).length ? JSON.stringify(ledger) : "");     // only the fingerprint is published, never the ledger
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   return h.toString(36);
@@ -148,7 +154,7 @@ export function digestOf(registry, uncraftable, trackKeys = []) {
 /** GM: tell every player client the definitions may have changed. Writes the setting only if the registry really is different. */
 export async function publishDefinitions(api) {
   if (!game.user.isGM) throw new Error("publishDefinitions: GM only");
-  const digest = digestOf(api.definitions, api.uncraftable, Object.keys(overlay()));
+  const digest = digestOf(api.definitions, api.uncraftable, Object.keys(overlay()), getLedger());
   if ((game.settings.get(MODULE_ID, DEFINITIONS_SYNC.revisionSetting) ?? "") === digest) return { changed: false, revision: digest };
   await game.settings.set(MODULE_ID, DEFINITIONS_SYNC.revisionSetting, digest);
   return { changed: true, revision: digest };
@@ -157,12 +163,16 @@ export async function publishDefinitions(api) {
 // Player side -----------------------------------------------------------------------------------------------------------
 const revisionNow = () => String(game.settings.get(MODULE_ID, DEFINITIONS_SYNC.revisionSetting) ?? "");
 
+/** Slice 1: does the player's copy hold any tag-matched slot? Then a change in how many items they own is worth asking about (a newly picked-up item may now fit). */
+const taggedSlotsInUse = () => [...(boundApi?.definitions?.recipe?.values() ?? [])].some(r => r.slots.some(s => Array.isArray(s.fits)));
+const ownedItemCount = () => ownedCharacters(game.user).reduce((n, a) => n + (a.items?.size ?? 0), 0);
+
 let inflight = null;
 let again = null;        // { force } wanted while a load was running
 
 async function loadOnce({ force }) {
   const state = defsState();
-  const key = `${factsKey(gatherFacts(game.user))}|r${revisionNow()}`;
+  const key = `${factsKey(gatherFacts(game.user))}|r${revisionNow()}${taggedSlotsInUse() ? `|i${ownedItemCount()}` : ""}`;
   if (!force && state.status === "ready" && state.key === key) return { changed: false };
   if (state.status !== "ready") state.status = "loading";
   let result;
@@ -176,6 +186,7 @@ async function loadOnce({ force }) {
   const { registry, errors } = loadPlayerRecords(result?.records);
   if (errors.length) console.error(`${MODULE_ID} | the GM sent definitions this client could not load:\n${errors.join("\n")}`);
   boundApi.definitions = attachRefresh(registry);
+  adapter.setTaggedRefProvider(() => new Set([...registry.recipe.values()].flatMap(r => r.slots.flatMap(sl => (sl.fits ?? []).map(f => f.id)))), { player: true });   // the items the GM says fit one of my slots count as stacks
   boundApi.resolvedOutputs = new Map();     // a player never receives the output items (docs/11b)
   boundApi.uncraftable = new Set(result?.uncraftable ?? []);
   boundApi.contexts = new Map();
@@ -242,8 +253,8 @@ export function installPlayerHooks(hooks = globalThis.Hooks) {
     const flags = changes?.flags?.[MODULE_ID];
     if (flags && MODULE_FLAGS_THAT_MATTER.some(key => key in flags)) schedule("character");
   });
-  on("createItem", item => { if (mine(item?.parent) && item.getFlag?.(MODULE_ID, "material")) schedule("inventory"); });
-  on("deleteItem", item => { if (mine(item?.parent) && item.getFlag?.(MODULE_ID, "material")) schedule("inventory"); });
+  on("createItem", item => { if (mine(item?.parent) && (item.getFlag?.(MODULE_ID, "material") || taggedSlotsInUse())) schedule("inventory"); });
+  on("deleteItem", item => { if (mine(item?.parent) && (item.getFlag?.(MODULE_ID, "material") || taggedSlotsInUse())) schedule("inventory"); });
   on("updateUser", (user, changes) => { if (user?.id === game.user.id && changes && "character" in changes) schedule("character"); });
   on("canvasReady", () => schedule("scene"));
   on("updateScene", (scene, changes) => { if (changes?.flags?.[MODULE_ID]) schedule("scene tags"); });
