@@ -670,8 +670,9 @@ await (async () => {
 - Look at the GM chat. You should see: ONE new whispered card, "Gate G21 Mitflit Draught was used, but no one is targeted. Target or select who it affects, then press Apply: dazzles the target."
 - Press **Apply** with nothing targeted. You should see: a warning "Target or select a token first, then press Apply." and the card keeps its buttons.
 - In the **GM** window click the **Goblin A** token and press **T**, then click the **Goblin B** token and press **T** too (Shift-click to keep both), so both are targeted.
-- Press **Apply** on the card.
+- Press **Apply** on the card. Each goblin's reflex save is rolled for real and in secret, so a goblin may be dazzled or may shrug it off; the block reads the GM log to learn which, and then checks the card and the condition against that.
 - Run the block below. You should see: `ALL PASS`.
+- Note: the pipeline forces the saves for this step (Goblin A fails, Goblin B passes), and the block then also checks that exactly that happened.
 
 ```js
 // [GM] The fallback card: no target at first; applied to the GM's own two targets.
@@ -683,7 +684,18 @@ await (async () => {
   g.check("it is the fallback card, with no target on it", fx?.fallback === true && fx.targets.length === 0);
   g.check("it was applied to the GM's targets (press Apply with both goblins targeted first if this fails)", fx?.state === "done", fx?.state);
   const text = (card?.content ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
-  g.check("the result names both goblins in plain words", /Gate G21 Goblin A (is dazzled|shrugs it off)\./.test(text) && /Gate G21 Goblin B (is dazzled|shrugs it off)\./.test(text), text.slice(-140));
+  const degreeOf = who => { const entry = g.api.gm.log({ kind: "effect" }).find(e => e.actorName === `Gate G21 ${who}` && /Draught/.test(e.text)); return { degree: (entry?.text.match(/save vs DC \d+: (\w+)/) ?? [])[1] ?? null, entry: entry?.text ?? null }; };
+  const lineFor = degree => (degree === "failure" || degree === "criticalFailure" ? "is dazzled." : degree ? "shrugs it off." : null);
+  const A = degreeOf("Goblin A"), B = degreeOf("Goblin B");
+  const sentence = who => (text.match(new RegExp(`Gate G21 ${who} (is dazzled|shrugs it off)\\.`)) ?? [])[0] ?? null;
+  const expectA = lineFor(A.degree) && `Gate G21 Goblin A ${lineFor(A.degree)}`, expectB = lineFor(B.degree) && `Gate G21 Goblin B ${lineFor(B.degree)}`;
+  const values = JSON.stringify({ logA: A.entry, logB: B.entry, degreeA: A.degree, degreeB: B.degree, expectA, expectB, sentenceA: sentence("Goblin A"), sentenceB: sentence("Goblin B"), forcedMixed: g.forcedMixed === true, dazzledA: Boolean(g.token("Goblin A").actor.getCondition("dazzled")), dazzledB: Boolean(g.token("Goblin B").actor.getCondition("dazzled")), text: text.slice(-200) });
+  g.check("each goblin's save was rolled once for the Draught (both are in the GM log)", Boolean(A.degree) && Boolean(B.degree), values);
+  g.check("Goblin A's line is exactly the one its save result gives", sentence("Goblin A") === expectA, values);
+  g.check("Goblin B's line is exactly the one its save result gives", sentence("Goblin B") === expectB, values);
+  g.check("a goblin that failed its save has the condition (Goblin A may already have it from Step 20 if it passed)", (lineFor(A.degree) !== "is dazzled." || Boolean(g.token("Goblin A").actor.getCondition("dazzled"))) && (lineFor(B.degree) !== "is dazzled." || Boolean(g.token("Goblin B").actor.getCondition("dazzled"))), values);
+  g.check("Goblin B passed its save, so it does not have the condition", lineFor(B.degree) !== "shrugs it off." || !g.token("Goblin B").actor.getCondition("dazzled"), values);
+  if (g.forcedMixed) g.check("forced run: Goblin A failed and Goblin B passed, so exactly one goblin is dazzled by this card", A.degree === "failure" && B.degree === "success" && sentence("Goblin A") === "Gate G21 Goblin A is dazzled." && sentence("Goblin B") === "Gate G21 Goblin B shrugs it off.", values);
   g.check("Goblin B's token is linked, so the world actor is the same one", g.token("Goblin B").actor === g.world("B"));
   return g.done();
 })();

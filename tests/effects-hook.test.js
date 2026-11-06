@@ -9,6 +9,7 @@ import * as adapter from "../scripts/adapter/pf2e-effects.js";
 import { createEffects } from "../scripts/effects/hook.js";
 import { findLeaks, EFFECT_SECRET_KEYS, LEAK_WORDS } from "../scripts/effects/plain.js";
 import { levelDC } from "../scripts/adapter/pf2e.js";
+import { EFFECTS } from "../scripts/config.js";
 import { loadDefinitions } from "../scripts/data/validate.js";
 import { CHAT_LEAK, asPage } from "./helpers.js";
 
@@ -130,6 +131,45 @@ test("a consumable: ONE card for the first use card (the second within ~10 s is 
   assert.deepEqual(again.flags[M].fx.targets, []);
   assert.match(again.content, /no one is targeted/);
   assert.equal(t.all().length, 2);
+});
+
+test("two consumable cards that arrive together (no await between them) make exactly ONE card", async () => {
+  const t = setup();
+  const hero = actorOf("Hero"), a = token("Goblin A", actorOf("Goblin A"));
+  addItem(hero, "C1", "Mitflit Draught", flagFor("g21-potion"));
+  const [one, two] = await Promise.all([t.effects.onMessage(consumableMessage(hero, "C1", [a])), t.effects.onMessage(consumableMessage(hero, "C1", [a]))]);
+  assert.equal([one, two].filter(Boolean).length, 1, JSON.stringify({ first: Boolean(one), second: Boolean(two), cards: t.all().length }));
+  assert.equal(t.all().length, 1, "one card in the chat");
+});
+
+test("a second Use AFTER the 10 second window is a second use: a second card (the window is EFFECTS.dedupeMs)", async () => {
+  const t = setup();
+  const hero = actorOf("Hero"), a = token("Goblin A", actorOf("Goblin A"));
+  addItem(hero, "C1", "Mitflit Draught", flagFor("g21-potion"));
+  assert.ok(await t.effects.onMessage(consumableMessage(hero, "C1", [a])));
+  t.tick(EFFECTS.dedupeMs - 1);
+  assert.equal(await t.effects.onMessage(consumableMessage(hero, "C1", [a])), null, "just inside the window: the same use");
+  t.tick(EFFECTS.dedupeMs + 1);
+  assert.ok(await t.effects.onMessage(consumableMessage(hero, "C1", [a])), "after the window: a new use, a new card");
+  assert.equal(t.all().length, 2);
+});
+
+test("a fallback card with two GM targets and mixed saves: only the one that fails gets the condition, the other's line says it shrugs it off", async () => {
+  const t = setup();
+  const hero = actorOf("Hero"), failer = actorOf("Goblin A", { degree: 1 }), passer = actorOf("Goblin B", { degree: 2 });
+  addItem(hero, "C1", "Mitflit Draught", flagFor("g21-potion"));
+  const card = await t.effects.onMessage(consumableMessage(hero, "C1", []));
+  assert.equal(card.flags[M].fx.fallback, true);
+  game.user.targets = new Set([{ document: token("Goblin A", failer) }, { document: token("Goblin B", passer) }]);
+  const out = await t.effects.applyCard(card.id);          // no forceDegree: each goblin's own save is rolled, A fails and B passes
+  game.user.targets = new Set();
+  const text = card.content.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+  const seen = JSON.stringify({ ok: out.ok, results: out.results, text: text.slice(-160), a: [...failer.conds], b: [...passer.conds] });
+  assert.equal(out.ok, true, seen);
+  assert.ok(failer.conds.has("dazzled") && !passer.conds.has("dazzled"), seen);
+  assert.match(text, /Goblin A is dazzled\./, seen);
+  assert.match(text, /Goblin B shrugs it off\./, seen);
+  assert.deepEqual(failer.rolls.map(r => r[0]), ["reflex"]); assert.deepEqual(passer.rolls.map(r => r[0]), ["reflex"]);
 });
 
 test("an unlinked token: the item is found through the token's actor (origin.uuid points at the world actor's item), and the condition lands on the token's actor", async () => {

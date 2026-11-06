@@ -156,10 +156,11 @@ test("GATE 21: every step runs in order (the click steps by real clicks on the e
       await post(useAs(names)); await post(useAs(names));      // PF2e posts the use card, a second card, then a damage-taken message
       await post({ id: "dmg-taken", flags: { pf2e: { context: { type: "damage-taken" } } }, author: { targets: new Set() } });
     },
-    pressApply: async (match, { degree, fallback } = {}) => {
+    pressApply: async (match, { degree, degrees, fallback } = {}) => {
       const card = newest(m => m.getFlag?.(M, "fx")?.state === "pending" && (fallback ? m.getFlag(M, "fx").fallback && match && new RegExp(match).test(m.content) : new RegExp(match).test(m.getFlag(M, "fx").text)));
       assert.ok(card, `a pending card matching "${match}" is there`);
       if (!fallback && degree) tok("Goblin A").actor.degree = 1;
+      for (const [name, result] of Object.entries(degrees ?? {})) tok(name).actor.degree = { criticalFailure: 0, failure: 1, success: 2, criticalSuccess: 3 }[result];     // each goblin's own save, no forced degree for the whole card
       assert.equal((await api.effects.applyCard(card.id, degree && fallback ? { forceDegree: degree } : undefined)).ok, true);
     },
     pressApplyRefused: async () => {

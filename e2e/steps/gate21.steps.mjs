@@ -6,7 +6,8 @@
 //   targetTokens(who, names[])             that user targets exactly these tokens ([] = nobody)
 //   strike(outcome, itemName)              the selected token Strikes the targeted one with the item; outcome is the die result to force (success / criticalFailure), a real run rolls until it gets it or asks the GM to
 //   useConsumable(names[])                 the selected token uses the Draught on these targets ([] = nobody targeted)
-//   pressApply(match, { degree })          the GM presses Apply on the newest pending effect card whose text matches (degree forces the secret save's result)
+//   pressApply(match, { degree, degrees }) the GM presses Apply on the newest pending effect card whose text matches (degree forces the secret save's result for every target;
+//                                          degrees is { "Goblin A": "failure", "Goblin B": "success" }: it forces each NAMED goblin's save on its own, a real run sets each target's roll before pressing Apply)
 //   pressApplyRefused()                    the GM presses Apply on the fallback card with nothing targeted: it must refuse and leave the card
 //   advance(ms)                            let the "same card" window pass (the module's duplicate guard)
 // No imports, no Node, no closures over the page: only the ctx the player hands in.
@@ -60,7 +61,9 @@ export default {
       await x(ctx, "useConsumable", []);
       await x(ctx, "pressApplyRefused");
       await x(ctx, "targetTokens", "gm", ["Goblin A", "Goblin B"]);
-      await x(ctx, "pressApply", "no one is targeted", { degree: "failure", fallback: true });
+      // Step 23's mixed result: A fails its save, B passes. Both are cleared first so the condition is the card's own work; the block then expects exactly that.
+      await ctx.drivers.gm.evaluate(async () => { const g = globalThis.__g21; g.forcedMixed = true; for (const name of ["Goblin A", "Goblin B"]) await g.clear(g.token(name).actor); });
+      await x(ctx, "pressApply", "no one is targeted", { degrees: { "Goblin A": "failure", "Goblin B": "success" }, fallback: true });
     }
   }
 };

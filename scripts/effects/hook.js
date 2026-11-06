@@ -35,6 +35,7 @@ export function createEffects(deps) {
     if (event.kind === "consumable" && event.originUuid) {
       const at = seenOrigins.get(event.originUuid);
       if (at !== undefined && now() - at < EFFECTS.dedupeMs) return null;      // the second card (Use pressed on the first) is the same use
+      seenOrigins.set(event.originUuid, now());      // recorded HERE, before the first await below: two cards that arrive together cannot both pass the check above
     }
     const item = await adapter.resolveItem(event, message);
     const flag = adapter.craftedFlag(item);
@@ -45,7 +46,6 @@ export function createEffects(deps) {
     const decision = decide(event, itemClass, own.length);
     if (decision === "skip") return null;
     if (event.messageId) seenMessages.add(event.messageId);
-    if (event.kind === "consumable" && event.originUuid) seenOrigins.set(event.originUuid, now());
     const targets = decision === "fallback" ? [] : own;
     const text = headline({ itemName: item.name, kind: event.kind === "attack" || event.kind === "consumable" ? event.kind : "other", outcome: event.outcome, itemClass, targetNames: await names(targets), mode: decision, lines: linesFor(effects) });
     return chat.create(cardMessage({ whisper: chat.gmIds(), flag: cardFlag({ itemUuid: item.uuid, targets, effects: effects.map(e => e.index), fallback: decision === "fallback", text }) }));
