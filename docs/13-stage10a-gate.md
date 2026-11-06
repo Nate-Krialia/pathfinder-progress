@@ -185,9 +185,11 @@ await (async () => {
   const p = globalThis.__p ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
   const [action] = p.pending();
   const result = await p.api.queue.cancel(p.hero, action.id);
+  const end = Date.now() + 6000;      // the cancel is relayed to the GM: wait for the update to arrive here
+  while (Date.now() < end && JSON.stringify(p.look()) !== JSON.stringify(p.base)) await new Promise(r => setTimeout(r, 150));
   const after = p.look();
   p.check("cancel refunded 2 days", result.refunded === 2, JSON.stringify(result));
-  p.check("gold, ore and days are exactly as at the start", JSON.stringify(after) === JSON.stringify(p.base), JSON.stringify(after));
+  p.check("gold, ore and days are exactly as at the start", JSON.stringify(after) === JSON.stringify(p.base), JSON.stringify({ base: p.base, after }));
   const again = await p.refused(() => p.api.queue.cancel(p.hero, action.id));
   p.check("a second cancel is refused with the plain message (nothing is returned twice)", /^Gate Hero has no queued action "[^"]+"$/.test(again ?? ""), again);
   p.check("still exactly as at the start", JSON.stringify(p.look()) === JSON.stringify(p.base));
@@ -373,6 +375,8 @@ await (async () => {
   p.check("queued with downtime closed, no days", first.type === "gather" && first.daysReserved === 0 && p.look().free === before.free);
   p.check("one charge is claimed on the node", record().reservedCharges === 1 && record().charges === 3, JSON.stringify(record()));
   await p.api.queue.cancel(p.hero, first.id);
+  const until = Date.now() + 6000;    // relayed to the GM: wait for the update to arrive here
+  while (Date.now() < until && "reservedCharges" in record()) await new Promise(r => setTimeout(r, 150));
   p.check("cancel gave the charge back (no claim left)", !("reservedCharges" in record()) && record().charges === 3, JSON.stringify(record()));
   const second = await p.api.queue.submit(p.hero, "gather", target);
   p.check("queued again", p.pending().some(a => a.id === second.id) && record().reservedCharges === 1);

@@ -323,7 +323,8 @@ await (async () => {
   p.check("sharing the same thing twice is refused", again === "Gate Ore is already waiting for the GM to approve sharing it.", again);
   const result = await p.api.queue.cancel(p.hero, wolf.id);
   p.check("cancelling the wolf share works", result.cancelled === true || result.refunded === 0, JSON.stringify(result));
-  p.check("2 shares are left waiting", p.pending().filter(a => a.type === "share").length === 2);
+  const left = await p.until(() => p.pending().filter(a => a.type === "share").length === 2);   // relayed to the GM: wait for the update to arrive here
+  p.check("2 shares are left waiting", Boolean(left), JSON.stringify(p.pending().map(a => [a.type, a.id])));
   return p.done();
 })();
 ```
@@ -411,7 +412,8 @@ await (async () => {
   p.check("it is labelled 'no effect yet'", hearth.goalName === "Yard Bench: hearth 1 (no effect yet)", hearth.goalName);
   p.check("2 Gate Ore are held", p.look().ore === before.ore - 2);
   const back = await p.api.workshop.putAside(p.hero, hearth.id);
-  p.check("putting it aside returns exactly the 2 Gate Ore", JSON.stringify(back) === JSON.stringify({ returned: [{ materialId: "g2-ore", units: 2 }] }) && JSON.stringify(p.look()) === JSON.stringify(before), JSON.stringify([back, p.look()]));
+  const settled = await p.until(() => JSON.stringify(p.look()) === JSON.stringify(before));   // relayed to the GM: wait for the update to arrive here
+  p.check("putting it aside returns exactly the 2 Gate Ore", JSON.stringify(back) === JSON.stringify({ returned: [{ materialId: "g2-ore", units: 2 }] }) && Boolean(settled), JSON.stringify({ before, afterPutAside: p.look(), back }));
   const again = await p.refused(() => p.api.workshop.putAside(p.hero, hearth.id));
   p.check("a second put-aside is refused and returns nothing", again === '"Yard Bench: hearth 1 (no effect yet)" is abandoned, not active.' && JSON.stringify(p.look()) === JSON.stringify(before), again);
   const row = p.api.stationsFor(p.hero).find(s => s.id === "g2-bench");
@@ -458,7 +460,8 @@ await (async () => {
   p.check("1 day is reserved (2 days minus 2 cuts, but never below 1)", action.daysReserved === 1 && after.reserved === 1, action.daysReserved);
   p.check("the 1 gp station fee and 2 Gate Ore were taken", action.params.escrow.feeCopper === 100 && after.gold === before.gold - 1 && after.ore === before.ore - 2, JSON.stringify(after));
   const result = await p.api.queue.cancel(p.hero, action.id);
-  p.check("cancel gives everything back", JSON.stringify(p.look()) === JSON.stringify(before), JSON.stringify([result, p.look()]));
+  const settled = await p.until(() => JSON.stringify(p.look()) === JSON.stringify(before));   // the cancel is relayed to the GM: wait for the update to arrive here
+  p.check("cancel gives everything back", Boolean(settled), JSON.stringify({ before, afterCancel: p.look(), result, pending: p.pending().map(a => a.id) }));
   return p.done();
 })();
 ```
@@ -547,10 +550,11 @@ await (async () => {
   const p = globalThis.__p2 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
   const build = p.pending().find(a => a.type === "build");
   const result = await p.api.queue.cancel(p.hero, build.id);
-  p.check("everything is exactly as before the build was queued", JSON.stringify(p.look()) === JSON.stringify(p.keep.beforeBuild ?? p.look()) && p.keep.beforeBuild !== undefined, JSON.stringify([result, p.look(), p.keep.beforeBuild]));
+  const settled = await p.until(() => p.keep.beforeBuild !== undefined && JSON.stringify(p.look()) === JSON.stringify(p.keep.beforeBuild));   // relayed to the GM: wait for the update to arrive here
+  p.check("everything is exactly as before the build was queued", Boolean(settled), JSON.stringify({ beforeBuild: p.keep.beforeBuild, afterCancel: p.look(), result, pending: p.pending().map(a => a.id) }));
   const again = await p.refused(() => p.api.queue.cancel(p.hero, build.id));
   p.check("a second cancel is refused (nothing returned twice)", /^Gate Smith has no queued action "[^"]+"$/.test(again ?? ""), again);
-  p.check("still exactly as before", JSON.stringify(p.look()) === JSON.stringify(p.keep.beforeBuild));
+  p.check("still exactly as before", JSON.stringify(p.look()) === JSON.stringify(p.keep.beforeBuild), JSON.stringify({ beforeBuild: p.keep.beforeBuild, now: p.look() }));
   const action = await p.api.queue.submit(p.hero, "build", { blueprint: "g2-camp", selection: { anvil: "g2-ore", hearthstone: "g2-gem" } });
   p.check("queued again", action.type === "build" && p.look().reserved === 3);
   return p.done();
@@ -640,7 +644,8 @@ await (async () => {
   const paid = await p.api.queue.submit(p.hero, "craft", { recipe: "g2-blade", selection: sel, stationId: "g2-bench" });
   p.check("queued at the Yard Bench, the 1 gp fee is taken", paid.params.escrow.feeCopper === 100 && p.look().gold === before.gold - 1, JSON.stringify(paid.params.escrow));
   await p.api.queue.cancel(p.hero, paid.id);
-  p.check("both cancelled: exactly as before", JSON.stringify(p.look()) === JSON.stringify(before), JSON.stringify(p.look()));
+  const settled = await p.until(() => JSON.stringify(p.look()) === JSON.stringify(before));   // relayed to the GM: wait for the update to arrive here
+  p.check("both cancelled: exactly as before", Boolean(settled), JSON.stringify({ before, afterCancel: p.look(), pending: p.pending().map(a => a.id) }));
   return p.done();
 })();
 ```

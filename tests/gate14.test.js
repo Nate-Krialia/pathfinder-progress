@@ -142,3 +142,37 @@ test("GATE 14: SETUP can be run twice, and CLEANUP works from the middle of the 
   assert.deepEqual(env.values.stationState ?? [], []);
   assert.deepEqual(measure(w.ann).stash, {});
 });
+
+test("gate 14 step 18: a cancel whose update arrives late still passes, and a real failure prints every value it compared", async () => {
+  const code = GATE.get(18).code.replace(/^(\/\/[^\n]*\n)*\s*await \(/, match => match.replace("await (", "("));
+  const run = async lateMs => {
+    const start = { gold: 100, ore: 12, gem: 4, hide: 0, free: 12, reserved: 0 };
+    const held = { ...start, gold: 99, ore: 10, reserved: 1 };
+    let state = start, queued = null, t0 = 0;
+    const rows = [];
+    globalThis.__p2 = {
+      hero: {},
+      look: () => (queued && t0 && Date.now() - t0 >= lateMs && lateMs >= 0 ? start : state),
+      pending: () => (queued ? [{ id: "q1" }] : []),
+      until: async (fn, ms = 1500) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await new Promise(r => setTimeout(r, 20)); } return false; },
+      check: (label, ok, detail) => rows.push({ label, ok, detail }),
+      done: () => (rows.every(r => r.ok) ? "ALL PASS" : "FAILED"),
+      api: { queue: {
+        submit: async () => { queued = true; state = held; return { id: "q1", daysReserved: 1, params: { escrow: { feeCopper: 100 } } }; },
+        cancel: async () => { t0 = Date.now(); return { refunded: 1 }; }
+      } }
+    };
+    const out = await (0, eval)(code);
+    delete globalThis.__p2;
+    return { out, rows };
+  };
+  const late = await run(300);
+  assert.equal(late.out, "ALL PASS", JSON.stringify(late.rows));           // the update arrives 300 ms after cancel() returned: the check waits for it
+  const never = await run(-1);
+  const failed = never.rows.find(r => r.label === "cancel gives everything back");
+  assert.equal(failed.ok, false);
+  const detail = JSON.parse(failed.detail);
+  assert.deepEqual(Object.keys(detail).sort(), ["afterCancel", "before", "pending", "result"], "the FAIL line prints every value it compared");
+  assert.equal(detail.before.gold, 100);
+  assert.equal(detail.afterCancel.gold, 99);
+});

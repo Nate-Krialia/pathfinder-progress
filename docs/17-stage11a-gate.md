@@ -285,9 +285,17 @@ await (async () => {
 
 ## Step 20 [Player]: queue a craft
 
-With **Gate Ore** in Body and **Gate Steel** in Edge, and Gate Bench chosen, click **Queue the craft**.
+- On **Gate Blade**, choose **Gate Ore** in **Body**
+- Choose **Gate Steel** in **Edge**
+- Choose **Gate Bench** as the workshop
+- Click **Queue the craft**
+- You should see: a line at the bottom of the window (also read out by a screen reader): "**Craft queued: Gate Blade. N days reserved.**" (the same N as before)
+- You should see: the slots are empty again
+- You should see: the status strip says **Downtime days: (12 - N) free, N reserved** and **Waiting on the GM: 1 queued**
+- Click **View queue**
+- You should see: a panel **Your queue** lists the craft with "N days reserved" and a **Cancel** button
 
-**What you should see:** a line at the bottom of the window (also read out by a screen reader): "**Craft queued: Gate Blade. N days reserved.**" (the same N as before). The slots are empty again. The status strip now says **Downtime days: (12 - N) free, N reserved** and **Waiting on the GM: 1 queued**. Click **View queue**: a panel **Your queue** lists the craft with "N days reserved" and a **Cancel** button.
+Click-script ids (the runner picks by these, never by position): recipe `g5-blade`, slot `body` = `g5-ore`, slot `edge` = `g5-steel`, station `g5-bench`.
 
 ## Step 21 [GM]: resolve it as a success
 
@@ -297,7 +305,8 @@ await (async () => {
   const g = globalThis.__g5 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
   const smith = g.smith();
   const action = g.queued(smith).find(a => a.type === "craft");
-  g.check("a craft is queued", Boolean(action));
+  g.check("a craft is queued (step 20 queues it; do step 20 first)", Boolean(action), JSON.stringify(g.queued(smith).map(a => a.type)));
+  if (!action) return g.done();
   const out = await g.api.queue.resolve(smith, action.id, { degree: "success", chat: true });
   g.check("it resolved", out.status === "resolved", out.message);
   const log = g.api.gm.log({ kind: "craft" });
@@ -308,11 +317,27 @@ await (async () => {
 
 ## Step 22 [Player]: you learned something (do not close or reload the window)
 
-**What you should see, without touching the window:** the queue is empty again ("Nothing queued"), and **the line at the bottom of the window ("Craft queued: ... days reserved.") has gone away by itself**: the window never says "queued" in one place and "Nothing queued" in another. (That line also fades out on its own after about 10 seconds, and a "Cancelled: ..." line likewise; a screen reader hears each one once when it appears, and nothing is announced when it goes.) On Gate Blade, under **Edge**, **Gate Steel** now says "**Gate Steel adds +1d4 fire damage**" instead of "You haven't tried this here yet". Under **Body**, **Gate Steel** STILL says "You haven't tried this here yet" (what you learn is per slot and per material). Choose **Gate Ore** and **Gate Steel** again: **What you will get** lists "Edge: Gate Steel adds +1d4 fire damage" and no unlearned effect.
+- Do not click anything yet
+- You should see: the queue is empty again ("Nothing queued")
+- You should see: the line at the bottom ("Craft queued: ... days reserved.") has gone away by itself, so the window never says "queued" in one place and "Nothing queued" in another
+- Note: that line also fades out on its own after about 10 seconds, and a "Cancelled: ..." line likewise; a screen reader hears each one once when it appears, and nothing is announced when it goes
+- Look at **Edge** on Gate Blade
+- You should see: **Gate Steel** says "**Gate Steel adds +1d4 fire damage**" instead of "You haven't tried this here yet"
+- Look at **Body**
+- You should see: **Gate Steel** STILL says "You haven't tried this here yet" (what you learn is per slot and per material)
+- Choose **Gate Ore** in **Body** and **Gate Steel** in **Edge** again
+- You should see: **What you will get** lists "Edge: Gate Steel adds +1d4 fire damage" and no unlearned effect
+
+The runner waits up to 12 seconds for the "Craft queued" line to clear before it looks at anything else.
 
 ## Step 23 [Player]: queue a second craft that will fail
 
-Choose **Gate Ore** (Body) and **Gate Star** (Edge), then click **Queue the craft**. **What you should see:** the same "Craft queued" line and "1 queued".
+- On **Gate Blade**, choose **Gate Ore** in **Body**
+- Choose **Gate Star** in **Edge**
+- Click **Queue the craft**
+- You should see: the same "Craft queued" line and "1 queued"
+
+Click-script ids: recipe `g5-blade`, slot `body` = `g5-ore`, slot `edge` = `g5-star`, station `g5-bench`.
 
 ## Step 24 [GM]: resolve it as a failure
 
@@ -322,7 +347,8 @@ await (async () => {
   const g = globalThis.__g5 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
   const smith = g.smith();
   const action = g.queued(smith).find(a => a.type === "craft");
-  g.check("a craft is queued", Boolean(action));
+  g.check("a craft is queued (step 23 queues it; do step 23 first)", Boolean(action), JSON.stringify(g.queued(smith).map(a => a.type)));
+  if (!action) return g.done();
   const out = await g.api.queue.resolve(smith, action.id, { degree: "failure", chat: true });
   g.check("it resolved", out.status === "resolved", out.message);
   const experiments = smith.getFlag(g.M, "compendium")?.experiments?.["g5-blade"]?.slots ?? {};
@@ -337,9 +363,18 @@ await (async () => {
 
 ## Step 26 [Player]: cancel from the queue panel
 
-Choose **Gate Ore** and **Gate Ember** and click **Queue the craft**, then **View queue** and **Cancel** on the row.
+- Note the days free in the status strip
+- On **Gate Blade**, choose **Gate Ore** in **Body**
+- Choose **Gate Ember** in **Edge**
+- Click **Queue the craft**
+- Click **View queue**
+- Click **Cancel** on the row
 
-**What you should see:** "**Cancelled: ... Your days and materials are back.**" at the bottom, the queue is empty again, and the days free are back to what they were before this step.
+- You should see: "**Cancelled: ... Your days and materials are back.**" at the bottom
+- You should see: the queue is empty again
+- You should see: the days free are back to what they were before this step
+
+Click-script ids: recipe `g5-blade`, slot `body` = `g5-ore`, slot `edge` = `g5-ember`, station `g5-bench`; the Cancel button is the one whose `data-action-id` is the queued craft's id.
 
 ## Step 27 [Player]: no message in your chat data has a DC or a roll
 

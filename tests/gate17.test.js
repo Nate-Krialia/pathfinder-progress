@@ -11,6 +11,9 @@ import { readFacts } from "../scripts/hub/facts.js";
 import { emptyState, formulaeTab, hubModel } from "../scripts/hub/viewmodels.js";
 import { renderHubMain } from "../scripts/hub/render.js";
 import { chatLeaks } from "./helpers.js";
+import { installFakeApplication } from "./fake-application.js";
+import script from "../e2e/steps/gate17.steps.mjs";
+import { makeDomDriver, playStep } from "../e2e/driver-dom.mjs";
 
 const gateDoc = readFileSync("docs/17-stage11a-gate.md", "utf8");
 const MODULE_VERSION = JSON.parse(readFileSync("module.json", "utf8")).version;
@@ -49,15 +52,51 @@ test("the stage 11a gate doc: steps are labelled, click-through steps say what y
   assert.doesNotMatch(gateDoc, /\bDC \d|odds of|\d+% chance/i, "the gate text itself never talks about difficulty to the player");
 });
 
+test("gate 17 steps 20, 22, 23 and 26 are in the standing bullet format and name the ids the click script picks by", () => {
+  for (const step of [20, 22, 23, 26]) {
+    const section = GATE.get(step).text;
+    const bullets = section.split("\n").filter(l => /^- /.test(l));
+    assert.ok(bullets.length >= 3, `step ${step} lists its instructions as bullets`);
+    assert.ok(bullets.every(b => b.length <= 400), `step ${step}: every bullet is short (one action)`);
+    assert.ok(bullets.some(b => /^- You should see:/.test(b)), `step ${step} has a "You should see:" bullet`);
+    assert.doesNotMatch(section.replace(/^- .*$/gm, ""), /What you should see:\*\*/, `step ${step} has no old-style paragraph`);
+  }
+  const ids = { 20: ["g5-blade", "g5-ore", "g5-steel", "g5-bench"], 23: ["g5-blade", "g5-ore", "g5-star", "g5-bench"], 26: ["g5-blade", "g5-ore", "g5-ember", "g5-bench"] };
+  for (const [step, list] of Object.entries(ids)) for (const id of list) assert.match(GATE.get(Number(step)).text, new RegExp("`" + id + "`"), `step ${step} names ${id}`);
+  const source = readFileSync("e2e/steps/gate17.steps.mjs", "utf8");
+  assert.doesNotMatch(source, /\bimport\b|require\(|process\.|fetch\(|eval\(|new Function|nth-child|\[data-action="[^"]*"\]\s*`?\)/, "the script obeys the runner's rules and never picks by position");
+  for (const id of ["g5-ore", "g5-steel", "g5-star", "g5-ember", "g5-blade", "g5-bench"]) assert.match(source, new RegExp(id));
+});
+
+test("gate 17 steps 21 and 24: with nothing queued the block reports a clean FAIL line, it does not throw a TypeError", async () => {
+  await gateWorld();
+  const { gm } = getUsers();
+  await quietly(async () => {
+    await runBlock(2, gm);
+    for (const step of [21, 24]) {
+      const sink = [];
+      const logged = console.log;
+      console.log = (...args) => sink.push(args.map(String).join(" "));
+      let result;
+      try { result = await runBlock(step, gm); } finally { console.log = logged; }
+      assert.equal(result, "1 FAILED: scroll up for the lines", `step ${step} fails cleanly`);
+      assert.match(sink.join("\n"), /FAIL: a craft is queued \(step \d+ queues it; do step \d+ first\)/, `step ${step} says what to do`);
+    }
+    assert.deepEqual((await runBlock(40, gm)).problems, []);
+  });
+});
+
 test("GATE 17: every code step runs, in order, and the click-through steps show exactly what the doc says they will", async () => {
-  // Stand-ins for the browser bits step 28 touches (the redraw counter); the counting itself is tested in hub-wiring.
-  globalThis.document = { querySelector: () => ({}) };
-  globalThis.MutationObserver = class { observe() {} disconnect() {} };
+  // Steps 20 to 26 click the REAL Hub window (strict ApplicationV2 stand-in over jsdom) through the shared click script e2e/steps/gate17.steps.mjs.
   const w = await gateWorld();
+  installFakeApplication();
   const api = getApi();
   const { gm, testUser } = getUsers();
   const lines = [];
   const logged = console.log;
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const base = { drivers: { gm: makeDomDriver({ as, user: gm }), player: makeDomDriver({ as, user: testUser }) }, state: {}, extras: {}, assert, wait };
+  const play = n => playStep({ script, n, who: "player", base, runBlock: () => {} });
   const expectPass = async (step, user) => {
     const sink = [];
     console.log = (...args) => sink.push(args.map(String).join(" "));
@@ -141,11 +180,13 @@ test("GATE 17: every code step runs, in order, and the click-through steps show 
     await expectPass(19, gm);
 
     // Steps 20-22: queue, resolve as a success, learn it
-    const queued = await as(testUser, () => api.queue.submit(smith, "craft", { recipe: "g5-blade", selection: { body: "g5-ore", edge: "g5-steel" }, stationId: "g5-bench" }));
+    await play(20);
+    const queued = (smith.getFlag("pathfinder-progress", "pendingActions") ?? []).find(a => a.type === "craft");
     assert.equal(queued.daysReserved, days, "the form said N days; the queue reserved N");
     const after20 = await read(picked);
     assert.deepEqual([after20.days.free, after20.days.reserved, hubModel(after20, emptyState()).status.waiting.value, hubModel(after20, { ...emptyState(), showQueue: true }).queue.rows.length], [12 - days, days, "1 queued", 1]);
     await expectPass(21, gm);
+    await play(22);
     await refresh();
     const learned = (await tabOf({ recipeId: "g5-blade" })).detail;
     assert.deepEqual(learned.slots.find(s => s.label === "Edge").options.find(o => o.name === "Gate Steel").effect, { known: true, effects: ["Gate Steel adds +1d4 fire damage"] });
@@ -154,18 +195,20 @@ test("GATE 17: every code step runs, in order, and the click-through steps show 
     assert.ok(again.effects.some(e => e.known && e.effects.includes("Gate Steel adds +1d4 fire damage")));
     assert.ok(again.effects.every(e => !e.known || !/Star/.test(e.effects.join())));
     // Steps 23-25: a failure teaches nothing
-    await as(testUser, () => api.queue.submit(smith, "craft", { recipe: "g5-blade", selection: { body: "g5-ore", edge: "g5-star" }, stationId: "g5-bench" }));
+    await play(23);
     await expectPass(24, gm);
     await refresh();
     const failed = (await tabOf({ recipeId: "g5-blade" })).detail;
     assert.equal(failed.slots.find(s => s.label === "Edge").options.find(o => o.name === "Gate Star").effect.known, false);
     // Step 26: cancel from the queue panel
     const before26 = (await read()).days;
-    const third = await as(testUser, () => api.queue.submit(smith, "craft", { recipe: "g5-blade", selection: { body: "g5-ore", edge: "g5-ember" }, stationId: "g5-bench" }));
-    assert.equal((await read()).queue.length, 1);
-    await as(testUser, () => api.queue.cancel(smith, third.id));
+    await play(26);
     const after26 = await read();
     assert.deepEqual([after26.queue.length, after26.days], [0, before26]);
+    await as(testUser, () => foundry.applications.instances.get("pathfinder-progress-hub")?.close());
+    // Stand-ins for the browser bits step 28 touches (the redraw counter); the counting itself is tested in hub-wiring.
+    globalThis.document = { querySelector: () => ({}) };
+    globalThis.MutationObserver = class { observe() {} disconnect() {} };
     // Step 27: no message in the chat data has a DC or a roll
     assert.deepEqual(chatLeaks(env.chat), []);
     await expectPass(27, testUser);
