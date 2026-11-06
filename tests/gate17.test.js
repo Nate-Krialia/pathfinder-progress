@@ -214,7 +214,7 @@ test("GATE 17: every code step runs, in order, and the click-through steps show 
     await expectPass(27, testUser);
 
     // Steps 28-32: the redraw counter, and the rule that decides what redraws
-    assert.match(await runBlock(28, testUser), /^counting:/);
+    assert.match(await runBlock(28, testUser), /^HANDOFF: counting: now do step 29 in the GM window, then run step 30 here$/);
     await expectPass(29, gm);
     await expectPass(30, testUser);
     await expectPass(31, gm);

@@ -406,7 +406,7 @@ await (async () => {
   globalThis.__pfpObserver?.disconnect();
   globalThis.__pfpObserver = new MutationObserver(() => { globalThis.__pfpRedraws++; });
   globalThis.__pfpObserver.observe(main, { childList: true });
-  return "counting: now do step 29 in the GM window, then run step 30 here";
+  return "HANDOFF: counting: now do step 29 in the GM window, then run step 30 here";
 })();
 ```
 
