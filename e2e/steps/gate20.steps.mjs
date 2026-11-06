@@ -15,7 +15,8 @@ const resize = (ctx, width) => (ctx.extras?.resize
   : ctx.driver.evaluate(w => foundry.applications.instances.get("pathfinder-progress-item-editor").setPosition({ width: w }), width));
 
 const setup = ctx => ctx.state.setup ?? (ctx.state.setup = ctx.driver.evaluate(() => game.users.getName("Test").getFlag("pathfinder-progress", "gateSetup20")));
-const firstRecipe = ctx => ctx.driver.evaluate(() => [...game.modules.get("pathfinder-progress").api.definitions.recipe.keys()][0]);
+/** The formula SETUP chose (saved in Test's flag by id), never "the first one in the list": the list order differs between worlds. */
+const setupRecipe = async ctx => (await setup(ctx)).recipeId;
 
 export default {
   before: {
@@ -86,7 +87,7 @@ export default {
     },
     8: async ctx => {
       const d = ctx.driver;
-      const recipeId = await firstRecipe(ctx);
+      const recipeId = await setupRecipe(ctx);
       await d.click("new-note");
       await d.set(create("name"), "Gate G20 Plan");
       await d.set(create("recipeId"), recipeId);
@@ -234,7 +235,7 @@ export default {
     26: async ctx => {
       const d = ctx.driver;
       await d.set(create("preset"), "plan");
-      await d.set(create("recipeId"), await firstRecipe(ctx));
+      await d.set(create("recipeId"), await setupRecipe(ctx));
       ctx.assert.equal(await d.attr('[data-action="do-create"]', "aria-disabled"), null, "Create turns on once a formula is chosen");
       await d.click("cancel-create");
       ctx.assert.equal(await d.evaluate(() => game.modules.get("pathfinder-progress").api.definitions.note.has("gate-g20-placeholder")), false, "Cancel creates nothing");

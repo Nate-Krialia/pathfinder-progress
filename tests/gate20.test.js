@@ -111,6 +111,15 @@ async function playNewSteps(d) {
   void text;
 }
 
+/** The real world lists recipes in a different order than SETUP sorts them: put them in REVERSE id order (right before the step runs; the editor rebuilds the map) so a script that picks a recipe by position fails. */
+function reverseRecipeOrder(api) {
+  const recipes = api.definitions.recipe;
+  assert.ok(recipes.size >= 2, "need two recipes for the order check");
+  const byId = [...recipes.values()].sort((a, b) => a.id.localeCompare(b.id));
+  for (const r of byId.slice().reverse()) { recipes.delete(r.id); recipes.set(r.id, r); }
+  assert.notEqual([...recipes.keys()][0], byId[0].id, "the map order differs from the sorted order");
+}
+
 const clean = () => ({ records: Object.keys(getApi().editor.records()).length, items: game.items.length, folders: game.folders.length, overlay: Object.keys(env.values.discoveryTracks ?? {}).length });
 
 test("the stage 11d gate doc: steps are labelled, click-through steps say what you should see, screenshots are asked for only where layout matters", () => {
@@ -169,7 +178,10 @@ test("GATE 20: every step runs in order, and the click steps are played by the S
     assert.match(setup.notes, /Steps 12 and 13 edit and restore the pack material/);
     assert.equal((await runBlock(2, gm)).already, "set up");
     // Steps 3-20 then the new Steps 22-26, each with its before/after clicks from the shared script; CLEANUP (Step 21) last, as in a full run
-    for (const n of [...Array.from({ length: 18 }, (_, i) => i + 3), 22, 23, 24, 25, 26]) await play(n);
+    for (const n of [...Array.from({ length: 18 }, (_, i) => i + 3), 22, 23, 24, 25, 26]) {
+      if (n === 8 || n === 26) reverseRecipeOrder(api);
+      await play(n);
+    }
     const cleanup = await runBlock(21, gm);
     assert.deepEqual(cleanup, { problems: [], actorsLeft: 0, recordsLeft: 0, itemsLeft: 0, tracksLeft: 0, audit: [] });
   });
