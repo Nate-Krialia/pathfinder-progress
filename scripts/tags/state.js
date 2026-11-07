@@ -6,7 +6,7 @@
 import { MODULE_ID, TAGS } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { logWorldEvent } from "../audit/store.js";
-import { emptyLedger, entryProblems, ledgerProblems } from "./ledger.js";
+import { craftedId, effectiveTags, effectiveTier, emptyLedger, entryProblems, isCraftedRef, ledgerProblems, slotFit } from "./ledger.js";
 import { getCaps, getCapsTable, getFrozenStore, getLimits, getLedger, setCurrentCaps, setCurrentFrozen, setCurrentLedger } from "./current.js";
 import { emptyFrozen, frozenProblems, recordFromPlan } from "./frozen.js";
 import { capsProblems } from "./stack.js";
@@ -74,6 +74,26 @@ export async function setEntry(api, ref, entry) {
   next.items[ref] = clean;
   await commit(api, next, `tags: tagged ${ref}`);
   return structuredClone(clean);
+}
+
+/**
+ * GM, a console helper for the real-Foundry gates: how one item (a Document or a uuid string) is seen by the tag system. Reads only; a player client is refused.
+ *   candidates   what `itemRefCandidates` returns for it (the references it could be tagged under, most trusted first)
+ *   matched      the first candidate that is a key in the ledger or a frozen record, else null
+ *   tags / tier  what the ledger says about `matched` (the existing effective-tags and effective-tier code); [] and null when nothing matched
+ *   fitsBySlot   every recipe slot that would accept it, as { "<recipeId>/<slotName>": "<recipeId>" }; {} when nothing matched
+ */
+export async function refsOf(api, itemOrUuid) {
+  requireGM("tags.refsOf");
+  const item = typeof itemOrUuid === "string" ? await globalThis.fromUuid?.(itemOrUuid) : itemOrUuid;
+  if (!item || typeof item !== "object") throw new TagError(`I could not find an item for "${String(itemOrUuid)}".`);
+  const ledger = getLedger();
+  const candidates = adapter.itemRefCandidates(item);
+  const known = ref => Boolean(ledger.items[ref]) || (isCraftedRef(ref) && Boolean(getFrozenStore().items[craftedId(ref)]));
+  const matched = candidates.find(known) ?? null;
+  const fitsBySlot = {};
+  if (matched) for (const recipe of api.definitions?.recipe?.values() ?? []) for (const slot of recipe.slots) if (slotFit(slot, matched, api.definitions, ledger).ok) fitsBySlot[`${recipe.id}/${slot.name}`] = recipe.id;
+  return { candidates: [...candidates], matched, tags: matched ? effectiveTags(matched, api.definitions, ledger) : [], tier: matched ? effectiveTier(matched, api.definitions, ledger) : null, fitsBySlot };
 }
 
 /** GM: take an item out of the ledger. */

@@ -422,6 +422,7 @@ Hooks.once("ready", async () => {
       setEntry: (ref, entry) => tagState.setEntry(api, ref, entry),
       removeEntry: ref => tagState.removeEntry(api, ref),
       setSlotNeeds: (recipeId, slotName, needs) => tagState.setSlotNeeds(api, recipeId, slotName, needs),
+      refsOf: itemOrUuid => tagState.refsOf(api, itemOrUuid),
       tagsOf: ref => { if (!game.user.isGM) throw new Error("tags.tagsOf: GM only"); return effectiveTags(ref, api.definitions, tagState.getLedger()); },
       tierOf: ref => { if (!game.user.isGM) throw new Error("tags.tierOf: GM only"); return effectiveTier(ref, api.definitions, tagState.getLedger()); },
       fits: (recipeId, slotName, ref) => { if (!game.user.isGM) throw new Error("tags.fits: GM only"); const slot = api.definitions.recipe.get(recipeId)?.slots.find(s => s.name === slotName); return slot ? slotFit(slot, ref, api.definitions, tagState.getLedger()) : { ok: false, reason: "no such slot" }; },

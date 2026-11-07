@@ -315,3 +315,45 @@ test("S2a CANARIES: the scan itself fails when a tag effect is planted in a play
   assert.ok(findCanaries({ slot: allText(slot) }, CANARIES).length >= 1);
   assert.ok(findTagLeaks([{ data: planted }], {}).length >= 1);
 });
+
+// refsOf: the console helper the real-Foundry item-reference probe prints for every copy -------------------------------------------------------------------------------
+const NEEDS_TOOTH = { all: ["venom-tooth"] };
+test("REFSOF: candidates, the matched reference, tags, tier and the slots that would accept the item (an Item document and a uuid string both work)", async () => {
+  const w = await tagged();
+  const item = (await give(w.ann, "Copy", STRAP).then(() => w.ann.items.at(-1)));
+  Object.assign(item, { _stats: { compendiumSource: TOOTH, duplicateSource: "Item.WORLD" }, uuid: `Actor.${w.ann.id}.Item.${item.id}` });
+  await as(w.gm, async () => {
+    await api().tags.setSlotNeeds(DAGGER, "fang", NEEDS_TOOTH);
+    const before = await api().tags.refsOf(item);
+    assert.deepEqual(before, { candidates: [TOOTH, "Item.WORLD", STRAP, item.uuid], matched: null, tags: [], tier: null, fitsBySlot: {} }, "untagged: the candidates are listed, nothing matches");
+    await api().tags.setEntry(TOOTH, { tags: ["venom-tooth"], tier: 2, name: "Tooth" });
+    const after = await api().tags.refsOf(item);
+    assert.equal(after.matched, TOOTH);
+    assert.deepEqual([after.tags, after.tier], [["venom-tooth"], 2]);
+    assert.deepEqual(after.fitsBySlot, { [`${DAGGER}/fang`]: DAGGER });
+    globalThis.fromUuid = async uuid => (uuid === item.uuid ? item : null);
+    assert.deepEqual(await api().tags.refsOf(item.uuid), after, "a uuid string gives the same answer");
+    await assert.rejects(api().tags.refsOf("Actor.nope.Item.nope"), /could not find an item/);
+    // a later candidate that is tagged is matched when the earlier ones are not
+    await api().tags.removeEntry(TOOTH);
+    await api().tags.setEntry(item.uuid, { tags: ["venom-tooth"], tier: 3, name: "Own copy" });
+    assert.equal((await api().tags.refsOf(item)).matched, item.uuid);
+  });
+});
+test("REFSOF: a crafted item matches through its frozen record (crafted:<freezeId>)", async () => {
+  const w = await tagged();
+  const item = (await give(w.ann, "Made", null).then(() => w.ann.items.at(-1)));
+  Object.assign(item, { flags: { [M]: { crafted: { freezeId: "fz1" } } } });
+  const { setCurrentFrozen } = await import("../scripts/tags/current.js");
+  setCurrentFrozen({ v: 1, items: { fz1: { recipeId: DAGGER, name: "Made", tier: 2, native: ["venom-tooth"], inherited: [], uses: [], roles: {}, contributions: [] } } });
+  const out = await as(w.gm, () => api().tags.refsOf(item));
+  assert.deepEqual([out.candidates[0], out.matched, out.tags, out.tier], ["crafted:fz1", "crafted:fz1", ["venom-tooth"], 2]);
+  setCurrentFrozen(null);
+});
+test("REFSOF: GM only; a player client is refused and learns nothing", async () => {
+  const w = await tagged();
+  await give(w.ann, "Copy", TOOTH);
+  const item = w.ann.items.at(-1);
+  await as(w.gm, () => api().tags.setEntry(TOOTH, { tags: ["venom-tooth"], tier: 2, name: "Tooth" }));
+  await assert.rejects(as(globalThis.game.users.find(u => !u.isGM), () => api().tags.refsOf(item)), /GM only/);
+});
