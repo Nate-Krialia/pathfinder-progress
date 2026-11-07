@@ -240,3 +240,85 @@ test("KIND (api): setSlotKind and setTagOverride are GM only, validated, and rev
     assert.equal((await api().tags.setSlotKind(DAGGER, "fang", null)).kind, undefined, "back to the slot's own name");
   });
 });
+
+// The warning for an item whose copies carry no source (GM only) --------------------------------------------------------------------------------------------------------
+import { refWarning, T } from "../scripts/tags/model.js";
+import { installTagEntryPoints } from "../scripts/tags/entry.js";
+
+const COMP = "Compendium.pf2e.equipment-srd.Item.CCCCCCCCCCCCCCCC";
+const doc = (uuid, extra = {}) => ({ documentName: "Item", name: "Thing", uuid, flags: {}, _stats: {}, getFlag: (scope, key) => extra.flags?.[scope]?.[key], ...extra });
+const KINDS = {
+  "an unsourced world item": [doc("Item.PLAIN"), true],
+  "an unsourced copy on an actor": [doc("Actor.A.Item.LOST"), true],
+  "a compendium copy (compendiumSource)": [doc("Actor.A.Item.COPY", { _stats: { compendiumSource: COMP } }), false],
+  "an imported world item (compendiumSource)": [doc("Item.IMPORTED", { _stats: { compendiumSource: COMP } }), false],
+  "an item with duplicateSource": [doc("Actor.A.Item.DUP", { _stats: { duplicateSource: "Item.PLAIN" } }), false],
+  "an item with the legacy sourceId": [doc("Actor.A.Item.OLD", { flags: { core: { sourceId: COMP } } }), false],
+  "a crafted item (freezeId)": [doc("Actor.A.Item.MADE", { flags: { "pathfinder-progress": { crafted: { freezeId: "fz1" } } } }), false],
+  "the compendium item itself": [doc(COMP, { pack: "pf2e.equipment-srd" }), false]
+};
+test("WARNING (model): shown for an item that offers only its own uuid, never for a sourced, crafted or compendium item", () => {
+  for (const [label, [item, shown]] of Object.entries(KINDS)) assert.equal(refWarning(item), shown ? T.noSource : null, label);
+  assert.equal(refWarning(null), null);
+  assert.equal(refWarning({ _stats: {}, flags: {} }), null, "an item with no uuid at all offers nothing to warn about");
+  assert.match(T.noSource, /^Copies of this item will not match this tag\. Put it in a compendium first, then tag the compendium item\.$/);
+});
+
+test("WARNING (sheet button): the Item tags window opened from an item's sheet shows the warning only for an unsourced item, and only to a GM", async () => {
+  const { w, text, el } = await windowFor();
+  const handlers = new Map();
+  installTagEntryPoints(() => api(), { on: (name, fn) => handlers.set(name, fn) });
+  const open = async item => {
+    const controls = [];
+    await as(w.gm, () => handlers.get("getHeaderControlsApplicationV2")({ document: item }, controls));
+    await as(w.gm, async () => { controls[0].onClick(); await wait(30); });
+  };
+  for (const [label, [item, shown]] of Object.entries(KINDS)) {
+    await open(item);
+    assert.equal(Boolean(el().querySelector('[data-part="ref-warning"]')), shown, label);
+    if (shown) assert.match(text(), /Copies of this item will not match this tag\. Put it in a compendium first/, label);
+    else assert.doesNotMatch(text(), /will not match this tag/, label);
+  }
+  const asPlayer = [];
+  await as(w.annUser, () => handlers.get("getHeaderControlsApplicationV2")({ document: KINDS["an unsourced world item"][0] }, asPlayer));
+  assert.deepEqual(asPlayer, [], "a player's item sheet gets no Item tags button, so no window and no warning");
+});
+
+test("WARNING (Look it up and Save): an unsourced item says so when found and again in the message after saving; a compendium item says nothing; a player never gets the window", async () => {
+  const { w, app, el, text, click, set } = await windowFor();
+  const items = { "Item.PLAIN": KINDS["an unsourced world item"][0], [COMP]: KINDS["the compendium item itself"][0], "Actor.A.Item.COPY": KINDS["a compendium copy (compendiumSource)"][0] };
+  globalThis.fromUuid = async uuid => items[uuid] ?? null;
+  await as(w.gm, () => api().tags.setEntry("spider-fang", { tags: [], tier: 1 }).catch(() => null));
+  await as(w.gm, async () => { await api().editor.create("tag", { name: "Venom Tooth", theme: "bitey things" }, { makeItem: false }); });
+  await click("tab", '[data-tab="items"]');
+  await set('[data-field="source"]', "item");
+  for (const [uuid, shown] of [["Item.PLAIN", true], [COMP, false], ["Actor.A.Item.COPY", false]]) {
+    await set('[data-field="uuid"]', uuid);
+    assert.equal(el().querySelector('[data-part="ref-warning"]'), null, "typing a new uuid clears the warning until it is looked up");
+    await click("lookup");
+    assert.equal(Boolean(el().querySelector('[data-part="ref-warning"]')), shown, uuid);
+  }
+  // save the unsourced one: the message repeats the warning (the form is blank again by then)
+  await set('[data-field="uuid"]', "Item.PLAIN"); await click("lookup");
+  await set('[data-field="tag"][data-tag="venom-tooth"]', true); await set('[data-field="tier"]', "2");
+  await click("save-entry");
+  assert.match(text(), /Saved Thing\. Copies of this item will not match this tag\./);
+  // saving a compendium item: no warning in the message
+  await set('[data-field="source"]', "item"); await set('[data-field="uuid"]', COMP); await click("lookup");
+  await set('[data-field="tag"][data-tag="venom-tooth"]', true); await set('[data-field="tier"]', "2");
+  await click("save-entry");
+  assert.match(text(), /Saved Thing\./);
+  assert.doesNotMatch(text(), /will not match this tag/);
+  // a typed uuid that was never looked up is resolved when it is saved
+  await set('[data-field="source"]', "item"); await set('[data-field="uuid"]', "Item.PLAIN"); await set('[data-field="name"]', "Thing");
+  await set('[data-field="tag"][data-tag="venom-tooth"]', true); await set('[data-field="tier"]', "2");
+  await click("save-entry");
+  assert.match(text(), /will not match this tag/);
+  // a player: the window is GM only and opening it throws, so the warning never reaches a player
+  const { openTagger } = await import("../scripts/tags/app.js");
+  await as(w.annUser, async () => assert.throws(() => openTagger(api(), { uuid: "Item.PLAIN", name: "Thing", noSource: true }), /GM only/));
+  const playerWindow = new (build())(api());
+  await as(w.annUser, () => playerWindow.render({ force: true }));
+  assert.doesNotMatch(playerWindow.element.textContent, /will not match this tag|Put it in a compendium/);
+  void app;
+});

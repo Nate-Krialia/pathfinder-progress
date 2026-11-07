@@ -3,7 +3,7 @@
  * Everything it writes goes through api.tags / api.editor (so the same validation and the same GM-only checks apply); this class keeps the draft and turns clicks into calls.
  */
 import { HUB, MODULE_ID } from "../config.js";
-import { renderTagger, taggerModel, T } from "./model.js";
+import { refWarning, renderTagger, taggerModel, T } from "./model.js";
 import { getCaps, getLedger, getLimits } from "./current.js";
 import { fxEdit, fxEmpty, fxProblems } from "./fx.js";
 
@@ -48,11 +48,11 @@ export function build() {
     #observer = null;
 
     /** Point the form at one item (from its sheet): a material by id, any other item by UUID and name. */
-    aim({ materialId, uuid, name }) {
+    aim({ materialId, uuid, name, noSource }) {
       this.ui.tab = "items"; this.ui.message = "";
       if (materialId && this.api.definitions.material.has(materialId)) return this.#edit(materialId, true);
       const entry = getLedger().items[uuid];
-      this.ui.draft = { source: "item", ref: uuid, uuid, name: entry?.name ?? name ?? "", tags: [...(entry?.tags ?? [])], tier: entry?.tier ?? "", editing: Boolean(entry) };
+      this.ui.draft = { source: "item", ref: uuid, uuid, name: entry?.name ?? name ?? "", tags: [...(entry?.tags ?? [])], tier: entry?.tier ?? "", editing: Boolean(entry), noSource };     // noSource: true / false when the item was known (its sheet), undefined when only a uuid is
       return undefined;
     }
 
@@ -93,7 +93,7 @@ export function build() {
       return this.#run(async () => {
         const doc = await fromUuid(String(d.uuid).trim()).catch(() => null);
         if (!doc || doc.documentName !== "Item") throw new Error("No item found with that UUID.");
-        d.name = doc.name; d.ref = doc.uuid;
+        d.name = doc.name; d.ref = doc.uuid; d.noSource = Boolean(refWarning(doc));
         return `Found ${doc.name}.`;
       });
     }
@@ -112,8 +112,10 @@ export function build() {
         const ref = d.source === "material" ? d.ref : String(d.ref || d.uuid).trim();
         const name = this.api.definitions.material.get(ref)?.name ?? d.name;
         await this.api.tags.setEntry(ref, { tags: d.tags, ...(d.tier !== "" ? { tier: Number(d.tier) } : {}), ...(d.source === "item" ? { name: d.name } : {}) });
+        // GM only: say plainly when copies of this item cannot match the tag just saved (known from the sheet or the lookup; else the uuid is resolved now)
+        const warn = d.source !== "item" ? false : d.noSource ?? Boolean(refWarning(await fromUuid(ref).catch(() => null)));
         this.ui.draft = blankDraft();
-        return T.saved(name || ref);
+        return warn ? `${T.saved(name || ref)} ${T.noSource}` : T.saved(name || ref);
       });
     }
 
@@ -155,7 +157,7 @@ export function build() {
       const f = el.dataset.field, d = this.ui.draft;
       if (f === "source") { this.ui.draft = { ...blankDraft(), source: el.value, tags: d.tags }; return this.render(); }
       if (f === "material") { d.ref = el.value; d.tags = el.value ? [...this.api.tags.tagsOf(el.value)] : []; return this.render(); }
-      if (f === "uuid") { d.uuid = el.value; d.ref = ""; return undefined; }
+      if (f === "uuid") { const showing = d.noSource === true; d.uuid = el.value; d.ref = ""; d.noSource = undefined; return showing ? this.render() : undefined; }     // a changed uuid is a different item: the warning is not about it
       if (f === "name") { d.name = el.value; return undefined; }
       if (f === "tag") { d.tags = el.checked ? [...new Set([...d.tags, el.dataset.tag])] : d.tags.filter(t => t !== el.dataset.tag); return undefined; }
       if (f === "tier") { d.tier = el.value; return undefined; }

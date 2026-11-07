@@ -24,12 +24,12 @@ function runBlock(step, user) {
   return as(user, () => (0, eval)(code));
 }
 const ROUTES = ["0a", "0b", "1a", "1b", "1c", "2a", "2b", "2c", "2d", "3a", "3b", "4", "5a", "5b", "5c", "6"];
-const COMP_UUID = "Compendium.pf2e.equipment-srd.Item.TORCHTORCHTORCH01";
+const COMP_UUID = "Compendium.pf2e.equipment-srd.Item.8Jdw4yAzWYylGePS";
 
 /** Just enough of Foundry's item side for the probe: a pretend compendium, item uuids, toObject with _stats, clone with addSource, drop data, fromCompendium. */
 function installProbeFake() {
   const comp = { name: "Torch", uuid: COMP_UUID, toObject: () => ({ name: "Torch", type: "equipment", system: { quantity: 1 }, flags: {}, _stats: { compendiumSource: null } }) };
-  game.packs = { ...game.packs, get: id => (id === "pf2e.equipment-srd" ? { getIndex: async () => [{ name: "Torch", _id: "TORCHTORCHTORCH01" }], getDocument: async () => comp } : undefined) };
+  game.packs = { ...game.packs, get: id => (id === "pf2e.equipment-srd" ? { getIndex: async () => [{ name: "Torch", _id: "8Jdw4yAzWYylGePS" }], getDocument: async () => comp } : undefined) };
   const decorate = (item, owner) => {
     item.uuid = owner ? `Actor.${owner.id}.Item.${item.id}` : `Item.${item.id}`;
     item.toObject = () => structuredClone({ name: item.name, type: item.type, system: item.system, flags: item.flags, _stats: item._stats });
@@ -66,9 +66,10 @@ const sink = async fn => {
 };
 
 test("the tags item-reference probe gate doc: steps are labelled, bullets are short, one block each, nothing is asked beyond the probe", () => {
-  assert.deepEqual([...GATE.keys()], [1, 2, 3, 4, 5]);
+  assert.deepEqual([...GATE.keys()], Array.from({ length: 16 }, (_, i) => i + 1));
+  const PLAYER_STEPS = [10, 11, 12, 15];
   for (const [step, entry] of GATE) {
-    assert.match(entry.who, /^\[GM\]\s*$/, `step ${step} is a GM step (no Player window yet)`);
+    assert.match(entry.who, PLAYER_STEPS.includes(step) ? /^\[Player\]\s*$/ : /^\[GM\]\s*$/, `step ${step} says who runs it`);
     assert.ok(entry.code, `step ${step} has a code block`);
     assert.equal((entry.text.match(/```js/g) ?? []).length, 1, `step ${step} has ONE code block`);
     // The standing format (CLAUDE.md): a short bullet list, one action per bullet; what to see is its own bullet starting "You should see:".
@@ -80,10 +81,14 @@ test("the tags item-reference probe gate doc: steps are labelled, bullets are sh
     if (!/Nothing to click/i.test(section)) assert.ok(bullets.some(b => /You should see:/.test(b)), `step ${step} has a "You should see:" bullet`);
   }
   assert.match(gateDoc, new RegExp(`version must be \\*\\*${MODULE_VERSION.replace(/\./g, "\\.")}\\*\\*`));
-  assert.match(gateDoc, /This is a PROBE, not a test/);
+  assert.match(gateDoc, /Steps 1 to 5 are a PROBE, not a test/);
   assert.match(gateDoc, /What the later steps depend on \(they are NOT written yet\)/);
   for (const id of ROUTES) assert.match(gateDoc, new RegExp(`\\b${id}\\b`), `the doc names route ${id}`);
-  assert.doesNotMatch(gateDoc, /api\.tags\.setEntry|queue\.submit|Player window as the user/, "no tagging, escrow or player-window steps yet");
+  assert.match(gateDoc, /No fallback code|\*\*Decision: no fallback code\.\*\*/);
+  assert.match(gateDoc, /Steps are never renumbered/);
+  assert.match(gateDoc, /Compendium\.pf2e\.equipment-srd\.Item\.8Jdw4yAzWYylGePS/);
+  assert.equal(GATE.get(16).text.includes("Safe to run twice"), true, "CLEANUP 2 says it is safe to run twice");
+  assert.doesNotMatch(gateDoc, /stack-merge step is written|merge the stack\?\)\s*\n- Run/, "no stack-merge step was added");
   assert.doesNotMatch(gateDoc.replace(/DC\b[^\n]*never/gi, ""), /\bDC \d|odds of|\d+% chance/i, "the gate text never talks about difficulty to a player");
   assert.equal(GATE.get(5).text.includes("Safe to run twice"), true, "CLEANUP says it is safe to run twice");
 });
@@ -95,7 +100,10 @@ test("the steps file obeys the runner's rules and picks by the saved uuids, neve
   assert.match(source, /s\.compendium\.uuid/);
   assert.match(source, /s\.worldItemUuid/);
   assert.deepEqual(Object.keys(script), ["before"]);
-  assert.deepEqual(Object.keys(script.before), ["4"]);
+  assert.deepEqual(Object.keys(script.before), ["4", "9", "10", "11", "12", "13", "14"]);
+  assert.match(source, /data-recipe="g22-trinket"/);
+  assert.match(source, /data-station="g22-bench"/);
+  assert.match(source, /data-action-id=/, "Cancel is picked by the queued action's id");
 });
 
 test("GATE 22: SETUP, the probe (one full line per route, runs twice), the drop step with and without the runner's drop action, CLEANUP twice", async () => {
@@ -190,4 +198,62 @@ test("GATE 22: a route that real Foundry refuses prints 'not possible here: <rea
     assert.ok(rows.some(r => /^PASS: 1b .* \| not possible here: fromCompendium is not a function here$/.test(r)), rows.join("\n"));
     await runBlock(5, gm);
   });
+});
+
+// Steps 6 to 16 (added after the probe): tag the compendium item, the player's window, queue / cancel / fail / succeed on a real-shaped craft, the leak scan, CLEANUP 2 --------------------------------------
+import { installFakeApplication } from "./fake-application.js";
+
+test("GATE 22 steps 6 to 16: tag the compendium item, the Player's window, queue and cancel, a forced failure, a success, the leak scan, CLEANUP 2 twice", async () => {
+  await world({ downtime: 0, iron: 0, fang: 0, perClientDefinitions: true });
+  const { gm, testUser } = getUsers();
+  installFakeApplication();
+  installProbeFake();
+  const api = getApi();
+  const baseItems = game.items.length, baseActors = game.actors.length;
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const dropped = [];
+  const extras = { dropOnSheet: async (actorName, data) => { dropped.push(data.uuid); const doc = await Item.implementation.fromDropData(data); await game.actors.getName(actorName).createEmbeddedDocuments("Item", [{ ...doc.toObject(), name: doc.name }]); } };
+  const base = { drivers: { gm: makeDomDriver({ as, user: gm }), player: makeDomDriver({ as, user: testUser }) }, state: {}, assert, wait, extras };
+  const results = {};
+  const play = async (n, who) => { const out = await sink(() => playStep({ script, n, who, base, runBlock: async () => { results[n] = await runBlock(n, who === "player" ? testUser : gm); } })); results[`lines${n}`] = out.lines; return results[n]; };
+  const expectPass = async (n, who) => assert.equal(await play(n, who), "ALL PASS", `step ${n}:\n${results[`lines${n}`].join("\n")}`);
+  await quietly(async () => {
+    await runBlock(2, gm);
+    const six = await runBlock(6, gm);
+    assert.equal(six.planted.length, 7);
+    assert.equal(game.users.getName("Test").character?.name, "Gate G22 Smith", "SETUP 2 makes Smith Test's character");
+    assert.equal((await runBlock(6, gm)).already, "set up", "SETUP 2 runs twice");
+    assert.deepEqual(await as(gm, () => api.tags.ledger().items), {}, "nothing is tagged before Step 7");
+
+    await expectPass(7, "gm");
+    await expectPass(8, "gm");
+    const ledgerAfter8 = Object.keys(await as(gm, () => api.tags.ledger().items));
+    assert.deepEqual(ledgerAfter8, [COMP_UUID], "Step 8 leaves only the compendium item tagged");
+    assert.match(results.lines7.join("\n"), /PASS: the compendium copy carries _stats\.compendiumSource/);
+    assert.match(results.lines8.join("\n"), /printed, not judged: the COPY of the world item/);
+
+    await play(9, "gm");
+    assert.equal(results[9], "ALL PASS", results.lines9.join("\n"));
+    assert.ok(results.lines9.some(l => /^PASS: ANSWER \(issue 27\): .*NO source, so a tag on the world item never matches its copies/.test(l)), results.lines9.join("\n"));
+    assert.equal(dropped.at(-1), game.items.getName("Gate G22 World Plain").uuid, "the steps file dropped the PLAIN world item by its saved uuid");
+
+    await as(testUser, () => api.definitions.refresh({ force: true }));
+    await expectPass(10, "player");
+    await expectPass(11, "player");
+    await expectPass(12, "player");
+    await expectPass(13, "gm");
+    await expectPass(14, "gm");
+    await expectPass(15, "player");
+    assert.match(results.lines15.join("\n"), /recorded, not judged: a player client can read the tagLedger/);
+
+    const clean = { problems: [], actorsLeft: 0, itemsLeft: 0, frozenLeft: 0, ledgerLeft: 0, downtimeOpen: false, sharedLeft: 0, flagLeft: false, audit: [] };
+    assert.deepEqual(await runBlock(16, gm), clean);
+    assert.deepEqual(await runBlock(16, gm), clean, "CLEANUP 2 runs twice");
+    await as(testUser, () => foundry.applications.instances.get("pathfinder-progress-hub")?.close());
+  });
+  assert.equal(game.items.length, baseItems);
+  assert.equal(game.actors.length, baseActors);
+  assert.equal(globalThis.__g22, undefined);
+  assert.deepEqual(Object.keys(await as(gm, () => api.tags.ledger().items)), [], "the tags are off again");
+  for (const [kind, id] of [["recipe", "g22-trinket"], ["tag", "g22-tooth"], ["material", "g22-iron"], ["station", "g22-bench"], ["town", "g22-town"]]) assert.equal(api.definitions[kind].has(id), false, `${kind} ${id} is gone`);
 });

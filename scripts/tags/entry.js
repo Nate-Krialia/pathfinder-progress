@@ -3,7 +3,7 @@ import { MODULE_ID } from "../config.js";
 import { openTagger } from "./app.js";
 import { itemRefCandidates } from "../adapter/pf2e.js";
 import { getLedger } from "./current.js";
-import { T } from "./model.js";
+import { refWarning, T } from "./model.js";
 
 const OPEN_ID = "pfpItemTags";
 const ACTION = "pfp-item-tags";
@@ -20,7 +20,7 @@ export function installTagEntryPoints(getApi, hooks = globalThis.Hooks) {
     if (!game.user.isGM || item?.documentName !== "Item" || !Array.isArray(controls) || controls.some(c => c.action === ACTION)) return;
     controls.push({
       action: ACTION, icon: "fa-solid fa-tags", label: T.title, visible: true,
-      onClick: () => openTagger(getApi(), { materialId: item.getFlag?.(MODULE_ID, "material")?.materialId, uuid: itemRefCandidates(item).find(r => getLedger().items[r]) ?? itemRefCandidates(item)[0], name: item.name })
+      onClick: () => openTagger(getApi(), { materialId: item.getFlag?.(MODULE_ID, "material")?.materialId, uuid: itemRefCandidates(item).find(r => getLedger().items[r]) ?? itemRefCandidates(item)[0], name: item.name, noSource: Boolean(refWarning(item)) })
     });
   });
 }

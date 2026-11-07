@@ -6,7 +6,7 @@ import { TIER_RANGES } from "../config.js";
 import { effectiveTags, effectiveTier, itemName } from "./ledger.js";
 import { rootAttributes } from "../hub/render.js";
 import { BLOCK_LABELS, BLOCK_TYPES } from "../editor/blocks.js";
-import { DAMAGE_TYPES } from "../adapter/pf2e.js";
+import { DAMAGE_TYPES, itemRefCandidates } from "../adapter/pf2e.js";
 import { EFFECT_CONDITIONS, EFFECT_SAVES, TAGS } from "../config.js";
 import { CLASSES, fxPreview, fxProblems, fxSet, valueAt } from "./fx.js";
 import { CAP_ROLES } from "./stack.js";
@@ -18,8 +18,24 @@ export const T = {
   intro: "Tag any item with several tags and a tier. Only you see this: players are only ever told that an item fits a slot.",
   materialSource: "A material", itemSource: "Any other item (by UUID)",
   needTier: "A tier is required for an item that is not a material: tag effects will scale by it.",
-  saved: name => `Saved ${name}.`, removed: name => `${name} is no longer tagged.`
+  saved: name => `Saved ${name}.`, removed: name => `${name} is no longer tagged.`,
+  // Shown to the GM only (this window is GM only): an item whose copies carry no source cannot be found again by its tag.
+  noSource: "Copies of this item will not match this tag. Put it in a compendium first, then tag the compendium item."
 };
+
+/**
+ * The warning for an item the GM is about to tag, or null. Copies of an item are found again through the reference they carry (`itemRefCandidates`): a compendium source, a duplicate
+ * source, the legacy source id, a crafted item's own id. An item that offers ONLY its own uuid (a world item made from scratch, or a copy that lost its source) is matched by exactly
+ * that one document, so a copy dropped on an actor never matches. A compendium item is the thing to tag, so it never gets the warning.
+ */
+export function refWarning(item) {
+  if (!item || typeof item !== "object") return null;
+  const own = typeof item.uuid === "string" && item.uuid !== "" ? item.uuid : null;
+  const candidates = itemRefCandidates(item);
+  if (!own || candidates.length !== 1 || candidates[0] !== own) return null;
+  if (own.startsWith("Compendium.") || item.pack) return null;
+  return T.noSource;
+}
 
 export const esc = text => String(text ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const opt = (value, label, selected) => `<option value="${esc(value)}"${selected ? " selected" : ""}>${esc(label)}</option>`;
@@ -53,6 +69,7 @@ function itemsTab(m) {
     <div data-part="tag-pick" role="group" aria-label="Tags">${m.tags.length ? m.tags.map(t => `<label class="pfp-check"><input type="checkbox" data-field="tag" data-tag="${esc(t.id)}"${d.tags.includes(t.id) ? " checked" : ""}> ${esc(t.name)}</label>`).join(" ") : "<em>No tags yet: make one on the Tags tab.</em>"}</div>
     <label>Tier <select data-field="tier">${tierOptions(d.tier)}</select></label>
     ${d.source === "item" ? `<p class="pfp-hint">${esc(T.needTier)}</p>` : ""}
+    ${d.source === "item" && d.noSource === true ? `<p class="pfp-warning" data-part="ref-warning" role="note"><strong>Heads up:</strong> ${esc(T.noSource)}</p>` : ""}
     <button type="button" data-action="save-entry">Save tags</button> ${d.editing ? '<button type="button" data-action="cancel-entry">Cancel</button>' : ""}
   </fieldset>`;
   return `<ul class="pfp-list" data-part="entries">${rows || "<li><em>Nothing tagged yet.</em></li>"}</ul>${form}`;
