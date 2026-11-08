@@ -348,8 +348,11 @@ await (async () => {
   const make = async (data, name) => (await friend.createEmbeddedDocuments("Item", [{ ...data, name }]))[0];
   const c = await make(game.items.fromCompendium(g.comp), "Gate G22 match C"), w = await make(world.toObject(), "Gate G22 match W"), p = await make(plain.toObject(), "Gate G22 match P");
   await api.tags.setEntry(COMP_UUID, { tags: ["g22-tooth"], tier: 2, name: "Gate G22 Torch" });
+  const held = await g.until(() => api.tags.ledger().items[COMP_UUID]);      // a read straight after a write: give it a moment, and print what the memory and the saved setting hold
+  const stored = JSON.stringify(game.settings.get(M, "tagLedger")), cache = JSON.stringify(Object.keys(api.tags.ledger().items));
+  g.check("the ledger holds the tag after the write (read from the same GM client; the saved setting and the keys in memory are printed)", Boolean(held), JSON.stringify({ cache, stored }));
   const R = { c: await api.tags.refsOf(c), w: await api.tags.refsOf(w), p: await api.tags.refsOf(p) };
-  const values = JSON.stringify({ compendiumCopy: { stats: g.stats(c), refsOf: R.c }, importedWorldItemCopy: { stats: g.stats(w), refsOf: R.w }, plainWorldItemCopy: { stats: g.stats(p), refsOf: R.p } });
+  const values = JSON.stringify({ ledgerKeysInMemory: cache, savedSetting: stored, compendiumCopy: { stats: g.stats(c), refsOf: R.c }, importedWorldItemCopy: { stats: g.stats(w), refsOf: R.w }, plainWorldItemCopy: { stats: g.stats(p), refsOf: R.p } });
   g.check("the compendium copy carries _stats.compendiumSource = the compendium uuid", g.stats(c).compendiumSource === COMP_UUID, values);
   g.check("so it matches the tag, with the tag and the tier the GM gave", R.c.matched === COMP_UUID && R.c.tags.join() === "g22-tooth" && R.c.tier === 2, values);
   g.check("and it would be accepted by the charm slot of Gate G22 Trinket", R.c.fitsBySlot["g22-trinket/charm"] === "g22-trinket", values);
@@ -372,23 +375,26 @@ await (async () => {
 await (async () => {
   const g = globalThis.__g22 ?? (() => { throw new Error("run SETUP (Step 2) and SETUP 2 (Step 6) first"); })();
   if (!g.stats) throw new Error("run SETUP 2 (Step 6) first");
-  const { api } = g;
+  const { api, M } = g;
   const COMP_UUID = "Compendium.pf2e.equipment-srd.Item.8Jdw4yAzWYylGePS";
   const friend = game.actors.get(g.ids.friend), world = game.items.get(g.ids.world);
   const w = friend.items.find(i => i.name === "Gate G22 match W");
   if (!w) throw new Error("run Step 7 first (it makes the copies this step reads)");
   if (!api.tags.ledger().items[COMP_UUID]) await api.tags.setEntry(COMP_UUID, { tags: ["g22-tooth"], tier: 2, name: "Gate G22 Torch" });
   await api.tags.setEntry(world.uuid, { tags: ["g22-tooth"], tier: 3, name: "Gate G22 World Item" });
+  await g.until(() => api.tags.ledger().items[world.uuid]);
   const both = await api.tags.refsOf(world), bothCopy = await api.tags.refsOf(w);
   g.check("the world item matches while both are tagged, and the compendium source wins (it is tried first)", both.matched === COMP_UUID && both.candidates[0] === COMP_UUID, JSON.stringify(both));
   await api.tags.removeEntry(COMP_UUID);
+  await g.until(() => !api.tags.ledger().items[COMP_UUID]);
   const alone = await api.tags.refsOf(world), aloneCopy = await api.tags.refsOf(w);
   g.check("with only the world item tagged it matches by its own uuid, at the tier the GM gave it", alone.matched === world.uuid && alone.tier === 3 && alone.tags.join() === "g22-tooth", JSON.stringify(alone));
   g.rows.push(`PASS: printed, not judged: the COPY of the world item, with both tagged: ${JSON.stringify(bothCopy)}; with only the world item tagged: ${JSON.stringify(aloneCopy)}`);
   await api.tags.setEntry(COMP_UUID, { tags: ["g22-tooth"], tier: 2, name: "Gate G22 Torch" });
   await api.tags.removeEntry(world.uuid);
+  await g.until(() => api.tags.ledger().items[COMP_UUID] && !api.tags.ledger().items[world.uuid]);
   const keys = Object.keys(api.tags.ledger().items);
-  g.check("put back: the compendium item is tagged and the world item is not", keys.includes(COMP_UUID) && !keys.includes(world.uuid), JSON.stringify(keys));
+  g.check("put back: the compendium item is tagged and the world item is not", keys.includes(COMP_UUID) && !keys.includes(world.uuid), JSON.stringify({ keys, savedSetting: game.settings.get(M, "tagLedger") }));
   return g.done();
 })();
 ```

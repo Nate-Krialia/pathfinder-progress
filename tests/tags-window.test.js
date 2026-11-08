@@ -6,7 +6,7 @@ import { asPage, seedRecords } from "./helpers.js";
 import { installFakeApplication } from "./fake-application.js";
 import { build } from "../scripts/tags/app.js";
 import { renderTagger, taggerModel } from "../scripts/tags/model.js";
-import { emptyLedger } from "../scripts/tags/ledger.js";
+import { decodeLedger, emptyLedger } from "../scripts/tags/ledger.js";
 
 const api = () => getApi();
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -78,7 +78,7 @@ test("WINDOW: an item that is not a material cannot be saved without a tier; wit
   await set('[data-field="tier"]', "2");
   await click("save-entry");
   assert.match(text(), /Saved Wolf Tooth/);
-  assert.deepEqual(env.values.tagLedger.items[ITEM], { tags: ["venom-tooth"], tier: 2, name: "Wolf Tooth" });
+  assert.deepEqual(decodeLedger(env.values.tagLedger).items[ITEM], { tags: ["venom-tooth"], tier: 2, name: "Wolf Tooth" });
   await click("remove-entry", `[data-ref="${ITEM}"]`);
   assert.match(text(), /Wolf Tooth is no longer tagged/);
 });

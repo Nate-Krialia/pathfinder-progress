@@ -208,6 +208,17 @@ test("GATE 22 steps 6 to 16: tag the compendium item, the Player's window, queue
   const { gm, testUser } = getUsers();
   installFakeApplication();
   installProbeFake();
+  // Real Foundry reads a dot in a key as a path and rewrites the object it is given (gate 22, Step 7): the fake does the same for the tag ledger, so the old module fails this test.
+  const realSet = game.settings.set;
+  game.settings.set = async (scope, key, value) => {
+    if (key === "tagLedger") for (const flat of Object.keys(value.items ?? {}).filter(k => k.includes("."))) {
+      const entry = value.items[flat]; delete value.items[flat];
+      let node = value.items; const path = flat.split(".");
+      for (const part of path.slice(0, -1)) node = node[part] ??= {};
+      node[path.at(-1)] = entry;
+    }
+    return realSet(scope, key, value);
+  };
   const api = getApi();
   const baseItems = game.items.length, baseActors = game.actors.length;
   const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -255,5 +266,6 @@ test("GATE 22 steps 6 to 16: tag the compendium item, the Player's window, queue
   assert.equal(game.actors.length, baseActors);
   assert.equal(globalThis.__g22, undefined);
   assert.deepEqual(Object.keys(await as(gm, () => api.tags.ledger().items)), [], "the tags are off again");
+  game.settings.set = realSet;
   for (const [kind, id] of [["recipe", "g22-trinket"], ["tag", "g22-tooth"], ["material", "g22-iron"], ["station", "g22-bench"], ["town", "g22-town"]]) assert.equal(api.definitions[kind].has(id), false, `${kind} ${id} is gone`);
 });

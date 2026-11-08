@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { DAGGER, M, as, craft, env, getApi, makeActor, resolve, world } from "./fake-world.js";
 import { asPage, findCanaries, findTagLeaks, seedRecords } from "./helpers.js";
 import { getLedger } from "../scripts/tags/current.js";
+import { decodeLedger } from "../scripts/tags/ledger.js";
 import { loadLedger } from "../scripts/tags/state.js";
 
 const api = () => getApi();
@@ -38,7 +39,7 @@ test("LEDGER: the GM tags a material and an ordinary item; a player cannot; it s
   await assert.rejects(as(w.annUser, () => api().tags.setEntry("spider-fang", { tags: ["venom-tooth"] })), /GM only/);
   await assert.rejects(as(w.annUser, async () => api().tags.ledger()), /GM only/);
   await assert.rejects(as(w.annUser, () => api().tags.removeEntry(TOOTH)), /GM only/);
-  assert.deepEqual(env.values.tagLedger.items[TOOTH], { tags: ["venom-tooth", "sharp-edge"], tier: 2, name: "Wolf Tooth" });
+  assert.deepEqual(decodeLedger(env.values.tagLedger).items[TOOTH], { tags: ["venom-tooth", "sharp-edge"], tier: 2, name: "Wolf Tooth" });
   getLedger().items = {}; loadLedger();                             // a fresh load reads the saved setting
   assert.ok(getLedger().items[TOOTH], "read back from the world setting");
 });
@@ -356,4 +357,49 @@ test("REFSOF: GM only; a player client is refused and learns nothing", async () 
   const item = w.ann.items.at(-1);
   await as(w.gm, () => api().tags.setEntry(TOOTH, { tags: ["venom-tooth"], tier: 2, name: "Tooth" }));
   await assert.rejects(as(globalThis.game.users.find(u => !u.isGM), () => api().tags.refsOf(item)), /GM only/);
+});
+
+// E-003-like real-Foundry finding (gate 22, Step 7): a uuid has dots in it, and Foundry reads a dot in a key as a path --------------------------------------------------------
+import { encodeLedger } from "../scripts/tags/ledger.js";
+
+/** What the fake's settings.set does when it behaves like the real one for a dotted key: it rewrites the object it was GIVEN, in place, into nested objects, and stores that. */
+function foundryReadsDotsAsPaths() {
+  const set = globalThis.game.settings.set;
+  globalThis.game.settings.set = async (scope, key, value) => {
+    if (key === "tagLedger") {
+      for (const flat of Object.keys(value.items ?? {}).filter(k => k.includes("."))) {
+        const entry = value.items[flat]; delete value.items[flat];
+        let node = value.items; const path = flat.split(".");
+        for (const part of path.slice(0, -1)) node = node[part] ??= {};
+        node[path.at(-1)] = entry;
+      }
+    }
+    return set(scope, key, value);
+  };
+  return () => { globalThis.game.settings.set = set; };
+}
+test("DOTTED KEYS: the ledger is saved without dots, so a uuid tag matches right after the write, survives a reload and can be taken off", async () => {
+  const w = await tagged();
+  const restore = foundryReadsDotsAsPaths();
+  try {
+    await giveWith(w.ann, "Copy", { _stats: { compendiumSource: TOOTH } });
+    const copy = w.ann.items.at(-1);
+    await as(w.gm, () => api().tags.setEntry(TOOTH, { tags: ["venom-tooth"], tier: 2, name: "Wolf Tooth" }));
+    const now = await as(w.gm, () => api().tags.refsOf(copy));
+    assert.deepEqual([now.matched, now.tags, now.tier], [TOOTH, ["venom-tooth"], 2], "matches straight after the write");
+    assert.ok(Object.keys(env.values.tagLedger.items).every(k => !k.includes(".")), `nothing with a dot in it was saved: ${Object.keys(env.values.tagLedger.items)}`);
+    await as(w.gm, async () => { loadLedger(); });
+    assert.deepEqual((await as(w.gm, () => api().tags.refsOf(copy))).matched, TOOTH, "still matches after the ledger is read back (a reload)");
+    assert.deepEqual(Object.keys(getLedger().items), [TOOTH], "the reference is the real uuid again in memory");
+    await as(w.gm, () => api().tags.removeEntry(TOOTH));
+    assert.equal((await as(w.gm, () => api().tags.refsOf(copy))).matched, null, "untagged");
+    await as(w.gm, async () => { loadLedger(); });
+    assert.deepEqual(Object.keys(getLedger().items), [], "and it stays untagged after a reload");
+  } finally { restore(); }
+});
+test("DOTTED KEYS: encodeLedger / decodeLedger round-trip any reference, including one with a percent sign", () => {
+  const ledger = { v: 1, items: { [TOOTH]: { tags: ["a"] }, "Item.abc": { tags: ["b"] }, "spider-fang": { tags: ["c"] }, "odd%2E.name": { tags: ["d"] } } };
+  const stored = encodeLedger(ledger);
+  assert.ok(Object.keys(stored.items).every(k => !k.includes(".")));
+  assert.deepEqual(decodeLedger(stored), ledger);
 });

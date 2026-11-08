@@ -13,6 +13,16 @@ export const emptyLedger = () => ({ v: TAGS.ledgerVersion, items: {} });
 
 const isPlainObject = v => v !== null && typeof v === "object" && !Array.isArray(v);
 
+// An item reference is often a uuid ("Compendium.pf2e.equipment-srd.Item.<id>"), which has dots in it. Foundry reads a dot in an object's key as a path when it saves data (a flag key may not
+// contain one for that reason), so the ledger is SAVED with the dots written as %2E (and a % as %25) and READ back with them restored. Everything in memory uses the real reference.
+const encodeKey = key => String(key).replaceAll("%", "%25").replaceAll(".", "%2E");
+const decodeKey = key => String(key).replaceAll("%2E", ".").replaceAll("%25", "%");
+const mapKeys = (ledger, fn) => ({ v: ledger?.v, items: Object.fromEntries(Object.entries(ledger?.items ?? {}).map(([key, entry]) => [fn(key), structuredClone(entry)])) });
+/** The ledger as it is written to the world setting: no key has a dot in it. */
+export const encodeLedger = ledger => mapKeys(ledger, encodeKey);
+/** The ledger as it was read from the world setting, with the real references back. */
+export const decodeLedger = ledger => mapKeys(ledger, decodeKey);
+
 /** What a stored ledger must look like; a damaged setting is an error to show, never silently replaced. */
 export function ledgerProblems(ledger) {
   if (!isPlainObject(ledger) || ledger.v !== TAGS.ledgerVersion || !isPlainObject(ledger.items)) return ["the saved tag ledger has an unknown shape"];

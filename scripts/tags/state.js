@@ -6,7 +6,7 @@
 import { MODULE_ID, TAGS } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
 import { logWorldEvent } from "../audit/store.js";
-import { craftedId, effectiveTags, effectiveTier, emptyLedger, entryProblems, isCraftedRef, ledgerProblems, slotFit } from "./ledger.js";
+import { craftedId, decodeLedger, effectiveTags, effectiveTier, emptyLedger, encodeLedger, entryProblems, isCraftedRef, ledgerProblems, slotFit } from "./ledger.js";
 import { getCaps, getCapsTable, getFrozenStore, getLimits, getLedger, setCurrentCaps, setCurrentFrozen, setCurrentLedger } from "./current.js";
 import { emptyFrozen, frozenProblems, recordFromPlan } from "./frozen.js";
 import { capsProblems } from "./stack.js";
@@ -30,7 +30,7 @@ export function loadLedger() {
   const raw = game.settings.get(MODULE_ID, TAGS.ledgerSetting);
   if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0)) { setLedger(emptyLedger()); return { problems: [] }; }
   const problems = ledgerProblems(raw);
-  setLedger(problems.length ? emptyLedger() : structuredClone(raw));
+  setLedger(problems.length ? emptyLedger() : decodeLedger(raw));
   return { problems };
 }
 
@@ -58,7 +58,7 @@ export async function setCaps(table) {
 export const capsNow = () => { requireGM("tags.caps"); return { table: structuredClone(getCapsTable()), effective: getCaps(), limits: getLimits() }; };
 
 async function commit(api, next, what) {
-  await game.settings.set(MODULE_ID, TAGS.ledgerSetting, next);
+  await game.settings.set(MODULE_ID, TAGS.ledgerSetting, encodeLedger(next));     // a separate, dot-free copy: whatever Foundry does to what it is given, `next` stays as written
   setLedger(next);
   await api.publishDefinitions?.();
   await logWorldEvent(what);
