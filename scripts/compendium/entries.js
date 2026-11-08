@@ -21,8 +21,12 @@ function safeKey(key) {
   return key;
 }
 
-/** The stable key of a creature entry: its name, lowercased. */
-export const creatureKey = name => safeKey(String(name ?? "").trim().toLowerCase());
+/**
+ * The stable key of a creature entry: its name, lowercased, with every dot written as %2e. Foundry reads a dot in an object's key as a path when it saves data (a flag, a setting), so a
+ * creature called "Dr. Smith" under the key "dr. smith" would be saved as nested objects and the whole Compendium would then read back as damaged. The entry itself holds the real name
+ * (and its own `key`), so the key is only an index. A name with no dot keeps exactly the key it always had; a literal "%2e" in a name is written %252e so two names never share a key.
+ */
+export const creatureKey = name => safeKey(String(name ?? "").trim().toLowerCase().replaceAll("%2e", "%252e").replaceAll(".", "%2e"));
 
 const addTo = (list, item, same) => (list.some(existing => same(existing, item)) ? list : [...list, item]);
 /** Like addTo, but an item first recorded WITHOUT its proper name (its name is its id) takes the proper name when it is known. */

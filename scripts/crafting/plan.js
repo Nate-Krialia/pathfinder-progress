@@ -97,7 +97,8 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       resolved = found.resolved;
     }
 
-    // Take units from this material's stacks, in order.
+    // Take units from this material's stacks, in order. Items that share a source (copies of one compendium item, tagged under that source) are separate stacks with the SAME materialId, so the
+    // craft takes the FIRST copy in the bag and then the next if it needs more: the player cannot choose a copy, and escrow (queue/work.js heldOf) records only the first copy's data. By design.
     const from = [];
     let need = slot.qty;
     for (const stack of stacks.filter(s => s.materialId === materialId)) {

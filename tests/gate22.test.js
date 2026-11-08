@@ -269,3 +269,63 @@ test("GATE 22 steps 6 to 16: tag the compendium item, the Player's window, queue
   game.settings.set = realSet;
   for (const [kind, id] of [["recipe", "g22-trinket"], ["tag", "g22-tooth"], ["material", "g22-iron"], ["station", "g22-bench"], ["town", "g22-town"]]) assert.equal(api.definitions[kind].has(id), false, `${kind} ${id} is gone`);
 });
+
+// The first-copy rule (issue 31): a craft takes the FIRST copy that shares a source; the gate steps must prove it is a copy of the right source, not that it is the one called Ingredient ----------------
+test("GATE 22 steps 11 to 14 tolerate another copy sharing the source, even when it comes first: they print which copy was escrowed and prove that very copy comes back", async () => {
+  await world({ downtime: 0, iron: 0, fang: 0, perClientDefinitions: true });
+  const { gm, testUser } = getUsers();
+  installFakeApplication();
+  installProbeFake();
+  const api = getApi();
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const base = { drivers: { gm: makeDomDriver({ as, user: gm }), player: makeDomDriver({ as, user: testUser }) }, state: {}, assert, wait, extras: {} };
+  const results = {};
+  const play = async (n, who) => { const out = await sink(() => playStep({ script, n, who, base, runBlock: async () => { results[n] = await runBlock(n, who === "player" ? testUser : gm); } })); results[`lines${n}`] = out.lines; return results[n]; };
+  const expectPass = async (n, who) => assert.equal(await play(n, who), "ALL PASS", `step ${n}:\n${results[`lines${n}`].join("\n")}`);
+  await quietly(async () => {
+    await runBlock(2, gm);
+    await runBlock(6, gm);
+    // another copy of the compendium item that sits BEFORE Gate G22 Ingredient in the bag, so the craft takes it first
+    const smith = game.actors.getName("Gate G22 Smith");
+    const ingredient = smith.items.find(i => i.name === "Gate G22 Ingredient");
+    const data = ingredient.toObject();
+    await ingredient.delete();
+    await smith.createEmbeddedDocuments("Item", [{ ...data, name: "Gate G22 Spare" }]);
+    await smith.createEmbeddedDocuments("Item", [{ ...data, name: "Gate G22 Ingredient" }]);
+    assert.deepEqual(smith.items.filter(i => i._stats?.compendiumSource === COMP_UUID).map(i => i.name), ["Gate G22 Spare", "Gate G22 Ingredient"]);
+    await expectPass(7, "gm");
+    await as(testUser, () => api.definitions.refresh({ force: true }));
+    await expectPass(10, "player");
+    assert.match(results.lines10.join("\n"), /recorded for Steps 11 and 12: 2 copy\(ies\) of the compendium item share the source in the bag/);
+    await expectPass(11, "player");
+    const line11 = results.lines11.find(l => /which item was escrowed/.test(l));
+    assert.match(line11, /"name":"Gate G22 Spare"/, "the craft took the FIRST copy sharing the source, not the one called Ingredient");
+    assert.match(line11, /"copiesSharingBefore":2/);
+    assert.match(line11, /"copiesSharingNow":1/);
+    assert.ok(smith.items.some(i => i.name === "Gate G22 Ingredient"), "the other copy stayed in the bag");
+    await expectPass(12, "player");
+    assert.match(results.lines12.find(l => /which item came back/.test(l)), /"escrowed":"Gate G22 Spare","matching":1,"copiesNow":2,"copiesBefore":2/);
+    await expectPass(13, "gm");
+    // the cancelled copy came back at the END of the bag, so now the first copy sharing the source is the other one: still a copy of the right source, still proven
+    assert.match(results.lines13.find(l => /which item was escrowed/.test(l)), /"escrowed":\{"name":"Gate G22 Ingredient".*"copiesStillInTheBag":1/);
+    await expectPass(14, "gm");
+    assert.match(results.lines14.find(l => /which item was escrowed/.test(l)), /"copiesStillInTheBag":\d/);
+    await runBlock(16, gm);
+    await as(testUser, () => foundry.applications.instances.get("pathfinder-progress-hub")?.close());
+  });
+});
+
+test("GATE 22 SETUP 2 refuses when Gate G22 Smith already holds another copy sharing the source, and says what to do", async () => {
+  await world({ downtime: 0, iron: 0, fang: 0, perClientDefinitions: true });
+  const { gm } = getUsers();
+  installProbeFake();
+  await quietly(async () => {
+    await runBlock(2, gm);
+    const smith = game.actors.getName("Gate G22 Smith");
+    await smith.createEmbeddedDocuments("Item", [{ name: "Torch", type: "equipment", system: { quantity: 1 }, flags: {}, _stats: { compendiumSource: COMP_UUID } }]);
+    await assert.rejects(Promise.resolve(runBlock(6, gm)), /already holds 1 copy\(ies\) of the compendium item \(Torch\).*FIRST copy.*CLEANUP 2 \(Step 16\)/);
+    assert.equal(smith.items.some(i => i.name === "Gate G22 Ingredient"), false, "nothing was planted");
+    assert.equal(getApi().downtime.isOpen(), false, "no downtime was opened");
+    await runBlock(16, gm);
+  });
+});

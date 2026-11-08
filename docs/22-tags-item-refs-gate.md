@@ -254,6 +254,7 @@ await (async () => {
 - Run the block below in the GM window. It is safe to run again at any time (after a reload of the GM window it puts the in-memory definitions and `globalThis.__g22` back).
 - You should see: an object with `planted` (seven lines) and a `published` revision. On a rerun it says `already: "set up"`.
 - If it stops with `this gate tags ...`, the compendium item SETUP chose is not the one this gate tags: set `NAME` in Step 2 back to `Torch` and run Step 2 again.
+- If it stops with `already holds ... copy(ies)`, Smith holds another copy of the compendium item (Step 4's drops leave one): run Step 16, then Step 2, then this step.
 
 ```js
 // [GM] SETUP 2: five in-memory g22- definitions (a tag, a material, a town, a workshop, a recipe whose second slot needs the tag), a copy of the compendium item on Gate G22 Smith (Gate G22 Ingredient),
@@ -296,6 +297,8 @@ await (async () => {
     return { already: "set up", rebuilt: "the definitions and globalThis.__g22", published: await api.publishDefinitions() };
   }
   if (api.tags.ledger().items[COMP_UUID]) throw new Error(`the compendium item ${COMP_UUID} is already tagged in your ledger: this gate tags it and takes the tag off again, so untag it first`);
+  const sharing = smith.items.filter(i => !i.getFlag(M, "crafted") && stats(i).compendiumSource === COMP_UUID);
+  if (sharing.length) throw new Error(`Gate G22 Smith already holds ${sharing.length} copy(ies) of the compendium item (${sharing.map(i => i.name).join(", ")}). A craft takes the FIRST copy that shares a source, so this gate could not tell which one it used: run CLEANUP 2 (Step 16), then SETUP (Step 2) and this step again. (The drops in Step 4 leave such copies on Smith.)`);
   if (api.downtime.isOpen()) throw new Error("downtime is already open; end it first");
   if (api.queue.list().length) throw new Error("the queue is not empty; resolve or clear it first");
   const holders = game.actors.filter(a => (a.getFlag(M, "downtimeDays") ?? 0) > 0).map(a => a.name);
@@ -437,7 +440,7 @@ await (async () => {
 - In the **Player** window, open **Downtime** for **Gate G22 Smith** (the scene controls' hourglass) and choose the formula **Gate G22 Trinket** (the runner does this).
 - Look at the **charm** slot: it lists one item.
 - Run the block below in the Player window.
-- You should see: `PASS:` lines and `ALL PASS`: the slot lists the item by the name the GM gave it, and nothing in the slot or on the page names the tag, a tier or a price.
+- You should see: `PASS:` lines and `ALL PASS`: the slot lists the item by the name the GM gave it, and nothing in the slot or on the page names the tag, a tier or a price. A `PASS: recorded for Steps 11 and 12` line says how many copies share the source in the bag (Steps 11 to 13 compare against it).
 
 ```js
 // [Player] The charm slot lists what fits, by name, and shows no tag, tier or price anywhere.
@@ -454,6 +457,10 @@ await (async () => {
   check("the slot lists exactly one item, the compendium reference, by the name the GM gave it", options.length === 1 && options[0].dataset.material === saved.craft.compendiumUuid && /Gate G22 Torch/.test(texts[0] ?? ""), JSON.stringify(texts));
   check("the option shows no tag, no tier and no price", !/tier|tag|\bgp\b|price|worth/i.test(texts.join(" ")), JSON.stringify(texts));
   check("nowhere on the window is the tag's name or id", !/Gate G22 Tooth|g22-tooth/.test(page), page.slice(0, 200));
+  const sourceOf = i => (i._stats?.toObject?.() ?? i._stats ?? {}).compendiumSource ?? null;
+  const copies = game.user.character.items.filter(i => !i.getFlag(M, "crafted") && sourceOf(i) === saved.craft.compendiumUuid);
+  globalThis.__g22bag = copies.map(i => ({ id: i.id, name: i.name, quantity: i.system?.quantity ?? 1, system: JSON.stringify(i.toObject().system) }));     // Steps 11 and 12 compare against this
+  rows.push(`PASS: recorded for Steps 11 and 12: ${copies.length} copy(ies) of the compendium item share the source in the bag: ${JSON.stringify(globalThis.__g22bag.map(c => [c.name, c.quantity]))}`);
   check("the player's copy of the slot says which items fit (id and name only) and carries nothing about tags", Boolean(charm) && Array.isArray(charm.fits) && charm.fits.length === 1 && Object.keys(charm.fits[0]).sort().join() === "id,name" && !("needs" in charm) && !("kind" in charm) && !("passCap" in charm) && !/g22-tooth/.test(JSON.stringify(charm)), JSON.stringify(charm));
   console.log(rows.join("\n"));
   return rows.some(r => r.startsWith("FAIL")) ? "FAILED: scroll up for the lines" : "ALL PASS";
@@ -464,25 +471,35 @@ await (async () => {
 ## Step 11 [Player]: queue a craft with the real PF2e item
 
 **What to do and see:**
+- Run Step 10 first in this window (it records which copies share the source).
 - In the **Player** window, on **Gate G22 Trinket**: choose **Gate G22 Iron** in **Body**, choose the item in **Charm**, choose **Gate G22 Bench**, click **Queue the craft** (the runner does this).
 - You should see: "Craft queued: Gate G22 Trinket. N days reserved." at the bottom.
 - Run the block below in the Player window.
-- You should see: `PASS:` lines and `ALL PASS`: the item left the bag and is held whole in the queued craft.
+- You should see: `PASS:` lines and `ALL PASS`. The block prints which item was escrowed and how many copies shared the source. A craft takes the FIRST copy that shares the source and the player cannot choose, so the escrowed copy need not be the one called Gate G22 Ingredient: the block proves it is a copy of the right source, that exactly that one left the bag, and that it is held whole.
 
 ```js
-// [Player] The craft is queued and the real item is held whole in escrow.
+// [Player] The craft is queued; the item in escrow is a copy of the right source, exactly one copy left the bag, and it is held whole.
 await (async () => {
   const M = "pathfinder-progress", rows = [];
   const check = (label, ok, detail) => rows.push(`${ok ? "PASS" : "FAIL"}: ${label}${detail === undefined ? "" : ` (${detail})`}`);
   const hero = game.user.character, saved = game.user.getFlag(M, "gateSetup22");
   if (game.user.isGM || hero?.name !== "Gate G22 Smith" || !saved?.craft) throw new Error('Player window as the user "Test" only, after the GM ran SETUP and SETUP 2');
-  const was = saved.craft.ingredient;
+  const was = saved.craft.ingredient, source = saved.craft.compendiumUuid;
+  const sourceOf = i => (i._stats?.toObject?.() ?? i._stats ?? {}).compendiumSource ?? null;
+  const sharing = () => hero.items.filter(i => !i.getFlag(M, "crafted") && sourceOf(i) === source);
+  const before = globalThis.__g22bag ?? null;
   const queued = (hero.getFlag(M, "pendingActions") ?? []).filter(a => a.type === "craft");
   check("exactly one craft is queued (the clicks queue it; do them first if this fails)", queued.length === 1, queued.length);
-  const unit = queued[0]?.params?.escrow?.units?.find(u => u.itemData);
-  check("the real item is in escrow, whole: its own name, type and compendium source", unit?.itemData?.name === was.name && unit?.itemData?.type === was.type && unit?.itemData?._stats?.compendiumSource === was.compendiumSource, JSON.stringify({ was, unit: unit ? { name: unit.itemData?.name, type: unit.itemData?.type, source: unit.itemData?._stats?.compendiumSource } : null }));
-  check("it has left the bag", !hero.items.some(i => i.name === was.name), hero.items.map(i => i.name).join(", "));
+  const unit = queued[0]?.params?.escrow?.units?.find(u => u.itemData), data = unit?.itemData;
+  const nowIds = sharing().map(i => i.id);
+  const gone = before ? before.filter(b => !nowIds.includes(b.id)) : null;
+  rows.push(`PASS: which item was escrowed, and how many copies shared the source: ${JSON.stringify({ escrowed: data ? { name: data.name, type: data.type, quantity: data.system?.quantity ?? null, units: unit.units, source: data._stats?.compendiumSource ?? null } : null, copiesSharingBefore: before ? before.length : "unknown (Step 10 was not run in this window)", copiesSharingNow: nowIds.length })}`);
+  check("the escrowed item is a copy of the right source (the compendium item the tag is on), of the right kind", Boolean(data) && data.type === was.type && data._stats?.compendiumSource === source, JSON.stringify({ type: data?.type, source: data?._stats?.compendiumSource }));
+  check("the escrowed item is held whole, with its own data", Boolean(data) && typeof data.name === "string" && data.system && typeof data.system === "object", JSON.stringify(data ? { name: data.name, keys: Object.keys(data.system).length } : null));
+  if (before) check("exactly one copy left the bag, and it is the one in escrow (the craft takes the first copy sharing the source)", gone.length === 1 && gone[0].name === data?.name && gone[0].system === JSON.stringify(data?.system) && nowIds.length === before.length - 1, JSON.stringify({ gone: gone.map(g => g.name), before: before.length, now: nowIds.length }));
+  else rows.push("PASS: not compared with the bag before the queue (Step 10 was not run in this window, so there is nothing to compare with)");
   check("the queue carries no tag, no tier from the ledger and no DC", !/g22-tooth|Gate G22 Tooth|\bDC\b/.test(JSON.stringify(queued)), JSON.stringify(queued).slice(0, 200));
+  globalThis.__g22escrow = data ? { name: data.name, type: data.type, system: JSON.stringify(data.system), source, copiesBefore: before ? before.length : null } : null;
   console.log(rows.join("\n"));
   return rows.some(r => r.startsWith("FAIL")) ? "FAILED: scroll up for the lines" : "ALL PASS";
 })();
@@ -495,23 +512,25 @@ await (async () => {
 - In the **Player** window click **View queue**, then **Cancel** on the craft (the runner does this).
 - You should see: "Cancelled: ... Your days and materials are back."
 - Run the block below in the Player window.
-- You should see: `PASS:` lines and `ALL PASS`: the item is back with its own name, type, data and compendium source, and the days and iron are back.
+- You should see: `PASS:` lines and `ALL PASS`: the item that was in escrow (Step 11 printed which) is back with its own name, type, data and compendium source, the bag holds as many copies as before, and the days and iron are back.
 
 ```js
-// [Player] After the cancel: the same real item is back (not a stand-in), the queue is empty, days and iron are back.
+// [Player] After the cancel: the item that was escrowed is back (not a stand-in), no other copy changed, the queue is empty, days and iron are back.
 await (async () => {
   const M = "pathfinder-progress", rows = [];
   const check = (label, ok, detail) => rows.push(`${ok ? "PASS" : "FAIL"}: ${label}${detail === undefined ? "" : ` (${detail})`}`);
   const hero = game.user.character, saved = game.user.getFlag(M, "gateSetup22");
   if (game.user.isGM || hero?.name !== "Gate G22 Smith" || !saved?.craft) throw new Error('Player window as the user "Test" only, after the GM ran SETUP and SETUP 2');
   const was = saved.craft.ingredient;
-  const item = hero.items.find(i => i.name === was.name);
-  const stats = item?._stats?.toObject?.() ?? item?._stats ?? {};
-  const now = item ? { name: item.name, type: item.type, system: item.toObject().system, compendiumSource: stats.compendiumSource ?? null, quantity: item.system?.quantity ?? null } : null;
+  const escrow = globalThis.__g22escrow ?? { name: was.name, type: was.type, system: JSON.stringify(was.system), source: was.compendiumSource, copiesBefore: null };
+  const sourceOf = i => (i._stats?.toObject?.() ?? i._stats ?? {}).compendiumSource ?? null;
+  const copies = hero.items.filter(i => !i.getFlag(M, "crafted") && sourceOf(i) === escrow.source);
+  const same = copies.filter(i => i.name === escrow.name && i.type === escrow.type && JSON.stringify(i.toObject().system) === escrow.system);
   const iron = hero.items.filter(i => i.getFlag(M, "material")?.materialId === "g22-iron").reduce((n, i) => n + i.system.quantity, 0);
-  const detail = JSON.stringify({ was, now, iron, free: hero.getFlag(M, "downtimeDays") ?? 0, queued: (hero.getFlag(M, "pendingActions") ?? []).length });
-  check("the item is back on Smith, once", hero.items.filter(i => i.name === was.name).length === 1, detail);
-  check("it is the same real item: same type, same data, same compendium source, same quantity", Boolean(now) && now.type === was.type && JSON.stringify(now.system) === JSON.stringify(was.system) && now.compendiumSource === was.compendiumSource && now.quantity === was.quantity, detail);
+  const detail = JSON.stringify({ escrowed: escrow.name, matching: same.length, copiesNow: copies.length, copiesBefore: escrow.copiesBefore, iron, free: hero.getFlag(M, "downtimeDays") ?? 0, queued: (hero.getFlag(M, "pendingActions") ?? []).length });
+  rows.push(`PASS: which item came back, and how many copies share the source now: ${detail}`);
+  check("the item that was escrowed is back: a copy with its own name, type, data and compendium source", same.length >= 1, detail);
+  check("no other copy changed or went missing: the bag holds as many copies as before the queue", escrow.copiesBefore === null || copies.length === escrow.copiesBefore, detail);
   check("the queue is empty again and the days and iron are back", (hero.getFlag(M, "pendingActions") ?? []).length === 0 && (hero.getFlag(M, "downtimeDays") ?? 0) === saved.craft.freeDays && iron === saved.craft.iron, detail);
   console.log(rows.join("\n"));
   return rows.some(r => r.startsWith("FAIL")) ? "FAILED: scroll up for the lines" : "ALL PASS";
@@ -524,26 +543,32 @@ await (async () => {
 **What to do and see:**
 - The runner queues the craft again in the Player window (the same clicks as Step 11). By hand, do Step 11's clicks first.
 - Run the block below in the GM window. It resolves the craft as a forced failure.
-- You should see: `PASS:` lines and `ALL PASS`. The charm slot has a loss chance of 0, so the item cannot be lost to the failure.
+- You should see: `PASS:` lines and `ALL PASS`. The block prints which item was escrowed and how many copies shared the source. The charm slot has a loss chance of 0, so the item cannot be lost to the failure.
 
 ```js
-// [GM] A forced failure: the queued craft resolves, nothing is made, and the real item comes back as it was.
+// [GM] A forced failure: the queued craft resolves, nothing is made, and the item that was escrowed comes back as it was.
 await (async () => {
   const g = globalThis.__g22 ?? (() => { throw new Error("run SETUP (Step 2) and SETUP 2 (Step 6) first"); })();
   if (!g.queued) throw new Error("run SETUP 2 (Step 6) first");
-  const { api } = g;
-  const smith = game.actors.get(g.ids.smith), was = game.users.getName("Test").getFlag(g.M, "gateSetup22").craft.ingredient;
+  const { api, M } = g;
+  const smith = game.actors.get(g.ids.smith), source = game.users.getName("Test").getFlag(M, "gateSetup22").craft.compendiumUuid;
+  const sharing = () => smith.items.filter(i => !i.getFlag(M, "crafted") && g.stats(i).compendiumSource === source);
   const action = g.queued(smith).find(a => a.type === "craft");
   g.check("a craft is queued (the Player's clicks queue it; do Step 11's clicks first if this fails)", Boolean(action), JSON.stringify(g.queued(smith).map(a => a.type)));
   if (!action) return g.done();
+  const data = action.params?.escrow?.units?.find(u => u.itemData)?.itemData;
+  const remaining = sharing().length;
+  g.rows.push(`PASS: which item was escrowed, and how many copies share the source: ${JSON.stringify({ escrowed: data ? { name: data.name, type: data.type, quantity: data.system?.quantity ?? null, source: data._stats?.compendiumSource ?? null } : null, copiesStillInTheBag: remaining })}`);
+  g.check("the escrowed item is a copy of the right source", Boolean(data) && data._stats?.compendiumSource === source, JSON.stringify(data?._stats));
+  if (!data) return g.done();
   const out = await api.queue.resolve(smith, action.id, { degree: "failure", chat: true });
   g.check("it resolved", out.status === "resolved", out.message);
   await g.until(() => g.queued(smith).length === 0);
-  const item = g.ingredient(), now = item ? g.snapOf(item) : null;
-  const detail = JSON.stringify({ was, now, queued: g.queued(smith).length, crafted: smith.items.filter(i => i.getFlag(g.M, "crafted")).length });
-  g.check("the real item is back on Smith, once", smith.items.filter(i => i.name === was.name).length === 1, detail);
-  g.check("it is the same real item: same type, data, compendium source and quantity", Boolean(now) && now.type === was.type && JSON.stringify(now.system) === JSON.stringify(was.system) && now.compendiumSource === was.compendiumSource && now.quantity === was.quantity, detail);
-  g.check("a failure makes no item", smith.items.filter(i => i.getFlag(g.M, "crafted")).length === 0, detail);
+  const same = sharing().filter(i => i.name === data.name && i.type === data.type && JSON.stringify(i.toObject().system) === JSON.stringify(data.system));
+  const detail = JSON.stringify({ escrowed: data.name, matching: same.length, copiesNow: sharing().length, copiesBefore: remaining + 1, queued: g.queued(smith).length, crafted: smith.items.filter(i => i.getFlag(M, "crafted")).length });
+  g.check("the item that was escrowed is back: a copy with its own name, type, data and compendium source", same.length >= 1, detail);
+  g.check("no other copy changed or went missing: the bag holds one more copy than while the craft was queued", sharing().length === remaining + 1, detail);
+  g.check("a failure makes no item", smith.items.filter(i => i.getFlag(M, "crafted")).length === 0, detail);
   return g.done();
 })();
 ```
@@ -562,10 +587,13 @@ await (async () => {
   const g = globalThis.__g22 ?? (() => { throw new Error("run SETUP (Step 2) and SETUP 2 (Step 6) first"); })();
   if (!g.queued) throw new Error("run SETUP 2 (Step 6) first");
   const { api, M } = g;
-  const smith = game.actors.get(g.ids.smith), was = game.users.getName("Test").getFlag(M, "gateSetup22").craft.ingredient;
+  const smith = game.actors.get(g.ids.smith), source = game.users.getName("Test").getFlag(M, "gateSetup22").craft.compendiumUuid;
+  const sharing = () => smith.items.filter(i => !i.getFlag(M, "crafted") && g.stats(i).compendiumSource === source);
   const action = g.queued(smith).find(a => a.type === "craft");
   g.check("a craft is queued (the Player's clicks queue it; do Step 11's clicks first if this fails)", Boolean(action), JSON.stringify(g.queued(smith).map(a => a.type)));
   if (!action) return g.done();
+  const data = action.params?.escrow?.units?.find(u => u.itemData)?.itemData, remaining = sharing().length;
+  g.rows.push(`PASS: which item was escrowed, and how many copies share the source: ${JSON.stringify({ escrowed: data?.name ?? null, source: data?._stats?.compendiumSource ?? null, copiesStillInTheBag: remaining })}`);
   const out = await api.queue.resolve(smith, action.id, { degree: "success", chat: true });
   g.check("it resolved", out.status === "resolved", out.message);
   await g.until(() => smith.items.some(i => i.getFlag(M, "crafted")));
@@ -575,7 +603,7 @@ await (async () => {
   g.check("a crafted item is on Smith, with an opaque freezeId", Boolean(made) && typeof flag?.freezeId === "string" && flag.freezeId.length > 0, JSON.stringify(flag));
   g.check("the GM-only store holds what it was made of", Boolean(flag?.freezeId) && Boolean(api.tags.frozen(flag.freezeId)), JSON.stringify(api.tags.frozen(flag?.freezeId ?? "")));
   g.check("the item's flags carry no tag, no tag name and no tag data", !/g22-tooth|Gate G22 Tooth|"tags"|"native"|"inherited"|"needs"|"priority"|effectBlocks/.test(text), text);
-  g.check("the ingredient was used up (a success keeps nothing)", smith.items.filter(i => i.name === was.name).length === 0, smith.items.map(i => i.name).join(", "));
+  g.check("the escrowed item was used up and no copy was handed back (a success keeps nothing): the bag still holds the same other copies", sharing().length === remaining, JSON.stringify({ copiesBefore: remaining, copiesNow: sharing().length, names: sharing().map(i => i.name) }));
   return g.done();
 })();
 ```
