@@ -726,7 +726,7 @@ await (async () => {
   const M = "pathfinder-progress", api = game.modules.get(M).api;
   const problems = [];
   const attempt = async (what, fn) => { try { await fn(); } catch (error) { problems.push(`${what}: ${error.message}`); } };
-  const names = ["Gate Smith", "Gate Bystander", "Gate Wolf"];
+  const names = ["Gate Smith", "Gate Bystander", "Gate Wolf", "Gate Wolf Jr."];
   const actors = names.map(n => game.actors.getName(n)).filter(a => a?.getFlag(M, "gateThrowaway2") === true);
   const ids = actors.map(a => a.id);
   const scene = game.scenes.getName("Gate Yard");
@@ -753,7 +753,7 @@ await (async () => {
     const book = game.settings.get(M, "sharedCompendium");
     if (!book) return;
     const drop = (entries, keep) => Object.fromEntries(Object.entries(entries ?? {}).filter(([k, e]) => keep(k, e)));
-    const next = { ...book, materials: drop(book.materials, k => !k.startsWith("g2-")), creatures: drop(book.creatures, (k, e) => e?.name !== "Gate Wolf"), regions: drop(book.regions, k => !k.startsWith("g2-")) };
+    const next = { ...book, materials: drop(book.materials, k => !k.startsWith("g2-")), creatures: drop(book.creatures, (k, e) => !["Gate Wolf", "Gate Wolf Jr."].includes(e?.name)), regions: drop(book.regions, k => !k.startsWith("g2-")) };
     if (JSON.stringify(next) !== JSON.stringify(book)) await game.settings.set(M, "sharedCompendium", next);
   });
   await attempt("audit ledger", async () => {
@@ -777,3 +777,107 @@ await (async () => {
 ```
 
 Expected: `problems: []`, `actorsLeft: 0`, `sceneLeft: false`, `downtimeOpen: false`, `stationStateLeft: 0`, `partyStationsLeft: 0`, and the audit list empty. In the Player window, run `delete globalThis.__p2` (or just reload).
+
+## Step 32 [GM]: a creature whose name has a dot (new: the dot-free key, on real Foundry)
+
+**What to do and see:**
+- Run SETUP (Step 2) again if you ran CLEANUP (Step 31) since. Steps 3 to 30 are not needed.
+- Run the block below in the GM window. It makes the creature **Gate Wolf Jr.** (the name ends in a dot), puts it in a combat with Gate Smith, shares the entry with the party and approves it.
+- You should see: `PASS:` lines and `ALL PASS`. The block prints the keys of Smith's saved Compendium and of the saved shared setting, so a key that Foundry changed shows up in the line.
+- Why: Foundry reads a dot in an object's key as a path when it saves data. The creature's key is its name with each dot written `%2e` (`gate wolf jr%2e`), so it must be saved flat. The entry still holds the real name.
+- Finish with Step 33 (CLEANUP again).
+
+```js
+// [GM] A creature called "Gate Wolf Jr.": recorded in a combat, shared and approved. The saved keys are printed; none may contain a dot, and the real name must read back.
+await (async () => {
+  const g = globalThis.__g2 ?? (() => { throw new Error("run SETUP (step 2) first"); })();
+  const { M } = g, smith = g.smith(), scene = g.scene();
+  const NAME = "Gate Wolf Jr.", KEY = "gate wolf jr%2e";
+  const existing = game.actors.getName(NAME);
+  if (existing && existing.getFlag(M, "gateThrowaway2") !== true) throw new Error(`"${NAME}" already exists and was not made by this check; rename or delete it first`);
+  const jr = existing ?? await Actor.create({ name: NAME, type: "npc", ownership: { default: 0 }, system: { traits: { value: ["animal"] } }, flags: { [M]: { gateThrowaway2: true } } });
+  if (!scene.tokens.some(t => t.actorId === jr.id)) { const td = await jr.getTokenDocument({ x: 800, y: 100 }); await scene.createEmbeddedDocuments("Token", [td.toObject()]); }
+  const tokenOf = actor => scene.tokens.find(t => t.actorId === actor.id);
+  const combat = await Combat.create({ scene: scene.id, flags: { [M]: { gateThrowaway2: true } } });
+  await combat.createEmbeddedDocuments("Combatant", [smith, jr].map(a => ({ tokenId: tokenOf(a).id, sceneId: scene.id, actorId: a.id })));
+  const entry = await g.until(() => g.book(smith).creatures?.[KEY]);
+  const flagKeys = Object.keys(g.book(smith).creatures ?? {});
+  const flagValues = JSON.stringify({ savedFlagKeys: flagKeys, entry });
+  g.check("Smith has an entry for Gate Wolf Jr. under the dot-free key, with the real name", Boolean(entry) && entry.key === KEY && entry.name === NAME, flagValues);
+  g.check("every creature key saved in Smith's Compendium is flat (no dot, no nested object)", flagKeys.length > 0 && flagKeys.every(k => !k.includes(".")) && flagKeys.includes(KEY), flagValues);
+  const mine = g.api.compendium.all().characters.find(c => c.actorId === smith.id);
+  g.check("the Compendium reads back and lists the creature by its real name", Boolean(mine) && mine.creatures.some(c => c.name === NAME), JSON.stringify(mine?.creatures?.map(c => c.name)));
+  const action = await g.api.queue.submit(smith, "share", { kind: "creature", key: KEY });
+  const approved = await g.api.queue.resolve(smith, action.id, { chat: false });
+  g.check("the share was approved", approved?.status === "resolved", JSON.stringify(approved));
+  const sharedKeys = await g.until(() => { const keys = Object.keys(game.settings.get(M, "sharedCompendium")?.creatures ?? {}); return keys.includes(KEY) ? keys : false; });
+  const stored = JSON.stringify({ savedSharedKeys: sharedKeys || Object.keys(game.settings.get(M, "sharedCompendium")?.creatures ?? {}), savedSharedSetting: game.settings.get(M, "sharedCompendium")?.creatures?.[KEY] });
+  g.check("the saved shared setting holds the creature under the dot-free key, and no key has a dot", Array.isArray(sharedKeys) && sharedKeys.includes(KEY) && sharedKeys.every(k => !k.includes(".")), stored);
+  g.check("no audit mismatches", g.api.audit.scan().length === 0, JSON.stringify(g.api.audit.scan()));
+  return g.done();
+})();
+```
+
+## Step 33 [GM]: CLEANUP again (always run this, even if a step failed)
+
+**What to do and see:**
+- Nothing to click.
+- Run the block below (the same block as Step 31). It also removes Gate Wolf Jr. and its shared entry.
+- You should see: `problems: []`, `actorsLeft: 0`, `sceneLeft: false`, `downtimeOpen: false`, `stationStateLeft: 0`, `partyStationsLeft: 0` and an empty audit list.
+
+```js
+// [GM] CLEANUP: deletes everything the gate made and puts back what it changed. Safe to run twice.
+await (async () => {
+  const M = "pathfinder-progress", api = game.modules.get(M).api;
+  const problems = [];
+  const attempt = async (what, fn) => { try { await fn(); } catch (error) { problems.push(`${what}: ${error.message}`); } };
+  const names = ["Gate Smith", "Gate Bystander", "Gate Wolf", "Gate Wolf Jr."];
+  const actors = names.map(n => game.actors.getName(n)).filter(a => a?.getFlag(M, "gateThrowaway2") === true);
+  const ids = actors.map(a => a.id);
+  const scene = game.scenes.getName("Gate Yard");
+  const ours = scene?.getFlag(M, "gateThrowaway2") === true ? scene : null;
+  const user = game.users.getName("Test");
+
+  for (const combat of game.combats?.filter(c => c.getFlag(M, "gateThrowaway2") === true) ?? []) await attempt("delete a combat", () => combat.delete());
+  if (ours) {
+    await attempt("party location", async () => { await game.settings.set(M, "partyLocation", ours.getFlag(M, "gateOriginalLocation") ?? ""); });
+    await attempt("clear the map", () => api.clearMap(ours));
+    await attempt("clear the anchors", () => api.clearAnchors(ours, { confirm: true }));
+    await attempt("untag the scene", () => api.untagScene(ours, "g2-wood"));
+    await attempt("the explorationState entry", async () => { const all = game.settings.get(M, "explorationState") ?? {}; delete all[ours.id]; await game.settings.set(M, "explorationState", all); });
+    await attempt("delete the scene", () => ours.delete());
+  }
+  await attempt("downtime", async () => {
+    const period = api.downtime.state();
+    if (!period.open || Object.keys(period.participants).every(id => ids.includes(id))) await game.settings.set(M, "downtime", {});
+    else problems.push("downtime: a real period is open, so it was left alone");
+  });
+  await attempt("the Yard Bench's saved state", async () => { if ((game.settings.get(M, "stationState") ?? []).some(e => e.stationId === "g2-bench")) await api.clearStationState("g2-bench"); });
+  await attempt("the party workshop", async () => { const list = game.settings.get(M, "partyStations") ?? []; if (list.some(s => s.blueprintId === "g2-camp")) await game.settings.set(M, "partyStations", list.filter(s => s.blueprintId !== "g2-camp")); });
+  await attempt("the shared Compendium", async () => {
+    const book = game.settings.get(M, "sharedCompendium");
+    if (!book) return;
+    const drop = (entries, keep) => Object.fromEntries(Object.entries(entries ?? {}).filter(([k, e]) => keep(k, e)));
+    const next = { ...book, materials: drop(book.materials, k => !k.startsWith("g2-")), creatures: drop(book.creatures, (k, e) => !["Gate Wolf", "Gate Wolf Jr."].includes(e?.name)), regions: drop(book.regions, k => !k.startsWith("g2-")) };
+    if (JSON.stringify(next) !== JSON.stringify(book)) await game.settings.set(M, "sharedCompendium", next);
+  });
+  await attempt("audit ledger", async () => {
+    const ledger = api.audit.ledger();
+    for (const id of ids) delete ledger[id];
+    if (ledger._events) ledger._events.history = ledger._events.history.filter(h => !/Gate |Yard /.test(h.text));
+    await game.settings.set(M, "auditLedger", ledger);
+  });
+  await attempt("Test's character", async () => {
+    const original = user?.getFlag(M, "gateOriginalCharacter");
+    if (!user || original === undefined) return;
+    await user.update({ character: original !== "none" && game.actors.get(original) ? original : null });
+    await user.unsetFlag(M, "gateOriginalCharacter");
+  });
+  for (const actor of actors) await attempt(`delete ${actor.name}`, () => actor.delete());
+  for (const [kind, id] of [["blueprint", "g2-camp"], ["recipe", "g2-blade"], ["region", "g2-wood"], ["nodeType", "g2-patch"], ["station", "g2-bench"], ["material", "g2-gem"], ["material", "g2-hide"], ["material", "g2-ore"], ["town", "g2-away"], ["town", "g2-town"]]) api.definitions[kind].delete(id);
+  delete globalThis.__g2;
+  delete globalThis.__p2;
+  return { problems, actorsLeft: game.actors.filter(a => names.includes(a.name)).length, sceneLeft: Boolean(game.scenes.getName("Gate Yard")), downtimeOpen: api.downtime.isOpen(), testUsersCharacter: user?.character?.name ?? null, stationStateLeft: (game.settings.get(M, "stationState") ?? []).filter(e => e.stationId === "g2-bench").length, partyStationsLeft: (game.settings.get(M, "partyStations") ?? []).filter(s => s.blueprintId === "g2-camp").length, audit: api.audit.scan() };
+})();
+```
+

@@ -244,3 +244,16 @@ test("when the INVALID copy comes first, the valid one is still reported as a du
   ]);
   assert.ok(errors.some(e => e.pack === "pack.b" && e.field === "id"), errors.map(formatError).join(" | "));
 });
+
+test("a slot name with a dot in it is refused (Foundry reads a dot in a key as a path), naming the pack, the entry and the field; a name without one loads", () => {
+  const bad = clone(RECIPE);
+  bad.slots[0].name = "Hilt (wrapped.)";
+  const { errors } = run(MATERIAL, bad);
+  assert.equal(errors.length, 1, JSON.stringify(errors.map(formatError)));
+  assertNamesAll(errors[0], { entry: "blade", field: "slots[0].name" });
+  assert.match(formatError(errors[0]), /must not contain a dot/);
+  assert.match(formatError(errors[0]), /Hilt \(wrapped\.\)/, "the offending name is printed");
+  const good = clone(RECIPE);
+  good.slots[0].name = "Hilt (wrapped)";
+  assert.deepEqual(run(MATERIAL, good).errors, []);
+});

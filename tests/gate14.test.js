@@ -30,10 +30,10 @@ const PLAYER = [2, 3].length; void PLAYER;
 
 // Who runs each step (the doc labels must agree).
 const WHO = new Map([[1, "both"], [2, "gm"], [3, "player"], [4, "player"], [5, "gm"], [6, "player"], [7, "gm"], [8, "player"], [9, "gm"], [10, "player"], [11, "gm"], [12, "player"], [13, "gm"], [14, "player"],
-  [15, "player"], [16, "player"], [17, "gm"], [18, "player"], [19, "player"], [20, "gm"], [21, "player"], [22, "gm"], [23, "player"], [24, "gm"], [25, "player"], [26, "gm"], [27, "player"], [28, "gm"], [29, "player"], [30, "gm"], [31, "gm"]]);
+  [15, "player"], [16, "player"], [17, "gm"], [18, "player"], [19, "player"], [20, "gm"], [21, "player"], [22, "gm"], [23, "player"], [24, "gm"], [25, "player"], [26, "gm"], [27, "player"], [28, "gm"], [29, "player"], [30, "gm"], [31, "gm"], [32, "gm"], [33, "gm"]]);
 
 test("the gate checklist has exactly one code block per step, and every step says who runs it", () => {
-  assert.equal(GATE.size, 31);
+  assert.equal(GATE.size, 33);
   for (const [step, { who, code, text }] of GATE) {
     assert.match(who, /^\[(GM|Player)\]( and \[(GM|Player)\])?$/, `step ${step}`);
     assert.ok(code, `step ${step} needs its code block`);
@@ -175,4 +175,54 @@ test("gate 14 step 18: a cancel whose update arrives late still passes, and a re
   assert.deepEqual(Object.keys(detail).sort(), ["afterCancel", "before", "pending", "result"], "the FAIL line prints every value it compared");
   assert.equal(detail.before.gold, 100);
   assert.equal(detail.afterCancel.gold, 99);
+});
+
+// Step 32 (new): a creature whose name has a dot, saved flat on real Foundry --------------------------------------------------------------------------------------------------------
+import { M as MODULE } from "./fake-world.js";
+function expandDots(value) {
+  if (Array.isArray(value) || value === null || typeof value !== "object") return value;
+  const out = {};
+  for (const [key, inner] of Object.entries(value)) { let node = out; const path = key.split("."); for (const part of path.slice(0, -1)) node = node[part] ??= {}; node[path.at(-1)] = expandDots(inner); }
+  return out;
+}
+test("gate 14 Step 32: a creature called Gate Wolf Jr. is saved under a dot-free key (Foundry reads a dot as a path), shared, and read back; Step 33 is the same CLEANUP as Step 31", async () => {
+  assert.equal(GATE.get(33).code, GATE.get(31).code, "Step 33 is the same CLEANUP block as Step 31");
+  assert.match(GATE.get(31).code, /"Gate Wolf Jr\."/, "CLEANUP removes Gate Wolf Jr.");
+  for (const step of [32, 33]) {
+    const section = GATE.get(step).text.split("```js")[0];
+    const bullets = section.split("\n").filter(l => /^- /.test(l));
+    assert.ok(bullets.length >= 3 && bullets.every(b => b.length <= 700), `step ${step} is in the bullet format`);
+    assert.ok(bullets.some(b => /^- You should see:/.test(b)), `step ${step} has a "You should see:" bullet`);
+  }
+  const w = await gateWorld();
+  const { gm } = getUsers();
+  const set = game.settings.set;
+  await quietly(async () => {
+    await runBlock(2, gm);
+    // what real Foundry does with a dotted key: the flag write and the setting write are expanded into nested objects
+    const smith = game.actors.getName("Gate Smith");
+    const update = smith.update.bind(smith);
+    smith.update = data => update(Object.fromEntries(Object.entries(data).map(([path, value]) => [path, expandDots(value)])));
+    game.settings.set = async (scope, key, value) => set(scope, key, key === "sharedCompendium" ? expandDots(value) : value);
+    try {
+      const sink = [], logged = console.log;
+      console.log = (...args) => sink.push(args.map(String).join(" "));
+      let result;
+      try { result = await runBlock(32, gm); } finally { console.log = logged; }
+      assert.equal(result, "ALL PASS", sink.join("\n"));
+      const text = sink.join("\n");
+      assert.match(text, /savedFlagKeys":\["gate wolf jr%2e"\]/, "the saved keys are printed");
+      assert.match(text, /savedSharedKeys":\["gate wolf jr%2e"\]/);
+      assert.deepEqual(Object.keys(env.values.sharedCompendium.creatures), ["gate wolf jr%2e"]);
+      assert.deepEqual(Object.keys(smith.getFlag(MODULE, "compendium").creatures), ["gate wolf jr%2e"]);
+    } finally { game.settings.set = set; }
+    const clean = await runBlock(33, gm);
+    assert.deepEqual([clean.problems, clean.actorsLeft, clean.sceneLeft], [[], 0, false]);
+    assert.deepEqual(Object.keys(env.values.sharedCompendium?.creatures ?? {}), [], "the shared entry is gone");
+    assert.equal(game.actors.getName("Gate Wolf Jr."), undefined);
+    const again = await runBlock(33, gm);
+    assert.deepEqual(again.problems, []);
+  });
+  assert.equal(game.actors.getName("Gate Smith"), undefined);
+  void w;
 });

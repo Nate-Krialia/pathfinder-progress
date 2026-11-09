@@ -14,6 +14,8 @@ import { any, arr, bool, int, num, obj, oneOf, optional, record, scalar, str, un
 export { BUILT_IN_ROLES } from "./roles.js";
 
 const idField = () => str({ pattern: ID_PATTERN, patternHint: "must be a lowercase slug (letters, digits, - or _)" });
+// A slot's name is used as an object key (a craft's selection, its uses, the Experiments): Foundry reads a dot in a key as a path when it saves data, so a name with a dot would be saved damaged.
+const slotName = () => str({ pattern: /^[^.]+$/, patternHint: "must not contain a dot (Foundry reads a dot in a key as a path when it saves data)" });
 const tier = range => int({ min: range.min, max: range.max });
 const quantity = () => str({ pattern: QUANTITY_PATTERN, patternHint: 'must be a number or dice like "3" or "1d4"' });
 const kind = name => oneOf([name]);
@@ -136,7 +138,7 @@ const recipe = obj({
     }
   })),
   slots: arr(obj({
-    name: str(),
+    name: slotName(),
     // One role, or several (e.g. a spider fang can drive bonusDamage AND specialAbility).
     drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }),
     // The lowest material tier the slot accepts. Optional: left out it is 1 (no floor); the loader fills the 1 in, so everything downstream always sees a number.
@@ -267,7 +269,7 @@ const blueprint = obj({
   category: str(),
   tier: tier(TIER_RANGES.station),
   // Materials: any material of at least the floor's tier fills a slot, one material type per slot (like a recipe).
-  slots: arr(obj({ name: str(), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
+  slots: arr(obj({ name: slotName(), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
   // Gold (gp) and downtime days the build costs.
   gold: num({ min: 0 }),
   buildDays: int({ min: 1 }),
@@ -344,7 +346,7 @@ const playerRecipe = obj({
   name: str(),
   category: str(),
   baseRole: optional(oneOf(["basePower", "spellPower"])),
-  slots: arr(obj({ name: str(), drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }),
+  slots: arr(obj({ name: slotName(), drives: union([str(), arr(str(), { min: 1 })], { hint: "must be a role name or a non-empty list of role names" }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }),
     // A slot that matches by tags carries NO tags for a player: only whether it may stay empty and which of the character's own items fit it (computed on the GM, names only).
     optional: optional(bool()), fits: optional(arr(obj({ id: str(), name: str() }))) }), { min: 1 }),
   stationCategory: str(),
@@ -361,7 +363,7 @@ const playerBlueprint = obj({
   name: str(),
   category: str(),
   tier: tier(TIER_RANGES.station),
-  slots: arr(obj({ name: str(), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
+  slots: arr(obj({ name: slotName(), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
   gold: num({ min: 0 }),
   buildDays: int({ min: 1 })
 });
@@ -473,7 +475,7 @@ const formulaSnapshot = obj({
   category: str(),
   // Legacy: snapshots made before v0.17.0 carry the craft level. It is accepted and ignored; the GM load rewrites the snapshot without it (docs/11b).
   craftLevel: optional(int({ min: CRAFT_LEVEL_RANGE.min, max: CRAFT_LEVEL_RANGE.max })),
-  slots: arr(obj({ name: str(), drives: arr(str(), { min: 1 }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
+  slots: arr(obj({ name: slotName(), drives: arr(str(), { min: 1 }), tierFloor: tier(TIER_RANGES.material), qty: int({ min: 1 }) }), { min: 1 }),
   stationCategory: str(),
   stationTierMin: tier(TIER_RANGES.station)
 });
@@ -569,7 +571,7 @@ const compFact = obj({ materialId: idField(), materialName: str(), tier: optiona
 const compBaseline = obj({
   baseTier: optional(int({ min: 1 })),
   at: int({ min: 0 }),
-  slots: arr(obj({ slot: str(), tierFloor: int({ min: 1 }), materialId: idField(), effects: record(any()) }))
+  slots: arr(obj({ slot: slotName(), tierFloor: int({ min: 1 }), materialId: idField(), effects: record(any()) }))
 });
 // Class knowledge (Stage 11c): what a material does in an ITEM CLASS (a recipe category), learned by a successful craft. role -> value.
 const compClassFact = obj({ materialId: idField(), materialName: str(), tier: optional(int({ min: 1 })), effects: record(any()), at: int({ min: 0 }) });
