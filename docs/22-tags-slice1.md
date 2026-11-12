@@ -58,6 +58,9 @@ In a slot with `needs`, each ingredient contributes ONCE (quantity is a cost, no
 ## Where the result goes
 `planCraft` puts the stack into the same `description` buckets (damage dice and rule elements, abilities, resistances, plain condition lines, base tier), so the item, the chat summary and the adapter are unchanged. The effects engine (`effects/resolve.js`) uses the SAME `stackedCraft` for a tagged slot's conditions, resolved again from the CURRENT registry, ledger and caps (2b freezes them per craft).
 
+## A crafted weapon's rules load only while it is held
+PF2e ignores the rule elements of a weapon that is not held (`requiresEquipped`), so a freshly crafted weapon shows its `DamageDice` rules as `ignored: true` until the character holds it (`actor.changeCarryType(item, { carryType: "held", handsHeld: 1 })`, or the sheet's carry control). The module does not equip a crafted weapon: the player decides. The rules themselves are valid (proven on real Foundry); gate 24 holds the weapon once before it checks them.
+
 ## Players
 The crafted item shows its own final stacked numbers, like any material today. Tag lists, tiers, tier tables, caps, effect sets, contributions, priorities and DCs stay GM-only. The canary tests (`tests/tags-wiring.test.js`, `findCanaries`) put odd values into a used tag's other tiers, an unused tag and the caps table and prove none appears in the player's definitions, preview, queue rows, Compendium, actor flags, chat or the crafted item's flags; a planted leak must be found.
 

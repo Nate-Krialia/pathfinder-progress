@@ -55,6 +55,9 @@ function pf2eify(actor) {
 const decorate = (item, owner) => {
   item.uuid = owner ? `Actor.${owner.id}.Item.${item.id}` : `Item.${item.id}`;
   item.toObject = () => structuredClone({ name: item.name, type: item.type, system: item.system, flags: item.flags, _stats: item._stats });
+  // as real PF2e: a weapon's rule elements are ignored until it is held (requiresEquipped)
+  Object.defineProperty(item, "isEquipped", { configurable: true, get: () => item.system?.equipped?.carryType === "held" });
+  Object.defineProperty(item, "rules", { configurable: true, get: () => (item.system?.rules ?? []).map(r => ({ key: r.key, ignored: !item.isEquipped })) });
   return item;
 };
 function fakePf2e() {
@@ -76,6 +79,7 @@ function fakePf2e() {
     const actor = pf2eify(await baseCreate(data));
     const embed = actor.createEmbeddedDocuments;
     actor.createEmbeddedDocuments = async (type, datas) => (await embed(type, datas)).map(item => decorate(item, actor));
+    actor.changeCarryType = async (item, { carryType, handsHeld = 0 }) => { item.system.equipped = { ...(item.system.equipped ?? {}), carryType, handsHeld }; };
     return actor;
   };
   const scene = { id: "S", name: "Gate Scene", flags: {}, tokens: [], getFlag: (scope, key) => structuredClone(scene.flags[scope]?.[key]), async setFlag(scope, key, value) { (scene.flags[scope] ??= {})[key] = structuredClone(value); }, async unsetFlag(scope, key) { delete scene.flags[scope]?.[key]; } };
@@ -190,6 +194,18 @@ test("GATE 24: SETUP, tag, craft with stacked numbers, the damage formula, two c
     assert.match(results.lines4.join("\n"), /which copies were escrowed.*"Gate G24 Torch Stack"/, "the first copy sharing the Torch source was escrowed");
     assert.match(results.lines4.join("\n"), /"copiesStillInTheBag":\{"torch":2,"rope":2\}/);
     await expectPass(5, "gm");
+    // a weapon that is not held is a clean FAIL in Steps 5 and 9 (carryType, isEquipped and each rule's ignored state printed), not a TypeError
+    const weapon = hero().items.find(i => i.name === "Gate G24 Blade");
+    assert.deepEqual([weapon.system.equipped.carryType, weapon.system.equipped.handsHeld, weapon.isEquipped], ["held", 1, true], "Step 4 held the weapon");
+    await hero().changeCarryType(weapon, { carryType: "worn", handsHeld: 0 });
+    for (const step of [5, 9]) {
+      const unheld = await sink(() => runBlock(step, gm));
+      assert.match(unheld.result, /FAILED/, `step ${step} fails cleanly on an unheld weapon`);
+      const line = unheld.lines.find(l => /^FAIL: the weapon is (still )?held/.test(l));
+      assert.ok(line, `step ${step} says the weapon is not held: ${unheld.lines.join(" | ")}`);
+      assert.match(line, /"carryType":"worn".*"isEquipped":false.*"ignored":true/, `step ${step} prints carryType, isEquipped and each rule's ignored state`);
+    }
+    await hero().changeCarryType(weapon, { carryType: "held", handsHeld: 1 });
     assert.equal(formulaCalls, 1);
     assert.match(results.lines5.join("\n"), /strike's damage formula shows/);
     await expectPass(6, "gm");

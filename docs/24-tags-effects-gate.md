@@ -4,6 +4,8 @@ Run in a real world on PF2e 8.6.1 with a **GM window** and an **incognito Player
 
 `tests/gate24.test.js` plays every step in a fake Foundry (a pretend compendium, items with sources, PF2e-like actors and tokens, a fake chat log) in which a dotted key is rewritten the way real Foundry does. **What the fake cannot prove, and only this gate can, in real Foundry:** that PF2e accepts the crafted weapon with several `DamageDice` rule elements and rolls them, that the numbers a craft stacks are the numbers on the weapon, that a cap clamps what it should and says so only to the GM, that a crafted weapon's use card applies the stacked conditions to the right token actors, what a real craft and a real cancel do to a stack of copies that share a source, and that the saved caps, ledger and frozen records read back as written.
 
+**A PF2e fact the gate relies on** (proven on real Foundry): PF2e ignores the rule elements of a weapon that is not held (`requiresEquipped`). A crafted weapon is NOT auto-equipped (the player decides), so it arrives unheld with every rule `ignored: true`; after `actor.changeCarryType(item, { carryType: "held", handsHeld: 1 })` the weapon is equipped and the rules load. Step 4 holds the crafted weapon once and Steps 5 and 9 check it is still held.
+
 **What SETUP plants** (all throwaway "Gate G24" things): three tags, `g24-fang` (1d4 fire damage, makes the target frightened 1, Will save), `g24-venom` (1d4 fire damage, makes the target sickened 2, Fortitude save) and `g24-barb` (1d6 poison damage; a tag holds at most one damage block per item class, so the Rope carries both Venom and Barb), a recipe **Gate G24 Blade** whose output is a real PF2e dagger and whose two tagged slots (Edge, Charm) match those tags, the characters **Gate G24 Hero** (owned by Test) and **Gate G24 Goblin A** (unlinked token) and **Gate G24 Goblin B** (linked token) with their tokens on the open scene, and, on the Hero, **several real copies that share one compendium source**: a stack of 3 plus a single copy of a **Torch** (the Edge ingredient), and two stacks of 2 **Rope** (the Charm ingredient). Torch and Rope are tagged in Step 3 and untagged in Step 11.
 
 **What the gate shows**
@@ -183,7 +185,7 @@ await (async () => {
 - The runner queues the craft in the Player window (Gate G24 Blade: Gate G24 Iron in Body, the Torch in Edge, the Rope in Charm, Gate G24 Bench). By hand: in the Player window open the Downtime window for Gate G24 Hero, choose the formula, pick those three and click **Queue the craft**.
 - Run the block below in the GM window. It resolves the craft as a forced success.
 - You should see: `PASS:` lines and `ALL PASS`. The block prints which copies were escrowed and how many shared each source (the craft takes the FIRST copy sharing a source), the stacked numbers, and the rule elements on the crafted weapon.
-- The block renames the weapon to **Gate G24 Blade** so the later steps find it.
+- The block renames the weapon to **Gate G24 Blade** so the later steps find it, and **holds it once** (`actor.changeCarryType(item, { carryType: "held", handsHeld: 1 })`, then waits for the update). Later steps rely on that: **PF2e loads a weapon's rule elements only while the weapon is held** (`requiresEquipped`), so an unheld crafted weapon shows its rules as `ignored: true`. The module does not equip a crafted weapon; the player decides.
 
 ```js
 // [GM] Resolve craft 1 (a forced success): fire adds up (1d4 + 1d4 = 2d4), poison stays; the weapon carries those rule elements; the first copies sharing each source were escrowed.
@@ -213,8 +215,16 @@ await (async () => {
   const rules = (made.toObject().system.rules ?? []).filter(r => r.key === "DamageDice");
   const rulesText = JSON.stringify(rules);
   g.check("the weapon carries one DamageDice rule element per stacked group: 2d4 fire and 1d6 poison (the rules as saved on the item are printed)", rules.length === 2 && rules.some(r => r.diceNumber === 2 && r.dieSize === "d4" && r.damageType === "fire") && rules.some(r => r.diceNumber === 1 && r.dieSize === "d6" && r.damageType === "poison"), rulesText);
-  const live = made.rules ?? null;
-  g.check("PF2e accepts the rule elements: none was ignored or failed to load (the live rule elements are printed)", live === null || (live.filter(r => r.key === "DamageDice").length === 2 && live.every(r => !r.ignored)), JSON.stringify(live?.map(r => ({ key: r.key, ignored: r.ignored }))));
+  // PF2e loads a weapon's rule elements only while the weapon is HELD (requiresEquipped). The module does not equip a crafted weapon (the player decides), so the gate holds it once, here, and waits for the update.
+  const stateOf = item => ({ carryType: item?.system?.equipped?.carryType ?? null, handsHeld: item?.system?.equipped?.handsHeld ?? null, isEquipped: item?.isEquipped ?? null, rules: (item?.rules ?? []).map(r => ({ key: r.key, ignored: r.ignored })) });
+  g.check("the Hero can hold the weapon (actor.changeCarryType exists)", typeof hero.changeCarryType === "function", JSON.stringify({ changeCarryType: typeof hero.changeCarryType, before: stateOf(made) }));
+  if (typeof hero.changeCarryType === "function") {
+    await hero.changeCarryType(made, { carryType: "held", handsHeld: 1 });
+    await g.until(() => made.isEquipped === true);
+  }
+  const heldState = stateOf(made);
+  g.check("the weapon is held, so PF2e loads its rule elements: carryType held, 1 hand, isEquipped true (the state is printed)", heldState.carryType === "held" && heldState.handsHeld === 1 && heldState.isEquipped === true, JSON.stringify(heldState));
+  g.check("PF2e accepts the rule elements: two DamageDice, none ignored (carryType, handsHeld, isEquipped and each rule's key and ignored state are printed)", heldState.rules.filter(r => r.key === "DamageDice").length === 2 && heldState.rules.every(r => r.ignored === false), JSON.stringify(heldState));
   g.check("the item's flags carry only the opaque id: no tag and no tag data", !/g24-fang|g24-venom|g24-barb|Gate G24 Fang|Gate G24 Venom|Gate G24 Barb|"tags"|"native"|"inherited"|"needs"|effectBlocks/.test(JSON.stringify(made.flags ?? {})), JSON.stringify(made.flags ?? {}));
   g.keep.craft1 = flag.freezeId;
   g.keep.bag = g.bag(hero);
@@ -227,7 +237,7 @@ await (async () => {
 
 **What to do and see:**
 - The runner reads the damage formula of **Gate G24 Blade** from the Hero's strike without posting a chat card (needs the runner's `damageFormula` action). By hand: open the Hero's sheet, Strikes, roll damage on **Gate G24 Blade** once, and read the formula in the chat card.
-- Run the block below in the GM window.
+- Run the block below in the GM window. (The weapon must still be held, as Step 4 left it: PF2e ignores the rule elements of a weapon that is not held, and the formula would lack the dice. The block checks and says so.)
 - You should see: `PASS:` lines and `ALL PASS`. If the runner supplied the formula it contains the 2d4 fire and the 1d6 poison; if not, the block says so and the hand roll is the check (the formula there must show **2d4** fire and **1d6** poison).
 
 ```js
@@ -239,6 +249,9 @@ await (async () => {
   else g.check("the strike's damage formula shows the stacked fire (2d4) and the poison (1d6)", /2d4/.test(formula) && /1d6/.test(formula), JSON.stringify({ formula }));
   const made = g.hero().items.find(i => i.name === "Gate G24 Blade");
   g.check("Gate G24 Blade is on the Hero (Step 4 made it)", Boolean(made), JSON.stringify(g.hero().items.map(i => i.name)));
+  if (!made) return g.done();
+  const state = { carryType: made.system?.equipped?.carryType ?? null, handsHeld: made.system?.equipped?.handsHeld ?? null, isEquipped: made.isEquipped ?? null, rules: (made.rules ?? []).map(r => ({ key: r.key, ignored: r.ignored })) };
+  g.check("the weapon is still held (Step 4 holds it; PF2e ignores the rule elements of a weapon that is not held, so the formula would lack the dice)", state.carryType === "held" && state.isEquipped === true && state.rules.length > 0 && state.rules.every(r => r.ignored === false), JSON.stringify(state));
   return g.done();
 })();
 ```
@@ -378,6 +391,9 @@ await (async () => {
   const done = cards.filter(m => m.flags[M].fx.state === "done");
   const text = m => (m.content ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
   const A = g.token("Goblin A")?.actor, B = g.token("Goblin B")?.actor;
+  const weapon = g.hero().items.find(i => i.name === "Gate G24 Blade");
+  const held = { carryType: weapon?.system?.equipped?.carryType ?? null, handsHeld: weapon?.system?.equipped?.handsHeld ?? null, isEquipped: weapon?.isEquipped ?? null, rules: (weapon?.rules ?? []).map(r => ({ key: r.key, ignored: r.ignored })) };
+  g.check("the weapon is held (Step 4 holds it), so the Strikes rolled its damage dice (the state is printed)", Boolean(weapon) && held.carryType === "held" && held.isEquipped === true && held.rules.length > 0 && held.rules.every(r => r.ignored === false), JSON.stringify(held));
   const detail = JSON.stringify({ cards: cards.map(m => ({ state: m.flags[M].fx.state, text: text(m).slice(-160) })), goblinA: A ? g.conds(A) : null, goblinB: B ? g.conds(B) : null });
   g.check("two cards for Gate G24 Blade were made and applied (one per Strike)", cards.length === 2 && done.length === 2, detail);
   g.check("Goblin A (an unlinked token: the token's own actor) has frightened 1 and sickened 2", Boolean(A) && A.getCondition("frightened")?.value === 1 && A.getCondition("sickened")?.value === 2, detail);
