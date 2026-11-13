@@ -132,7 +132,7 @@ test("the tags stacking, caps and effects gate doc: steps are labelled, bullets 
   assert.ok(GATE.get(8).text.includes("what a cancel does to a stack"), "Step 8 says it prints what a cancel does to a stack");
   assert.doesNotMatch(gateDoc.replace(/DC\b[^\n]*never/gi, ""), /\bDC \d|odds of|\d+% chance/i, "the gate text itself never talks about difficulty to a player");
   // every check in a block prints what it compared: its line carries a detail (a JSON dump, a named value or a template)
-  for (const [step, { code }] of GATE) if (step > 1) for (const line of code.split("\n").filter(l => /\bg\.check\(|\bcheck\(/.test(l) && !/const check|const g = /.test(l))) assert.match(line, /JSON\.stringify|\bvalues\b|\bdetail\b|\$\{|stored\b|show\(|out\.message|\w+Text\b|\.slice\(/, `step ${step}: a check prints what it compared: ${line.trim().slice(0, 90)}`);
+  for (const [step, { code }] of GATE) if (step > 1) for (const line of code.split("\n").filter(l => /\bg\.check\(|\bcheck\(/.test(l) && !/const check|const g = /.test(l))) assert.match(line, /JSON\.stringify|\bvalues\b|\bdetail\b|\$\{|stored\b|show\(|out\.message|\w+Text\b|\.slice\(|\.join\(/, `step ${step}: a check prints what it compared: ${line.trim().slice(0, 90)}`);
 });
 
 test("the steps file obeys the runner's rules and picks by stable ids and names, never by position", () => {
@@ -214,6 +214,34 @@ test("GATE 24: SETUP, tag, craft with stacked numbers, the damage formula, two c
     assert.match(results.lines8.join("\n"), /what a cancel did to the copies sharing a source/);
     await expectPass(9, "gm");
     await expectPass(10, "player");
+    // The loosened scan is still a scan. PF2e's own words are no leak (flags.pf2e carries tags, dc, total), but a planted tag name anywhere, and the module's own messages and rendered text, still are.
+    const step10 = async () => (await sink(() => runBlock(10, testUser)));
+    const post = async data => ChatMessage.create({ author: { name: "Test" }, ...data });
+    const drop = async m => ChatMessage.deleteDocuments([m.id]);
+    const benign = await post({ content: "<p>Strike</p>", flags: { core: {}, pf2e: { modifiers: [{ slug: "x", tags: ["a"] }], context: { type: "attack-roll", dc: { value: 15 }, options: ["postRoll:total", "total"] } } } });
+    const passes = await step10();
+    assert.equal(passes.result, "ALL PASS", `PF2e's own generic words in flags.pf2e are not a leak:\n${passes.lines.join("\n")}`);
+    await drop(benign);
+    const cases = [
+      ["a planted tag name inside a PF2e card's flags (scan 1 reads the full data of every message)", { content: "<p>Strike</p>", flags: { pf2e: { context: { note: "g24-fang" } } } }, /scan 1 \(planted tag names, full data\)/, /\[\[g24-fang\]\]/],
+      ["a planted tag name in a PF2e card's rendered text", { content: "<p>It has Gate G24 Venom</p>", flags: { pf2e: {} } }, /scan 1 \(planted tag names, full data\)/, /\[\[Gate G24 Venom\]\]/],
+      ["a planted tag name in a message's flavor and roll data", { content: "<p>x</p>", flavor: "ok", rolls: ['{"formula":"1d4","note":"Gate G24 Barb"}'], flags: {} }, /scan 1 \(planted tag names, full data\)/, /\[\[Gate G24 Barb\]\]/],
+      ["a module message that says DC 15", { content: "<p>DC 15 save</p>", flags: { "pathfinder-progress": { note: 1 } } }, /scan 2 \(the module's own message, full data\), secret words/, /\[\[DC\]\]/],
+      ["a module message that names a cap in its flags", { content: "<p>ok</p>", flags: { "pathfinder-progress": { note: "capped bonusDamage" } } }, /scan 2 \(the module's own message, full data\), cap words/, /\[\[capped\]\]/],
+      ["another message that says DC 20 in its rendered text", { content: "<p>DC 20 to resist</p>", flags: { pf2e: {} } }, /scan 2 \(another message, rendered text and flavor only\), secret words/, /\[\[DC\]\]/]
+    ];
+    for (const [label, data, scan, match] of cases) {
+      const leak = await post(data);
+      const out = await step10();
+      await drop(leak);
+      assert.match(out.result, /FAILED/, `${label}: step 10 flags it`);
+      const line = out.lines.find(l => /^FAIL: /.test(l) && scan.test(l));
+      assert.ok(line, `${label}: the failing line names the scan:\n${out.lines.join("\n")}`);
+      assert.ok(line.includes(`message ${leak.id} by Test`), `${label}: the line prints the message id and the author`);
+      assert.match(line, match, `${label}: the line prints the exact match`);
+      assert.match(line, /"[^"]*"\s\[\[[^\]]+\]\]\s"[^"]*"/, `${label}: the line prints the match with its context`);
+      assert.ok(!/\.\.\.$|…$/.test(line), `${label}: the line is not cut`);
+    }
     const clean = { problems: [], actorsLeft: 0, tokensLeft: 0, frozenLeft: 0, ledgerLeft: 0, capsLeft: 0, downtimeOpen: false, sharedLeft: 0, flagLeft: false, audit: [] };
     assert.deepEqual(await runBlock(11, gm), clean);
     assert.deepEqual(await runBlock(11, gm), clean, "CLEANUP runs twice");

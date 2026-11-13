@@ -411,28 +411,48 @@ await (async () => {
 
 **What to do and see:**
 - In the **Player** window run the block below.
-- You should see: `PASS:` lines and `ALL PASS`. It reads every chat message this client holds (a whisper is delivered to every client), the Hero's flags and every item's flags, looking for a tag's name or id, a cap, a note about a clamp, a DC or a roll total.
+- You should see: `PASS:` lines and `ALL PASS`. It reads every chat message this client holds (a whisper is delivered to every client), the Hero's flags and every item's flags, in two separate scans.
+- **Scan 1, the real secrecy test, is strict:** the names and ids of the tags this gate planted are looked for in EVERY message, PF2e's own cards included, over the whole message (content, flavor, flags, rolls). No exclusions.
+- **Scan 2, generic secret words** (a tag list, a cap, what a cap cut, a DC, a roll total, odds): the module's own messages (the ones carrying the module's flag) are searched over their whole data; every other message is searched only in its rendered text and flavor, because PF2e's own cards legitimately carry words like `tags`, `dc` and `total` inside their `flags.pf2e` data (modifiers, context, roll options).
+- A FAIL line prints EVERY match, uncut: the message id, the author, which scan, which pattern, and the exact matched text with 80 characters of context either side.
 - The crafted weapons' rule elements and description legitimately show the final numbers (2d4 fire); that is not looked for.
 
 ```js
-// [Player] No chat message, actor flag or item flag names a tag, a cap, what a cap cut, a DC or a roll total.
+// [Player] Scan 1 (strict): no message at all names a planted tag. Scan 2 (generic words): none of the module's own messages, and no other message's text, mentions a tag list, a cap, a DC, a roll total or odds.
 await (async () => {
   const M = "pathfinder-progress", rows = [];
   const check = (label, ok, detail) => rows.push(`${ok ? "PASS" : "FAIL"}: ${label}${detail === undefined ? "" : ` (${detail})`}`);
   const hero = game.user.character;
   if (game.user.isGM || hero?.name !== "Gate G24 Hero") throw new Error('Player window as the user "Test" only, after the GM ran SETUP');
-  const tagWords = /g24-fang|g24-venom|g24-barb|Gate G24 Fang|Gate G24 Venom|Gate G24 Barb|"tags"|"native"|"inherited"|"needs"|"priority"|"passCap"|effectBlocks/;
+  const planted = /g24-fang|g24-venom|g24-barb|Gate G24 Fang|Gate G24 Venom|Gate G24 Barb/;
+  const genericTags = /"tags"|"native"|"inherited"|"needs"|"priority"|"passCap"|effectBlocks/;
   const capWords = /\bcapped\b|maxDicePerType|maxCount|maxValue|maxTier|\bbecame\b|tagCaps/i;
   const secretWords = /\bDC\b|\btotal\b|\bodds\b/i;
-  const chat = game.messages.contents.map(m => `${m.content ?? ""} ${JSON.stringify(m.flags ?? {})}`);
+  const generic = [["tag data", genericTags], ["cap words", capWords], ["secret words", secretWords]];
+  const global = re => new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+  // every match, with 80 characters of context either side, never cut
+  const hits = (text, re) => [...String(text).matchAll(global(re))].map(x => `${JSON.stringify(String(text).slice(Math.max(0, x.index - 80), x.index))} [[${x[0]}]] ${JSON.stringify(String(text).slice(x.index + x[0].length, x.index + x[0].length + 80))}`);
+  const full = m => JSON.stringify(m.toObject?.() ?? m);
+  const rendered = m => `${String(m.content ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ")} ${String(m.flavor ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ")}`;
+  const who = m => `message ${m.id} by ${m.author?.name ?? m.user?.name ?? (typeof m.author === "string" ? m.author : m.user) ?? "unknown author"}`;
+  const messages = game.messages.contents;
+  const ours = messages.filter(m => m.flags?.[M]), others = messages.filter(m => !m.flags?.[M]);
+  const found = [];
+  for (const m of messages) for (const h of hits(full(m), planted)) found.push(`${who(m)}, scan 1 (planted tag names, full data), pattern ${planted.source}: ${h}`);
+  check(`scan 1: no message names a planted tag, PF2e cards included, over the full data of each (${messages.length} read)`, found.length === 0, found.join(" || "));
+  const mine = [];
+  for (const m of ours) for (const [name, re] of generic) for (const h of hits(full(m), re)) mine.push(`${who(m)}, scan 2 (the module's own message, full data), ${name}, pattern ${re.source}: ${h}`);
+  check(`scan 2a: none of the module's own messages mentions tag data, a cap, a DC, a roll total or odds, over their full data (${ours.length} read)`, mine.length === 0, mine.join(" || "));
+  const text = [];
+  for (const m of others) for (const [name, re] of generic) for (const h of hits(rendered(m), re)) text.push(`${who(m)}, scan 2 (another message, rendered text and flavor only), ${name}, pattern ${re.source}: ${h}`);
+  check(`scan 2b: no other message shows tag data, a cap, a DC, a roll total or odds in its rendered text or flavor (${others.length} read; their flags.pf2e data is not read here)`, text.length === 0, text.join(" || "));
+  const flags = [];
   const actorFlags = JSON.stringify(hero.flags ?? {});
-  const itemFlags = hero.items.map(i => `${i.name}: ${JSON.stringify(i.flags ?? {})}`);
-  const show = (list, re) => list.filter(t => re.test(t)).join(" | ").slice(0, 300);
-  check(`no chat message this client holds names a tag or tag data (${chat.length} read)`, !chat.some(t => tagWords.test(t)), show(chat, tagWords));
-  check("and none mentions a cap or what a cap cut", !chat.some(t => capWords.test(t)), show(chat, capWords));
-  check("and none carries a DC, a roll total or odds", !chat.some(t => secretWords.test(t)), show(chat, secretWords));
-  check("the character's flags name no tag and carry no cap", !tagWords.test(actorFlags) && !capWords.test(actorFlags), actorFlags.slice(0, 300));
-  check(`no item's flags name a tag or a cap (${itemFlags.length} read)`, !itemFlags.some(t => tagWords.test(t) || capWords.test(t)), show(itemFlags, new RegExp(`${tagWords.source}|${capWords.source}`, "i")));
+  for (const re of [planted, genericTags, capWords]) for (const h of hits(actorFlags, re)) flags.push(`the character's flags, pattern ${re.source}: ${h}`);
+  check("the character's flags name no planted tag and carry no tag data or cap", flags.length === 0, flags.join(" || "));
+  const itemHits = [];
+  for (const i of hero.items) for (const re of [planted, genericTags, capWords]) for (const h of hits(JSON.stringify(i.flags ?? {}), re)) itemHits.push(`item ${i.name}, pattern ${re.source}: ${h}`);
+  check(`no item's flags name a planted tag or carry tag data or a cap (${hero.items.size ?? hero.items.length} items read)`, itemHits.length === 0, itemHits.join(" || "));
   let readable = "no";
   try { const caps = game.settings.get(M, "tagCaps"); readable = caps && typeof caps === "object" ? "yes" : "empty"; } catch { readable = "no"; }
   rows.push(`PASS: recorded, not judged: a player client can read the tagCaps world setting from the console: ${readable} (the honor system)`);
