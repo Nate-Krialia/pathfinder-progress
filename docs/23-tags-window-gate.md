@@ -138,7 +138,7 @@ await (async () => {
 **What to do and see:**
 - Make sure no window of this module is open.
 - Run the block below in the GM window. It opens the real sheet of **Gate G23 Charm**, looks for the module's header button, clicks it and checks the Item tags window opens aimed at that item.
-- You should see: `PASS:` lines and `ALL PASS`. If the button is missing, the FAIL line prints which sheet class opened, whether it is an ApplicationV2, the header controls and buttons it has, and the hooks Foundry has registered for header controls: that shows the cause (a sheet that is not ApplicationV2 never fires `getHeaderControlsApplicationV2`).
+- You should see: `PASS:` lines and `ALL PASS`. If the button is missing, the FAIL line prints which sheet class opened, whether it is an ApplicationV2, the header buttons as drawn, and the hooks Foundry has registered for header controls: that shows the cause. PF2e's item sheets are ApplicationV1: the module adds its button through `getItemSheetHeaderButtons` there and through `getHeaderControlsApplicationV2` on an ApplicationV2 sheet.
 - The block closes the item sheet and the window before it ends.
 
 ```js
@@ -157,11 +157,12 @@ await (async () => {
   const controls = typeof sheet._getHeaderControls === "function" ? sheet._getHeaderControls().map(c => c.action ?? c.label ?? "?") : null;
   const v1Buttons = typeof sheet._getHeaderButtons === "function" ? sheet._getHeaderButtons().map(b => b.class ?? b.label ?? "?") : null;
   const hooks = Object.fromEntries(Object.entries(Hooks.events ?? {}).filter(([name]) => /HeaderControls|HeaderButtons/.test(name)).map(([name, list]) => [name, list.length]));
-  const info = { sheetClass: sheet.constructor.name, isApplicationV2: isV2, headerControls: controls, headerButtonsV1: v1Buttons, headerHooksRegistered: hooks };
-  const button = sheet.element?.querySelector('[data-action="pfp-item-tags"]') ?? null;
-  g.check("the item sheet shows the module's header button (the cause is printed if not: sheet class, ApplicationV2 or not, the controls, the registered header hooks)", Boolean(button), JSON.stringify(info));
+  const root = sheet.element?.[0] ?? sheet.element;      // an ApplicationV1 sheet's element is a jQuery object: its first entry is the real element
+  const drawn = [...(root?.querySelectorAll?.("header a, header button") ?? [])].map(el => ({ tag: el.tagName.toLowerCase(), class: el.className, action: el.dataset?.action ?? null, text: el.textContent.trim() }));
+  const info = { sheetClass: sheet.constructor.name, isApplicationV2: isV2, elementIsJQuery: Boolean(sheet.element && !sheet.element.querySelector), headerControls: controls, headerButtonsV1: v1Buttons, headerButtonsDrawn: drawn, headerHooksRegistered: hooks };
+  const button = root?.querySelector?.('[data-action="pfp-item-tags"], .header-button.pfp-item-tags') ?? null;
+  g.check("the item sheet shows the module's header button (the cause is printed if not: sheet class, ApplicationV2 or not, the buttons as drawn, the registered header hooks)", Boolean(button), JSON.stringify(info));
   if (!button) { await g.closeAll(); return g.done(); }
-  g.check("the sheet is an ApplicationV2 (so getHeaderControlsApplicationV2 fires for it)", isV2, JSON.stringify(info));
   button.click();
   const app = await g.until(() => { const a = g.app(); return a?.rendered && a.element ? a : false; });
   g.check("clicking it opens the Item tags window", Boolean(app), JSON.stringify({ openInstances: [...foundry.applications.instances.keys()].filter(k => /pathfinder-progress/.test(k)) }));

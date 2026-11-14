@@ -34,9 +34,9 @@ const sink = async fn => {
 
 /**
  * What the real window sits in: scene controls with the module's button drawn (when the module's hook put the tool in), items that know their own uuid and have a sheet. `v2: false` makes the sheet an old-style
- * (ApplicationV1-like) one that never asks for header controls, the case the gate must report with its cause; `button: false` leaves the scene-controls button undrawn.
+ * (ApplicationV1-like) one with a jQuery-like element that fires get<Class>HeaderButtons for its class chain (`v1Hooks: false` makes it fire nothing, the case the gate must report with its cause); `button: false` leaves the scene-controls button undrawn.
  */
-function fakeWindowWorld({ v2 = true, button = true } = {}) {
+function fakeWindowWorld({ v2 = true, button = true, v1Hooks = true } = {}) {
   const { ApplicationV2 } = foundry.applications.api;
   const gm = getUsers().gm;
   const controls = { tokens: { tools: { select: { name: "select" } } } };
@@ -50,8 +50,22 @@ function fakeWindowWorld({ v2 = true, button = true } = {}) {
     if (button && tool) { const b = document.createElement("button"); b.dataset.tool = "pfpItemTags"; b.addEventListener("click", () => tool.onChange()); document.body.append(b); }
     const sheetFor = item => {
       if (!v2) {
-        const el = document.createElement("div");
-        const sheet = { constructor: { name: "FakeItemSheetV1" }, rendered: false, element: null, render: async () => { sheet.rendered = true; sheet.element = el; el.innerHTML = '<a class="header-button">Sheet</a>'; }, close: async () => { sheet.rendered = false; }, _getHeaderButtons: () => [{ class: "configure-sheet" }] };
+        // An ApplicationV1-like sheet: `element` is jQuery-like (array-like, NO querySelector), the header buttons come from _getHeaderButtons, which calls get<Class>HeaderButtons for each class of the chain
+        // (like Application#_getHeaderButtons does), and a click on a drawn <a class="header-button"> runs that button's onclick.
+        const chain = ["FakeEquipmentSheet", "ItemSheet", "DocumentSheet", "FormApplication", "Application"];
+        const sheet = {
+          constructor: { name: "FakeEquipmentSheet" }, item, document: item, rendered: false, element: null,
+          _getHeaderButtons() { const list = [{ class: "close", label: "Close" }]; if (v1Hooks) for (const cls of chain) for (const fn of listeners[`get${cls}HeaderButtons`] ?? []) fn(sheet, list); return list; },
+          async render() {
+            const root = document.createElement("div");
+            root.innerHTML = `<header class="window-header">${sheet._getHeaderButtons().map((b, i) => `<a class="header-button ${b.class}" data-i="${i}">${b.label ?? ""}</a>`).join("")}</header>`;
+            const buttons = sheet._getHeaderButtons();
+            root.querySelectorAll(".header-button").forEach(a => a.addEventListener("click", () => buttons[Number(a.dataset.i)].onclick?.()));
+            sheet.element = { 0: root, length: 1, find: sel => root.querySelectorAll(sel) };
+            sheet.rendered = true;
+          },
+          async close() { sheet.rendered = false; }
+        };
         return sheet;
       }
       class FakeItemSheet extends ApplicationV2 {
@@ -160,15 +174,15 @@ test("GATE 23: SETUP, the scene-controls button, the header button of an Applica
   assert.equal(api.definitions.recipe.get("dagger-spider-fang").slots.find(s => s.name === "fang").needs, undefined, "the real recipe is back as the pack has it");
 });
 
-test("GATE 23 Step 4 on an item sheet that is not an ApplicationV2: a clean FAIL that prints the cause (sheet class, ApplicationV2 or not, the controls and buttons, the registered header hooks), never a throw", async () => {
-  const { gm, results, play } = await playGate({ v2: false });
+test("GATE 23 Step 4 on an ApplicationV1 sheet that fires no header hook: a clean FAIL that prints the cause (sheet class, ApplicationV2 or not, the controls and buttons, the registered header hooks), never a throw", async () => {
+  const { gm, results, play } = await playGate({ v2: false, v1Hooks: false });
   await quietly(async () => {
     await runBlock(2, gm);
     const out = await play(4, "gm");
     assert.match(out, /FAILED/);
     const line = results.lines4.find(l => /^FAIL: the item sheet shows the module's header button/.test(l));
     assert.ok(line, results.lines4.join("\n"));
-    assert.match(line, /"sheetClass":"FakeItemSheetV1".*"isApplicationV2":false.*"headerButtonsV1":\["configure-sheet"\].*"headerHooksRegistered":\{[^}]*"getHeaderControlsApplicationV2":\d/, "the cause is printed in full");
+    assert.match(line, /"sheetClass":"FakeEquipmentSheet".*"isApplicationV2":false.*"elementIsJQuery":true.*"headerButtonsV1":\["close"\],"headerButtonsDrawn":\[\{"tag":"a","class":"header-button close".*"headerHooksRegistered":\{[^}]*"getItemSheetHeaderButtons":\d/, "the cause is printed in full");
     await runBlock(7, gm);
   });
 });
@@ -181,6 +195,16 @@ test("GATE 23 Step 3 without the module's scene-controls button: a clean FAIL th
     const line = results.lines3.find(l => /^FAIL: the module's scene-controls button is drawn/.test(l));
     assert.ok(line, results.lines3.join("\n"));
     assert.match(line, /"found":false,"groups":\{"tokens":\[[^\]]*"pfpItemTags"\]\}/, "the structure of the scene controls is printed");
+    await runBlock(7, gm);
+  });
+});
+
+test("GATE 23 Step 4 on an ApplicationV1 item sheet (jQuery element): the module's button is drawn, clicking it opens the window aimed at the item", async () => {
+  const { gm, results, expectPass } = await playGate({ v2: false });
+  await quietly(async () => {
+    await runBlock(2, gm);
+    await expectPass(4);
+    assert.match(results.lines4.join("\n"), /"isApplicationV2":false,"elementIsJQuery":true/, "the sheet is printed as V1 with a jQuery element");
     await runBlock(7, gm);
   });
 });
