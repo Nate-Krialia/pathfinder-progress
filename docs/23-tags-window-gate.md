@@ -138,7 +138,9 @@ await (async () => {
 **What to do and see:**
 - Make sure no window of this module is open.
 - Run the block below in the GM window. It opens the real sheet of **Gate G23 Charm**, looks for the module's header button, clicks it and checks the Item tags window opens aimed at that item.
-- You should see: `PASS:` lines and `ALL PASS`. If the button is missing, the FAIL line prints which sheet class opened, whether it is an ApplicationV2, the header buttons as drawn, and the hooks Foundry has registered for header controls: that shows the cause. PF2e's item sheets are ApplicationV1: the module adds its button through `getItemSheetHeaderButtons` there and through `getHeaderControlsApplicationV2` on an ApplicationV2 sheet.
+- You should see: `PASS:` lines and `ALL PASS`.
+- You should see: one `REPORT what the click did:` line on every run: the button's attributes, whether it has a click handler, the open windows at 0, 1 and 3 seconds, anything the console said, and the item the window opened for. If the click opens nothing, it also says what calling the button's own handler directly did.
+- If the button is missing, the FAIL line prints which sheet class opened, whether it is an ApplicationV2, the header buttons as drawn, and the hooks Foundry has registered for header controls: that shows the cause. PF2e's item sheets are ApplicationV1: the module adds its button through `getItemSheetHeaderButtons` there and through `getHeaderControlsApplicationV2` on an ApplicationV2 sheet.
 - The block closes the item sheet and the window before it ends.
 
 ```js
@@ -163,11 +165,43 @@ await (async () => {
   const button = root?.querySelector?.('[data-action="pfp-item-tags"], .header-button.pfp-item-tags') ?? null;
   g.check("the item sheet shows the module's header button (the cause is printed if not: sheet class, ApplicationV2 or not, the buttons as drawn, the registered header hooks)", Boolean(button), JSON.stringify(info));
   if (!button) { await g.closeAll(); return g.done(); }
-  button.click();
-  const app = await g.until(() => { const a = g.app(); return a?.rendered && a.element ? a : false; });
-  g.check("clicking it opens the Item tags window", Boolean(app), JSON.stringify({ openInstances: [...foundry.applications.instances.keys()].filter(k => /pathfinder-progress/.test(k)) }));
+  // What the click does, printed whole on every run: the button as drawn, whether it has a click handler, the open windows at 0, 1 and 3 seconds, anything the console said, and the item the window was opened for.
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const windows = () => [...foundry.applications.instances.keys()].filter(k => /pathfinder-progress/.test(k));
+  const buttonObject = typeof sheet._getHeaderButtons === "function" ? sheet._getHeaderButtons().find(b => b.class === "pfp-item-tags") ?? null : null;
+  let jq = null;
+  try { jq = (globalThis.jQuery ?? globalThis.$)?._data?.(button, "events") ?? null; } catch (e) { jq = { error: String(e) }; }
+  const drawnButton = { tag: button.tagName.toLowerCase(), attributes: Object.fromEntries([...button.attributes].map(a => [a.name, a.value])), text: button.textContent.trim() };
+  const handler = { jqueryEventTypes: jq ? Object.keys(jq) : null, jqueryClickHandlers: jq?.click?.length ?? null, nativeOnclickProperty: typeof button.onclick, buttonObjectFound: Boolean(buttonObject), buttonObjectOnclick: typeof buttonObject?.onclick, buttonObjectKeys: buttonObject ? Object.keys(buttonObject) : null };
+  const said = [];
+  const realError = console.error, realWarn = console.warn;
+  const onError = e => said.push({ kind: "window error", message: String(e.message ?? e) });
+  const onReject = e => said.push({ kind: "unhandled rejection", message: String(e.reason?.message ?? e.reason) });
+  console.error = (...a) => { said.push({ kind: "console.error", message: a.map(String).join(" ").slice(0, 300) }); realError.apply(console, a); };
+  console.warn = (...a) => { said.push({ kind: "console.warn", message: a.map(String).join(" ").slice(0, 300) }); realWarn.apply(console, a); };
+  window.addEventListener("error", onError); window.addEventListener("unhandledrejection", onReject);
+  const openWindows = {};
+  let direct = null;
+  try {
+    button.click();
+    openWindows["0s"] = windows();
+    await sleep(1000); openWindows["1s"] = windows();
+    await sleep(2000); openWindows["3s"] = windows();
+    if (!openWindows["3s"].length && buttonObject?.onclick) {      // diagnostic only, when the click opened nothing: call the button's own onclick directly, so a failing click and a failing handler can be told apart
+      direct = { threw: null, openedAfterDirectCall: false };
+      try { await buttonObject.onclick(new Event("click")); } catch (e) { direct.threw = String(e?.stack ?? e).slice(0, 400); }
+      direct.openedAfterDirectCall = Boolean(await g.until(() => g.app()?.rendered, 3000));
+    }
+  } finally {
+    console.error = realError; console.warn = realWarn;
+    window.removeEventListener("error", onError); window.removeEventListener("unhandledrejection", onReject);
+  }
+  const app = g.app()?.rendered && g.app().element ? g.app() : null;
+  const draft = app?.ui?.draft ?? null;
+  const clickReport = { drawnButton, handler, openWindowsAfterClick: openWindows, consoleDuringClick: said, openedFor: draft ? { name: draft.name, uuid: draft.uuid } : null, itemExpected: { name: item.name, uuid: item.uuid }, directOnclickDiagnostic: direct };
+  console.log(`REPORT what the click did: ${JSON.stringify(clickReport)}`);
+  g.check("clicking it opens the Item tags window (everything the click did is printed)", Boolean(openWindows["3s"]?.length) && Boolean(app), JSON.stringify(clickReport));
   if (app) {
-    const draft = app.ui?.draft ?? null;
     g.check("the window is aimed at that item: the item list tab, an ordinary item, its uuid and name (the draft is printed)", app.ui?.tab === "items" && draft?.source === "item" && draft?.uuid === item.uuid && draft?.name === item.name, JSON.stringify({ tab: app.ui?.tab, draft, itemUuid: item.uuid, itemName: item.name }));
     const warning = g.within('[data-part="ref-warning"]')?.textContent.replace(/\s+/g, " ").trim() ?? null;
     g.check("it warns that copies of an item with no source will not match (the Charm has no compendium source; the warning text is printed)", /Copies of this item will not match this tag/.test(warning ?? ""), JSON.stringify({ warning, refsOf: await api.tags.refsOf(item) }));

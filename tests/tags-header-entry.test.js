@@ -34,3 +34,14 @@ test("ENTRY: an ApplicationV1 item sheet gets exactly one GM-only Item tags butt
   as(testUser, () => handlers.get("getHeaderControlsApplicationV2")({ document: item }, asPlayer2));
   assert.equal(asPlayer2.length, 0);
 });
+
+test("ENTRY: the V1 button's onclick runs the open function, and a failure is reported (console.error) instead of vanishing", async () => {
+  const { handlers, gm } = await setup();
+  const broken = { ...item, getFlag: () => { throw new Error("flag read failed"); } };
+  const buttons = [];
+  as(gm, () => handlers.get(V1_HOOK)({ item: broken }, buttons));
+  const logged = [];
+  const spy = console.error; console.error = (...a) => logged.push(a.map(String).join(" "));
+  try { as(gm, () => buttons[0].onclick({ preventDefault() {} })); } finally { console.error = spy; }
+  assert.match(logged.join("\n"), /could not open the window for Gate Charm/);
+});

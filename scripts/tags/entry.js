@@ -28,6 +28,13 @@ export function installTagEntryPoints(getApi, hooks = globalThis.Hooks) {
   hooks.on(V1_HOOK, (sheet, buttons) => {
     const item = sheet?.item ?? sheet?.document;
     if (!game.user.isGM || item?.documentName !== "Item" || !Array.isArray(buttons) || buttons.some(b => b.class === V1_CLASS)) return;
-    buttons.unshift({ label: T.title, class: V1_CLASS, icon: "fa-solid fa-tags", onclick: () => openFor(item) });
+    // An ApplicationV1 header button runs its onclick callback (V2's `action` name does nothing here). A failure is reported, never swallowed by the click.
+    buttons.unshift({
+      label: T.title, class: V1_CLASS, icon: "fa-solid fa-tags",
+      onclick: event => {
+        event?.preventDefault?.();
+        try { return openFor(item); } catch (error) { console.error(`${MODULE_ID} | the Item tags button could not open the window for ${item?.name}`, error); globalThis.ui?.notifications?.error?.(`${T.title}: ${error?.message ?? error}`); return undefined; }
+      }
+    });
   });
 }

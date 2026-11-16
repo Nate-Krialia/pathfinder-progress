@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (tag system, Slice 1; the module version is NOT bumped)
+- **Item tags V1 header button click**: the button's `onclick` now reports a failure (console.error and a notification) instead of letting a click do nothing quietly. Gate 23 step 4 prints, on every run, what the click did: the button as drawn, its click handler, the open windows at 0/1/3 s, console output, and the item the window opened for.
 - **Item tags header button on ApplicationV1 item sheets** (PF2e's item sheets are ApplicationV1, so the ApplicationV2-only hook never fired for them): `getItemSheetHeaderButtons` adds the same GM-only "Item tags" button (once per sheet). Gate 23 step 4 now reads a jQuery `element`, prints the sheet class, whether it is ApplicationV2 and the header buttons as drawn, and clicks the button.
 - New GM-only **tag ledger** (world setting `tagLedger`): item reference -> several tags and a tier. A material's single `tag` is read as its first tag. A PF2e item with no material record can fill a slot only when tagged WITH a tier (and a name); the editor refuses otherwise.
 - Recipe slots can say `needs: { all: [tags], optional }`; a slot without `needs` is exactly as before. Required tagged slots must be filled, optional ones may stay empty; `tierFloor` still applies. Tag definitions get a numeric `priority` (stored and edited only).

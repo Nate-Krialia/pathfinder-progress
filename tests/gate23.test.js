@@ -208,3 +208,23 @@ test("GATE 23 Step 4 on an ApplicationV1 item sheet (jQuery element): the module
     await runBlock(7, gm);
   });
 });
+
+test("GATE 23 Step 4: the V1 header button's click opens ONE Item tags window aimed at that sheet's item (V2 too); the click report is printed on a pass; a handler that throws is reported, not swallowed", async () => {
+  for (const v2 of [false, true]) {
+    const { gm, results, play } = await playGate({ v2 });
+    await quietly(async () => {
+      await runBlock(2, gm);
+      assert.equal(await play(4, "gm"), "ALL PASS", results.lines4.join("\n"));
+      const report = results.lines4.find(l => /^REPORT what the click did: /.test(l));
+      assert.ok(report, "the report is printed on a pass too");
+      const data = JSON.parse(report.replace(/^REPORT what the click did: /, ""));
+      assert.equal(data.openWindowsAfterClick["0s"].length + data.openWindowsAfterClick["1s"].length + data.openWindowsAfterClick["3s"].length > 0, true);
+      assert.deepEqual(data.openedFor, data.itemExpected, "the window opened for the sheet's own item");
+      assert.deepEqual(data.consoleDuringClick, []);
+      assert.equal(data.directOnclickDiagnostic, null, "no diagnostic call when the click worked");
+      if (!v2) { assert.equal(data.handler.buttonObjectOnclick, "function"); assert.match(data.drawnButton.attributes.class, /header-button.*pfp-item-tags/); }
+      assert.equal([...foundry.applications.instances.keys()].filter(k => /pathfinder-progress/.test(k)).length, 0, "closed again");
+      await runBlock(7, gm);
+    });
+  }
+});
