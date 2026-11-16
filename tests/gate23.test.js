@@ -209,7 +209,7 @@ test("GATE 23 Step 4 on an ApplicationV1 item sheet (jQuery element): the module
   });
 });
 
-test("GATE 23 Step 4: the V1 header button's click opens ONE Item tags window aimed at that sheet's item (V2 too); the click report is printed on a pass; a handler that throws is reported, not swallowed", async () => {
+test("GATE 23 Step 4: the V1 header button's click opens ONE Item tags window aimed at that sheet's item (V2 too); the report prints both window lists, the returned value and the module's debug lines on a pass", async () => {
   for (const v2 of [false, true]) {
     const { gm, results, play } = await playGate({ v2 });
     await quietly(async () => {
@@ -218,13 +218,42 @@ test("GATE 23 Step 4: the V1 header button's click opens ONE Item tags window ai
       const report = results.lines4.find(l => /^REPORT what the click did: /.test(l));
       assert.ok(report, "the report is printed on a pass too");
       const data = JSON.parse(report.replace(/^REPORT what the click did: /, ""));
-      assert.equal(data.openWindowsAfterClick["0s"].length + data.openWindowsAfterClick["1s"].length + data.openWindowsAfterClick["3s"].length > 0, true);
-      assert.deepEqual(data.openedFor, data.itemExpected, "the window opened for the sheet's own item");
-      assert.deepEqual(data.consoleDuringClick, []);
-      assert.equal(data.directOnclickDiagnostic, null, "no diagnostic call when the click worked");
+      const t = data.windowsAroundTheClick;
+      assert.deepEqual(Object.keys(t), ["before", "0s", "1s", "3s"]);
+      assert.equal(t.before.filter(w => /tagger/.test(w.id)).length, 0, "no Item tags window before the click");
+      assert.equal(t["3s"].filter(w => w.id === "pathfinder-progress-tagger").length, 1, "exactly one Item tags window");
+      assert.equal(t["3s"].find(w => w.id === "pathfinder-progress-tagger").list, "instances");
+      assert.equal(data.directCallReturned.type, v2 ? "undefined" : "object");
+      if (!v2) assert.equal(data.directCallReturned.constructorName, "TaggerWindow");
+      assert.deepEqual(data.openedFor, { name: data.itemExpected.name, uuid: data.itemExpected.uuid }, "the window opened for the sheet's own item");
+      const debug = data.consoleDuringBoth.filter(c => c.kind === "console.debug").map(c => c.message).join("\n");
+      if (!v2) { assert.match(debug, /Item tags button clicked.*"name":"[^"]+","uuid":"Actor\.[^"]+","type":/); assert.match(debug, /opening the Item tags window with.*"uuid":"Actor\./); assert.match(debug, /finished drawing/); }
+      assert.deepEqual(data.consoleDuringBoth.filter(c => c.kind !== "console.debug"), []);
       if (!v2) { assert.equal(data.handler.buttonObjectOnclick, "function"); assert.match(data.drawnButton.attributes.class, /header-button.*pfp-item-tags/); }
       assert.equal([...foundry.applications.instances.keys()].filter(k => /pathfinder-progress/.test(k)).length, 0, "closed again");
       await runBlock(7, gm);
     });
   }
+});
+
+test("GATE 23 Step 4: a window that is only in ui.windows (ApplicationV1 list) is found by the check, and the report prints that list", async () => {
+  const { gm, results, play } = await playGate({ v2: false });
+  const proto = foundry.applications.api.ApplicationV2.prototype, realRender = proto.render;
+  await quietly(async () => {
+    await runBlock(2, gm);
+    ui.windows = {};
+    // after the Item tags window draws, move it from foundry.applications.instances to ui.windows, the other place Foundry keeps windows
+    proto.render = async function (...args) {
+      const out = await realRender.apply(this, args);
+      if (this.id === "pathfinder-progress-tagger" && foundry.applications.instances.has(this.id)) { foundry.applications.instances.delete(this.id); ui.windows[9] = this; }
+      return out;
+    };
+    try {
+      await play(4, "gm");
+      const lines = results.lines4.join("\n");
+      assert.match(lines, /PASS: clicking it opens the Item tags window/, lines);
+      assert.match(lines, /"list":"ui\.windows","id":"9","cls":"[^"]*","title":"Item tags"/, "the V1 list is printed with the window's class and title");
+    } finally { proto.render = realRender; for (const w of Object.values(ui.windows)) await w.close?.(); delete ui.windows; }
+    await runBlock(7, gm);
+  });
 });

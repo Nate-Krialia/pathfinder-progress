@@ -209,6 +209,9 @@ export function openTagger(api, prefill = null) {
   const existing = foundry.applications.instances.get(TAGGER_ID);
   const app = existing ?? new TaggerApp(api);
   if (prefill) app.aim(prefill);
-  app.render({ force: true });
+  // The render promise is kept on the window (`opened`) for a caller that wants to wait for it; a failed render is reported, never left as an unhandled rejection nobody sees.
+  const opened = Promise.resolve(app.render({ force: true }));
+  opened.catch(error => console.error(`${MODULE_ID} | the Item tags window failed to render`, error));
+  app.opened = opened;
   return app;
 }

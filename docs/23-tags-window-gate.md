@@ -60,7 +60,7 @@ await (async () => {
       set: (selector, value) => { const el = g.within(selector); if (!el) throw new Error(`the Item tags window has no ${selector}`); if (el.type === "checkbox") el.checked = Boolean(value); else el.value = value; el.dispatchEvent(new (el.ownerDocument.defaultView.Event)("change", { bubbles: true })); },
       click: selector => { const el = g.within(selector); if (!el) throw new Error(`the Item tags window has no ${selector}`); el.click(); },
       windowText: () => (g.app()?.element?.textContent ?? "").replace(/\s+/g, " ").trim(),
-      closeAll: async () => { await g.app()?.close(); await g.charm()?.sheet?.close(); },
+      closeAll: async () => { await g.app()?.close(); for (const w of Object.values(ui.windows ?? {})) if (w.title === "Item tags") await w.close(); await g.charm()?.sheet?.close(); },
       check: (label, ok, detail) => rows.push(`${ok ? "PASS" : "FAIL"}: ${label}${detail === undefined ? "" : ` (${detail})`}`),
       done: () => { console.log(rows.join("\n")); const bad = rows.filter(r => r.startsWith("FAIL")).length; rows.length = 0; return bad ? `${bad} FAILED: scroll up for the lines` : "ALL PASS"; }
     };
@@ -139,7 +139,8 @@ await (async () => {
 - Make sure no window of this module is open.
 - Run the block below in the GM window. It opens the real sheet of **Gate G23 Charm**, looks for the module's header button, clicks it and checks the Item tags window opens aimed at that item.
 - You should see: `PASS:` lines and `ALL PASS`.
-- You should see: one `REPORT what the click did:` line on every run: the button's attributes, whether it has a click handler, the open windows at 0, 1 and 3 seconds, anything the console said, and the item the window opened for. If the click opens nothing, it also says what calling the button's own handler directly did.
+- You should see: one `REPORT what the click did:` line on every run: the button's attributes, its click handler, the windows from `foundry.applications.instances` AND `ui.windows` (class and title) before the click and 0, 1 and 3 seconds after, and every console debug, warning and error line meanwhile.
+- You should see: the same line also covers a direct call of the button's own `onclick`: what it returned, the windows around it, and the item name, uuid and type the module resolved (its `console.debug` lines).
 - If the button is missing, the FAIL line prints which sheet class opened, whether it is an ApplicationV2, the header buttons as drawn, and the hooks Foundry has registered for header controls: that shows the cause. PF2e's item sheets are ApplicationV1: the module adds its button through `getItemSheetHeaderButtons` there and through `getHeaderControlsApplicationV2` on an ApplicationV2 sheet.
 - The block closes the item sheet and the window before it ends.
 
@@ -165,45 +166,60 @@ await (async () => {
   const button = root?.querySelector?.('[data-action="pfp-item-tags"], .header-button.pfp-item-tags') ?? null;
   g.check("the item sheet shows the module's header button (the cause is printed if not: sheet class, ApplicationV2 or not, the buttons as drawn, the registered header hooks)", Boolean(button), JSON.stringify(info));
   if (!button) { await g.closeAll(); return g.done(); }
-  // What the click does, printed whole on every run: the button as drawn, whether it has a click handler, the open windows at 0, 1 and 3 seconds, anything the console said, and the item the window was opened for.
+  // What the click does, printed whole on every run. Windows are listed from BOTH places Foundry keeps them: foundry.applications.instances (ApplicationV2) and ui.windows (ApplicationV1).
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const windows = () => [...foundry.applications.instances.keys()].filter(k => /pathfinder-progress/.test(k));
+  const listWindows = () => [
+    ...[...foundry.applications.instances.entries()].map(([id, a]) => ({ list: "instances", id, cls: a.constructor?.name, title: a.title ?? a.options?.window?.title ?? null, app: a })),
+    ...Object.entries(ui.windows ?? {}).map(([id, a]) => ({ list: "ui.windows", id, cls: a.constructor?.name, title: a.title ?? a.options?.title ?? null, app: a }))
+  ];
+  const isTagger = w => /pathfinder-progress-tagger/.test(String(w.id)) || w.title === "Item tags" || w.cls === "TaggerWindow";
+  const show = list => list.map(({ list: l, id, cls, title }) => ({ list: l, id, cls, title }));
+  const taggerOpen = () => listWindows().find(isTagger) ?? null;
   const buttonObject = typeof sheet._getHeaderButtons === "function" ? sheet._getHeaderButtons().find(b => b.class === "pfp-item-tags") ?? null : null;
   let jq = null;
   try { jq = (globalThis.jQuery ?? globalThis.$)?._data?.(button, "events") ?? null; } catch (e) { jq = { error: String(e) }; }
   const drawnButton = { tag: button.tagName.toLowerCase(), attributes: Object.fromEntries([...button.attributes].map(a => [a.name, a.value])), text: button.textContent.trim() };
   const handler = { jqueryEventTypes: jq ? Object.keys(jq) : null, jqueryClickHandlers: jq?.click?.length ?? null, nativeOnclickProperty: typeof button.onclick, buttonObjectFound: Boolean(buttonObject), buttonObjectOnclick: typeof buttonObject?.onclick, buttonObjectKeys: buttonObject ? Object.keys(buttonObject) : null };
   const said = [];
-  const realError = console.error, realWarn = console.warn;
+  const real = { error: console.error, warn: console.warn, debug: console.debug };
   const onError = e => said.push({ kind: "window error", message: String(e.message ?? e) });
   const onReject = e => said.push({ kind: "unhandled rejection", message: String(e.reason?.message ?? e.reason) });
-  console.error = (...a) => { said.push({ kind: "console.error", message: a.map(String).join(" ").slice(0, 300) }); realError.apply(console, a); };
-  console.warn = (...a) => { said.push({ kind: "console.warn", message: a.map(String).join(" ").slice(0, 300) }); realWarn.apply(console, a); };
+  const watch = kind => (...a) => { said.push({ kind: `console.${kind}`, message: a.map(x => { try { return typeof x === "object" ? JSON.stringify(x) : String(x); } catch { return String(x); } }).join(" ").slice(0, 400) }); real[kind].apply(console, a); };
+  console.error = watch("error"); console.warn = watch("warn"); console.debug = watch("debug");
   window.addEventListener("error", onError); window.addEventListener("unhandledrejection", onReject);
-  const openWindows = {};
+  const timeline = async () => { const t = { before: show(listWindows()) }; return t; };
+  const sample = async (t, action) => { await action(); t["0s"] = show(listWindows()); await sleep(1000); t["1s"] = show(listWindows()); await sleep(2000); t["3s"] = show(listWindows()); };
+  const click = await timeline();
   let direct = null;
   try {
-    button.click();
-    openWindows["0s"] = windows();
-    await sleep(1000); openWindows["1s"] = windows();
-    await sleep(2000); openWindows["3s"] = windows();
-    if (!openWindows["3s"].length && buttonObject?.onclick) {      // diagnostic only, when the click opened nothing: call the button's own onclick directly, so a failing click and a failing handler can be told apart
-      direct = { threw: null, openedAfterDirectCall: false };
-      try { await buttonObject.onclick(new Event("click")); } catch (e) { direct.threw = String(e?.stack ?? e).slice(0, 400); }
-      direct.openedAfterDirectCall = Boolean(await g.until(() => g.app()?.rendered, 3000));
-    }
+    await sample(click, () => button.click());
+    // The button's own onclick, called directly with a fake click event: what it returns, and what the windows do. Printed on every run, so a click that never reaches the handler and a handler that opens nothing can be told apart.
+    direct = await timeline();
+    const fakeEvent = { type: "click", preventDefault() {} };
+    let returned = { threw: null, type: "undefined", constructorName: null, timedOut: false };
+    await sample(direct, async () => {
+      try {
+        const value = buttonObject?.onclick ? await Promise.race([Promise.resolve(buttonObject.onclick(fakeEvent)), sleep(5000).then(() => { returned.timedOut = true; return undefined; })]) : undefined;
+        returned.type = value === null ? "null" : typeof value; returned.constructorName = value?.constructor?.name ?? null;
+      } catch (e) { returned.threw = String(e?.stack ?? e).slice(0, 400); }
+    });
+    direct.returned = returned;
   } finally {
-    console.error = realError; console.warn = realWarn;
+    console.error = real.error; console.warn = real.warn; console.debug = real.debug;
     window.removeEventListener("error", onError); window.removeEventListener("unhandledrejection", onReject);
   }
-  const app = g.app()?.rendered && g.app().element ? g.app() : null;
+  const found = taggerOpen();
+  const app = found?.app ?? null;
   const draft = app?.ui?.draft ?? null;
-  const clickReport = { drawnButton, handler, openWindowsAfterClick: openWindows, consoleDuringClick: said, openedFor: draft ? { name: draft.name, uuid: draft.uuid } : null, itemExpected: { name: item.name, uuid: item.uuid }, directOnclickDiagnostic: direct };
+  const inEither = list => list.some(w => isTagger(w));
+  const clickOpened = inEither(click["0s"]) || inEither(click["1s"]) || inEither(click["3s"]);
+  const clickReport = { drawnButton, handler, windowsAroundTheClick: click, windowsAroundTheDirectCall: direct, directCallReturned: direct.returned, consoleDuringBoth: said, openedFor: draft ? { name: draft.name, uuid: draft.uuid } : null, itemExpected: { name: item.name, uuid: item.uuid, type: item.type } };
   console.log(`REPORT what the click did: ${JSON.stringify(clickReport)}`);
-  g.check("clicking it opens the Item tags window (everything the click did is printed)", Boolean(openWindows["3s"]?.length) && Boolean(app), JSON.stringify(clickReport));
+  g.check("clicking it opens the Item tags window (found in foundry.applications.instances or ui.windows; everything the click and a direct call did is printed)", clickOpened, JSON.stringify(clickReport));
+  g.check("calling the button's own onclick directly opens it too (a diagnostic; printed above)", inEither(direct["0s"]) || inEither(direct["1s"]) || inEither(direct["3s"]), JSON.stringify({ directCallReturned: direct.returned, windows: direct["3s"] }));
   if (app) {
     g.check("the window is aimed at that item: the item list tab, an ordinary item, its uuid and name (the draft is printed)", app.ui?.tab === "items" && draft?.source === "item" && draft?.uuid === item.uuid && draft?.name === item.name, JSON.stringify({ tab: app.ui?.tab, draft, itemUuid: item.uuid, itemName: item.name }));
-    const warning = g.within('[data-part="ref-warning"]')?.textContent.replace(/\s+/g, " ").trim() ?? null;
+    const warning = (app.element?.querySelector?.('[data-part="ref-warning"]') ?? null)?.textContent.replace(/\s+/g, " ").trim() ?? null;
     g.check("it warns that copies of an item with no source will not match (the Charm has no compendium source; the warning text is printed)", /Copies of this item will not match this tag/.test(warning ?? ""), JSON.stringify({ warning, refsOf: await api.tags.refsOf(item) }));
   }
   await g.closeAll();

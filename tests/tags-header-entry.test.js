@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { as, getUsers, world } from "./fake-world.js";
 import { installTagEntryPoints, V1_HOOK } from "../scripts/tags/entry.js";
+import { installFakeApplication } from "./fake-application.js";
 
 const item = { documentName: "Item", name: "Gate Charm", uuid: "Actor.a.Item.b", getFlag: () => undefined };
 async function setup() {
@@ -44,4 +45,42 @@ test("ENTRY: the V1 button's onclick runs the open function, and a failure is re
   const spy = console.error; console.error = (...a) => logged.push(a.map(String).join(" "));
   try { as(gm, () => buttons[0].onclick({ preventDefault() {} })); } finally { console.error = spy; }
   assert.match(logged.join("\n"), /could not open the window for Gate Charm/);
+});
+
+const capture = async fn => {
+  const lines = [], saved = { debug: console.debug, error: console.error };
+  console.debug = (...a) => lines.push(["debug", a.map(x => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(" ")]);
+  console.error = (...a) => lines.push(["error", a.map(String).join(" ")]);
+  try { return { value: await fn(), lines }; } finally { console.debug = saved.debug; console.error = saved.error; }
+};
+
+test("ENTRY: every guard that keeps the V1 button off a sheet says which one (console.debug, module prefix); a Player says nothing", async () => {
+  const { handlers, gm, testUser } = await setup();
+  const hook = handlers.get(V1_HOOK);
+  const run = (user, sheet, buttons) => capture(() => as(user, () => hook(sheet, buttons)));
+  const notItem = await run(gm, { item: { documentName: "Actor" } }, []);
+  assert.match(notItem.lines.map(l => l[1]).join("\n"), /^pathfinder-progress \| Item tags button not added: the sheet's document is not an Item/);
+  const notList = await run(gm, { item }, {});
+  assert.match(notList.lines.map(l => l[1]).join("\n"), /^pathfinder-progress \| Item tags button not added: the header buttons are not a list/);
+  const list = [];
+  await run(gm, { item }, list);
+  const again = await run(gm, { item }, list);
+  assert.match(again.lines.map(l => l[1]).join("\n"), /^pathfinder-progress \| Item tags button not added again: this sheet already has it/);
+  assert.equal(list.length, 1);
+  const player = await run(testUser, { item }, []);
+  assert.deepEqual(player.lines, [], "a Player is the normal case and says nothing");
+});
+
+test("ENTRY: the V1 onclick logs what it resolved, a failed window draw is reported (console.error) and the click still ends", async () => {
+  const { handlers, gm } = await setup();
+  installFakeApplication();
+  const buttons = [];
+  as(gm, () => handlers.get(V1_HOOK)({ item, constructor: { name: "FakeSheet" } }, buttons));
+  // the entry point is given an api with no definitions, so the window cannot draw: the failure must be reported
+  const out = await capture(() => as(gm, () => buttons[0].onclick({ preventDefault() {} })));
+  const text = out.lines.map(l => `${l[0]}: ${l[1]}`).join("\n");
+  assert.match(text, /debug: pathfinder-progress \| Item tags button clicked \{"sheetClass":"FakeSheet","name":"Gate Charm","uuid":"Actor\.a\.Item\.b"/);
+  assert.match(text, /debug: pathfinder-progress \| opening the Item tags window with \{"uuid":"Actor\.a\.Item\.b","name":"Gate Charm","noSource":/);
+  assert.match(text, /error: pathfinder-progress \| the Item tags window failed to render/);
+  assert.equal(out.value, undefined);
 });
