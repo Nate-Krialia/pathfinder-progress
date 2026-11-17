@@ -293,5 +293,11 @@ export function installFrozenHooks(hooks = globalThis.Hooks) {
     if (!id || getFrozenStore().items[id]?.held || itemsWithFreezeId(id).some(other => other !== item && other.id !== item.id)) return;
     return removeFrozen(id).catch(error => console.error(`${MODULE_ID} | could not remove a frozen craft result`, error));
   });
-  hooks.on("updateSetting", setting => { if (game.user?.isGM && setting?.key === `${MODULE_ID}.${TAGS.frozenSetting}`) loadFrozen(); });
+  // A change made by ANOTHER GM client (or the writer's own echo, which reads back what was just written, so it is harmless) is read into memory here; without this a second GM would
+  // carry on with the ledger / caps / frozen store it read at ready and its next save would overwrite the other GM's change. Only a GM client ever reads these, and nothing is sent to anyone.
+  // The first ever write of a setting arrives as `createSetting`, the rest as `updateSetting`.
+  const reloads = { [`${MODULE_ID}.${TAGS.frozenSetting}`]: loadFrozen, [`${MODULE_ID}.${TAGS.ledgerSetting}`]: loadLedger, [`${MODULE_ID}.${TAGS.capsSetting}`]: loadCaps };
+  const reload = setting => { if (game.user?.isGM) reloads[setting?.key]?.(); };
+  hooks.on("updateSetting", reload);
+  hooks.on("createSetting", reload);
 }

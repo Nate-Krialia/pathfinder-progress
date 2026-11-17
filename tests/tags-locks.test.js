@@ -60,3 +60,48 @@ test("CAPS LOCK: overlapping setCaps calls land in the order they were asked for
   assert.equal(env.values.tagCaps.roles.basePower.maxTier, 4, "saved: the last call");
   assert.equal(getCaps().basePower.maxTier, 4, "memory: the last call");
 });
+
+// A second GM's change is read in (review finding 4) -----------------------------------------------------------------------------
+import { encodeLedger } from "../scripts/tags/ledger.js";
+const KEY = k => `${M}.${k}`;
+
+test("SECOND GM: a ledger change another GM client saved is read into memory (update and first-time create), and the writer's own echo changes nothing", async () => {
+  const w = await tagWorld();
+  await as(w.gm, () => api().tags.setEntry(A, { tags: ["venom-tooth"], tier: 2, name: "Item A" }));
+  const mine = structuredClone(getLedger());
+  await fireHookAs(w.gm, "updateSetting", [{ key: KEY("tagLedger") }]);                                   // my own echo: reads back what I wrote
+  assert.deepEqual(getLedger(), mine, "the echo of my own write is harmless");
+  // another GM tags B: the saved setting changes under me
+  env.values.tagLedger = encodeLedger({ v: 1, items: { ...mine.items, [B]: { tags: ["venom-tooth"], tier: 3, name: "Item B" } } });
+  assert.equal(getLedger().items[B], undefined, "not yet seen");
+  await fireHookAs(w.gm, "updateSetting", [{ key: KEY("tagLedger") }]);
+  assert.deepEqual(Object.keys(getLedger().items).sort(), [A, B]);
+  // and the next save of THIS GM keeps the other GM's tag instead of overwriting it
+  await as(w.gm, () => api().tags.setEntry("spider-fang", { tags: ["venom-tooth"] }));
+  assert.deepEqual(Object.keys(decodeLedger(env.values.tagLedger).items).sort(), [A, B, "spider-fang"].sort());
+  // the first write of a setting arrives as createSetting
+  env.values.tagLedger = encodeLedger({ v: 1, items: {} });
+  await fireHookAs(w.gm, "createSetting", [{ key: KEY("tagLedger") }]);
+  assert.deepEqual(getLedger().items, {});
+});
+
+test("SECOND GM: a caps change another GM client saved is read into memory; the echo of the writer's own save changes nothing", async () => {
+  const w = await tagWorld();
+  await as(w.gm, () => api().tags.setCaps({ v: 1, roles: { basePower: { maxTier: 2 } } }));
+  await fireHookAs(w.gm, "updateSetting", [{ key: KEY("tagCaps") }]);
+  assert.equal(getCaps().basePower.maxTier, 2, "own echo harmless");
+  env.values.tagCaps = { v: 1, roles: { basePower: { maxTier: 3 } } };
+  await fireHookAs(w.gm, "updateSetting", [{ key: KEY("tagCaps") }]);
+  assert.equal(getCaps().basePower.maxTier, 3);
+});
+
+test("SECOND GM: a Player client never reads any of it (it would have wiped the GM-only memory the fake shares), and an unrelated setting does nothing", async () => {
+  const w = await tagWorld();
+  await as(w.gm, () => api().tags.setEntry(A, { tags: ["venom-tooth"], tier: 2, name: "Item A" }));
+  await as(w.gm, () => api().tags.setCaps({ v: 1, roles: { basePower: { maxTier: 2 } } }));
+  for (const key of ["tagLedger", "tagCaps", "tagCrafted"]) await fireHookAs(w.annUser, "updateSetting", [{ key: KEY(key) }]);
+  assert.ok(getLedger().items[A], "the ledger memory is untouched");
+  assert.equal(getCaps().basePower.maxTier, 2, "so are the caps");
+  await fireHookAs(w.gm, "updateSetting", [{ key: KEY("downtimeState") }]);
+  assert.ok(getLedger().items[A]);
+});
