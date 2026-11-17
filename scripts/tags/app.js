@@ -18,7 +18,7 @@ export function build() {
       id: TAGGER_ID, classes: ["pfp-hub-window", "pfp-tagger-window"], tag: "div",
       window: { title: T.title, resizable: true }, position: { width: 720, height: 600 },
       actions: {
-        tab(event, target) { this.ui.tab = target.dataset.tab; this.ui.message = ""; return this.render(); },
+        "pfp-tab"(event, target) { this.ui.tab = target.dataset.tab; this.ui.message = ""; return this.render(); },
         lookup() { return this.#lookup(); },
         "save-entry"() { return this.#saveEntry(); },
         "cancel-entry"() { this.ui.draft = blankDraft(); return this.render(); },

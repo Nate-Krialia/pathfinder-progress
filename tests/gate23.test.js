@@ -297,3 +297,27 @@ test("GATE 23 Step 4: when Foundry never binds the header click, the report says
     await runBlock(7, gm);
   });
 });
+
+test("GATE 23 Step 5: every tab switch is printed whole (tabs offered, tabGroups, active tab, data-field names, the tab active when the field was looked for, page errors); each field is found on its own tab", async () => {
+  const { gm, results, expectPass } = await playGate({});
+  await quietly(async () => {
+    await runBlock(2, gm);
+    await expectPass(5);
+    const opened = results.lines5.find(l => /^REPORT the window when it opened: /.test(l));
+    assert.ok(opened, results.lines5.join("\n"));
+    const first = JSON.parse(opened.replace(/^REPORT the window when it opened: /, ""));
+    assert.ok(first.tabButtons.length >= 3 && first.tabButtons.every(b => typeof b.tab === "string" && "group" in b));
+    assert.ok(Array.isArray(first.dataFields) && first.activeTab === "items");
+    for (const [tab, field] of [["tags", "new-tag-name"], ["items", "material"], ["slots", "recipe"]]) {
+      const line = results.lines5.find(l => l.startsWith(`REPORT switch to the ${tab} tab: `));
+      assert.ok(line, `a report for the ${tab} switch`);
+      const d = JSON.parse(line.replace(/^REPORT switch to the [a-z]+ tab: /, ""));
+      assert.equal(d.found, true);
+      assert.equal(d.activeTabWhenLooked, tab);
+      assert.ok(d.after.dataFields.includes(field), `${field} is in the DOM after the switch`);
+      assert.deepEqual(d.pageErrors, []);
+      assert.ok("tabGroups" in d.before && "tabGroups" in d.after);
+    }
+    await runBlock(7, gm);
+  });
+});

@@ -158,10 +158,21 @@ export class FakeApplicationV2 {
     this.#element.addEventListener("click", event => {
       const target = event.target?.closest?.("[data-action]");
       if (!target) return;
+      // Foundry reserves the action name "tab": its own tab handling takes the click (and needs data-tab AND data-group), whatever options.actions says. Modelled from the error a real run raised.
+      if (target.dataset.action === "tab") return this._onClickTab(event, target);
       const config = this.options.actions[target.dataset.action];
       const handler = typeof config === "function" ? config : config?.handler;
       if (typeof handler === "function") handler.call(this, event, target);
     });
+  }
+  /** The tab switch of the real class, as far as a real run showed it: it throws Foundry's own message when the tab or the group is missing. */
+  changeTab(tab, group) {
+    if (!tab || !group) throw new Error("You must pass both the tab and tab group identifier");
+    this.tabGroups[group] = tab;
+  }
+  _onClickTab(event, target) {
+    event.preventDefault?.();
+    return this.changeTab(target.dataset.tab, target.dataset.group);
   }
   async _prepareContext() { return {}; }
   async _renderHTML() { throw new Error("subclasses must implement _renderHTML"); }

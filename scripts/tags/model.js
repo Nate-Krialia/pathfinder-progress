@@ -166,7 +166,7 @@ export function renderTagger(m) {
   const body = tab === "slots" ? slotsTab(m) : tab === "tags" ? tagsTab(m) : itemsTab(m);
   const root = Object.entries(rootAttributes({ display: m.ui.display ?? normalizeDisplay({}), layout: m.ui.layout ?? "wide" })).map(([k, v]) => `${k}="${esc(v)}"`).join(" ");
   return `<div class="pfp-hub pfp-tagger" tabindex="-1" ${root}><p>${esc(T.intro)}</p>
-    <nav role="tablist">${Object.entries(T.tabs).map(([id, label]) => `<button type="button" role="tab" data-action="tab" data-tab="${id}" aria-selected="${tab === id}">${esc(label)}</button>`).join("")}</nav>
+    <nav role="tablist">${Object.entries(T.tabs).map(([id, label]) => `<button type="button" role="tab" data-action="pfp-tab" data-tab="${id}" aria-selected="${tab === id}">${esc(label)}</button>`).join("")}</nav>
     <div data-part="message" role="status" aria-live="polite">${esc(m.ui.message)}</div>
     <div data-part="body" class="pfp-tagger-body">${body}</div></div>`;
 }

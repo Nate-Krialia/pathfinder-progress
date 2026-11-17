@@ -41,7 +41,7 @@ test("WINDOW: GM only", async () => {
 
 test("WINDOW: create a tag, give it a priority, tag a material with two tags, see it listed", async () => {
   const { w, text, click, set } = await windowFor();
-  await click("tab", '[data-tab="tags"]');
+  await click("pfp-tab", '[data-tab="tags"]');
   await set('[data-field="new-tag-name"]', "Venom Tooth");
   await click("create-tag");
   assert.match(text(), /Made the tag Venom Tooth/);
@@ -53,7 +53,7 @@ test("WINDOW: create a tag, give it a priority, tag a material with two tags, se
   await click("save-priority", '[data-tag="venom-tooth"]');
   assert.match(text(), /Saved the priority/);
   assert.equal(api().definitions.tag.get("venom-tooth").priority, 7);
-  await click("tab", '[data-tab="items"]');
+  await click("pfp-tab", '[data-tab="items"]');
   await set('[data-field="material"]', "spider-fang");
   await set('[data-field="tag"][data-tag="venom-tooth"]', true);
   await set('[data-field="tag"][data-tag="sharp-edge"]', true);
@@ -67,7 +67,7 @@ test("WINDOW: create a tag, give it a priority, tag a material with two tags, se
 test("WINDOW: an item that is not a material cannot be saved without a tier; with one it is", async () => {
   const { click, set, text } = await windowFor();
   await as(getApiGm(), () => api().editor.create("tag", { name: "Venom Tooth", theme: "x" }, { makeItem: false }));
-  await click("tab", '[data-tab="items"]');
+  await click("pfp-tab", '[data-tab="items"]');
   await set('[data-field="source"]', "item");
   await set('[data-field="uuid"]', ITEM);
   await set('[data-field="name"]', "Wolf Tooth");
@@ -87,7 +87,7 @@ const getApiGm = () => globalThis.game.users.get("gm1");
 test("WINDOW: set what a recipe slot needs, then take it back to the tier rule", async () => {
   const { click, set, text } = await windowFor();
   await as(getApiGm(), () => api().editor.create("tag", { name: "Venom Tooth", theme: "x" }, { makeItem: false }));
-  await click("tab", '[data-tab="slots"]');
+  await click("pfp-tab", '[data-tab="slots"]');
   await set('[data-field="recipe"]', DAGGER);
   await set('[data-field="slot-tag"][data-slot="fang"][data-tag="venom-tooth"]', true);
   await set('[data-field="slot-optional"][data-slot="fang"]', true);
@@ -101,7 +101,7 @@ test("WINDOW: set what a recipe slot needs, then take it back to the tier rule",
 
 test("WINDOW: saving a slot with no tag ticked says so instead of saving", async () => {
   const { click, set, text } = await windowFor();
-  await click("tab", '[data-tab="slots"]');
+  await click("pfp-tab", '[data-tab="slots"]');
   await set('[data-field="recipe"]', DAGGER);
   await set('[data-field="slot-optional"][data-slot="fang"]', true);
   await click("save-slot", '[data-slot="fang"]');
@@ -121,7 +121,7 @@ const makeTag = async (name = "Venom Tooth") => as(getApiGm(), () => api().edito
 test("BUILDER: open a tag's effects, add a damage block, fill the dice by tier, and save it as an editor patch the registry reads", async () => {
   const { click, set, text, el } = await windowFor();
   await makeTag();
-  await click("tab", '[data-tab="tags"]');
+  await click("pfp-tab", '[data-tab="tags"]');
   await click("edit-effects", '[data-tag="venom-tooth"]');
   assert.match(text(), /What Venom Tooth does/);
   await click("fx-add", '[data-type="damage"]');
@@ -141,7 +141,7 @@ test("BUILDER: open a tag's effects, add a damage block, fill the dice by tier, 
 test("BUILDER: a draft with a problem names it and cannot be saved", async () => {
   const { click, text } = await windowFor();
   await makeTag();
-  await click("tab", '[data-tab="tags"]');
+  await click("pfp-tab", '[data-tab="tags"]');
   await click("edit-effects", '[data-tag="venom-tooth"]');
   await click("fx-class", '[data-cls="armor"]');
   await click("fx-add", '[data-type="damage"]');
@@ -153,7 +153,7 @@ test("BUILDER: a draft with a problem names it and cannot be saved", async () =>
 test("BUILDER: Any item has no 'Apply a condition' button (it belongs to a weapon, bomb or consumable)", async () => {
   const { click, el } = await windowFor();
   await makeTag();
-  await click("tab", '[data-tab="tags"]');
+  await click("pfp-tab", '[data-tab="tags"]');
   await click("edit-effects", '[data-tag="venom-tooth"]');
   assert.equal(el().querySelector('[data-action="fx-add"][data-type="condition"]'), null);
   await click("fx-class", '[data-cls="weapon"]');
@@ -163,7 +163,7 @@ test("BUILDER: Discard throws the draft away; removing every block takes the eff
   const { click, text } = await windowFor();
   await makeTag();
   await api().editor.update("tag:venom-tooth", { effectBlocks: { general: { blocks: [{ type: "damage", dice: { all: "1d4" }, damageType: "fire" }] } } }, { confirmed: true });
-  await click("tab", '[data-tab="tags"]');
+  await click("pfp-tab", '[data-tab="tags"]');
   await click("edit-effects", '[data-tag="venom-tooth"]');
   await click("fx-remove", '[data-index="0"]');
   await click("fx-discard");
@@ -176,7 +176,7 @@ test("BUILDER: Discard throws the draft away; removing every block takes the eff
 });
 test("CAPS: the window shows the defaults, saves a changed cap, refuses a bad one, and goes back to the defaults", async () => {
   const { click, set, text } = await windowFor();
-  await click("tab", '[data-tab="tags"]');
+  await click("pfp-tab", '[data-tab="tags"]');
   assert.match(text(), /Caps/);
   await set('[data-field="cap"][data-role="resistance"][data-name="maxValue"]', "20");
   await click("caps-save");
@@ -202,14 +202,14 @@ test("CAPS: only a GM can read or write them", async () => {
 test("KIND (window): set a slot's kind alone, without touching its needs; the kind scope of the builder writes a bySlot set", async () => {
   const { click, set, text } = await windowFor();
   await makeTag();
-  await click("tab", '[data-tab="slots"]');
+  await click("pfp-tab", '[data-tab="slots"]');
   await set('[data-field="recipe"]', DAGGER);
   await set('[data-field="slot-kind"][data-slot="fang"]', "decoration");
   await click("save-slot", '[data-slot="fang"]');
   assert.match(text(), /Saved fang/);
   const fang = api().definitions.recipe.get(DAGGER).slots.find(s => s.name === "fang");
   assert.equal(fang.kind, "decoration"); assert.equal(fang.needs, undefined, "the needs were left alone");
-  await click("tab", '[data-tab="tags"]');
+  await click("pfp-tab", '[data-tab="tags"]');
   await click("edit-effects", '[data-tag="venom-tooth"]');
   await set('[data-field="fx-kind"]', "decoration");
   await click("fx-add", '[data-type="damage"]');
@@ -290,7 +290,7 @@ test("WARNING (Look it up and Save): an unsourced item says so when found and ag
   globalThis.fromUuid = async uuid => items[uuid] ?? null;
   await as(w.gm, () => api().tags.setEntry("spider-fang", { tags: [], tier: 1 }).catch(() => null));
   await as(w.gm, async () => { await api().editor.create("tag", { name: "Venom Tooth", theme: "bitey things" }, { makeItem: false }); });
-  await click("tab", '[data-tab="items"]');
+  await click("pfp-tab", '[data-tab="items"]');
   await set('[data-field="source"]', "item");
   for (const [uuid, shown] of [["Item.PLAIN", true], [COMP, false], ["Actor.A.Item.COPY", false]]) {
     await set('[data-field="uuid"]', uuid);
@@ -321,4 +321,31 @@ test("WARNING (Look it up and Save): an unsourced item says so when found and ag
   await as(w.annUser, () => playerWindow.render({ force: true }));
   assert.doesNotMatch(playerWindow.element.textContent, /will not match this tag|Put it in a compendium/);
   void app;
+});
+
+test("WINDOW: the tab buttons never use Foundry's own tab action name; each switch reaches the tab that holds its field (the fake throws Foundry's error text for a tab switch with no group)", async () => {
+  const { app, el, click, text } = await windowFor();
+  assert.equal(el().querySelectorAll('[data-action="tab"]').length, 0, 'ApplicationV2 reserves data-action="tab" for its own tab handling, which needs a tab AND a group');
+  assert.deepEqual([...el().querySelectorAll('[data-action="pfp-tab"]')].map(b => b.dataset.tab).sort(), ["items", "slots", "tags"]);
+  assert.throws(() => app.changeTab("tags"), /You must pass both the tab and tab group identifier/, "the fake throws the real message for one argument");
+  assert.throws(() => app.changeTab(undefined, "primary"), /You must pass both/);
+  const seen = {};
+  for (const [tab, field] of [["tags", "new-tag-name"], ["items", "material"], ["slots", "recipe"]]) {
+    await click("pfp-tab", `[data-tab="${tab}"]`);
+    assert.equal(app.ui.tab, tab);
+    seen[tab] = !!el().querySelector(`[data-field="${field}"]`);
+  }
+  assert.deepEqual(seen, { tags: true, items: true, slots: true }, "the field is found on its own tab");
+  void text;
+});
+
+test("WINDOW: a click on a button that DOES use the reserved name \"tab\" without a group raises Foundry's error and switches nothing (the fake's model of the real failure)", async () => {
+  const { app, el } = await windowFor();
+  const b = document.createElement("button"); b.dataset.action = "tab"; b.dataset.tab = "tags"; el().append(b);
+  const before = app.ui.tab, errors = [];
+  const onError = e => { errors.push(String(e.message ?? e)); e.preventDefault?.(); };
+  window.addEventListener("error", onError);
+  try { b.click(); } finally { window.removeEventListener("error", onError); }
+  assert.equal(app.ui.tab, before, "nothing switched");
+  assert.match(errors.join("\n"), /You must pass both the tab and tab group identifier/);
 });

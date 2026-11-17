@@ -120,7 +120,7 @@ await (async () => {
   if (!app) return g.done();
   const box = app.element.getBoundingClientRect();
   const title = (app.element.querySelector(".window-title")?.textContent ?? app.title ?? "").trim();
-  const tabs = [...app.element.querySelectorAll('[data-action="tab"]')].map(b => `${b.dataset.tab}: ${b.textContent.trim()}`);
+  const tabs = [...app.element.querySelectorAll('[data-action="pfp-tab"]')].map(b => `${b.dataset.tab}: ${b.textContent.trim()}`);
   const list = (app.element.querySelector('[data-part="entries"]')?.textContent ?? "").replace(/\s+/g, " ").trim();
   g.check("the window is drawn: it has a size on the screen", box.width > 0 && box.height > 0, JSON.stringify({ width: box.width, height: box.height }));
   g.check("it has the module's own title", /Item tags/.test(title), JSON.stringify({ title }));
@@ -241,6 +241,7 @@ await (async () => {
 - Make sure no window of this module is open.
 - Run the block below in the GM window. It opens the Item tags window and, inside it, creates a tag **Gate G23 Bite**, gives it priority 7, tags the material **Gate G23 Iron**, tags the item **Gate G23 Charm** (by its uuid, which has dots in it), and gives the real recipe's `fang` slot a requirement for the tag.
 - You should see: `PASS:` lines and `ALL PASS`. After each save the block waits for the write and prints the saved values: the ledger setting, the tag, the recipe's slot, and what `api.tags.refsOf` says about the Charm.
+- You should see: a `REPORT the window when it opened:` line, and one `REPORT switch to the … tab:` line per tab switch: the tab buttons with their group, `tabGroups`, the active tab, the `data-field` names found before and after, the tab that was active when the field was looked for, and any page error.
 - The block closes the window before it ends.
 
 ```js
@@ -258,10 +259,25 @@ await (async () => {
   if (!app) return g.done();
   const saved = () => JSON.stringify({ tagLedger: game.settings.get(M, "tagLedger"), editorDefinitions: Object.keys(game.settings.get(M, "editorDefinitions") ?? {}) });
   const tagOf = () => [...api.definitions.tag.values()].find(t => t.name === "Gate G23 Bite");
+  // Every tab switch is printed whole: the tabs the window offers, its active tab per group (tabGroups), the data-field names in the DOM before and after, which tab was active when the field was looked for, and any page error.
+  const tabInfo = () => { const w = g.app(); return { tabButtons: [...(w?.element?.querySelectorAll('[data-action="pfp-tab"]') ?? [])].map(el => ({ tab: el.dataset.tab, group: el.dataset.group ?? null, selected: el.getAttribute("aria-selected") })), tabGroups: w?.tabGroups ?? null, activeTab: w?.ui?.tab ?? null, dataFields: [...new Set([...(w?.element?.querySelectorAll("[data-field]") ?? [])].map(el => el.dataset.field))] }; };
+  console.log(`REPORT the window when it opened: ${JSON.stringify(tabInfo())}`);
+  const goTab = async (tab, field) => {
+    const before = tabInfo(), errors = [];
+    const realError = console.error, onError = e => errors.push(String(e.message ?? e)), onReject = e => errors.push(String(e.reason?.message ?? e.reason));
+    console.error = (...a) => { errors.push(a.map(String).join(" ").slice(0, 300)); realError.apply(console, a); };
+    window.addEventListener("error", onError); window.addEventListener("unhandledrejection", onReject);
+    let found = null, activeWhenLooked = null;
+    try {
+      g.click(`[data-action="pfp-tab"][data-tab="${tab}"]`);
+      found = await g.until(() => { activeWhenLooked = g.app()?.ui?.tab ?? null; return g.within(`[data-field="${field}"]`); });
+    } finally { console.error = realError; window.removeEventListener("error", onError); window.removeEventListener("unhandledrejection", onReject); }
+    console.log(`REPORT switch to the ${tab} tab: ${JSON.stringify({ asked: tab, lookedFor: field, found: Boolean(found), activeTabWhenLooked: activeWhenLooked, before, after: tabInfo(), pageErrors: errors })}`);
+    return found;
+  };
   try {
     // the Tags tab: a new tag, then its priority
-    g.click('[data-action="tab"][data-tab="tags"]');
-    await g.until(() => g.within('[data-field="new-tag-name"]'));
+    await goTab("tags", "new-tag-name");
     g.set('[data-field="new-tag-name"]', "Gate G23 Bite");
     g.click('[data-action="create-tag"]');
     const tag = await g.until(tagOf);
@@ -273,8 +289,7 @@ await (async () => {
     const prio = await g.until(() => tagOf()?.priority === 7);
     g.check("the priority 7 is saved and read back (the tag and the saved editor keys are printed)", Boolean(prio), JSON.stringify({ tag: tagOf() ?? null, saved: saved() }));
     // the Items tab: a material
-    g.click('[data-action="tab"][data-tab="items"]');
-    await g.until(() => g.within('[data-field="material"]'));
+    await goTab("items", "material");
     g.set('[data-field="material"]', "g23-iron");
     await g.until(() => g.within(`[data-field="tag"][data-tag="${tag.id}"]`));
     g.set(`[data-field="tag"][data-tag="${tag.id}"]`, true);
@@ -297,8 +312,7 @@ await (async () => {
     g.check("the item Gate G23 Charm is tagged by its uuid and read back through refsOf (the ledger entry, refsOf and the saved setting, whose key has no dots, are printed)", Boolean(entry) && refs.matched === charm.uuid && refs.tags.join() === tag.id && refs.tier === 2, JSON.stringify({ entry: entry ?? null, refsOf: refs, saved: saved() }));
     g.check("the window said the copies of an item with no source will not match", /Copies of this item will not match this tag/.test(g.windowText()), JSON.stringify({ message: g.windowText().slice(-260) }));
     // the Recipe slots tab: a slot need on the real recipe
-    g.click('[data-action="tab"][data-tab="slots"]');
-    await g.until(() => g.within('[data-field="recipe"]'));
+    await goTab("slots", "recipe");
     g.set('[data-field="recipe"]', RECIPE);
     await g.until(() => g.within(`[data-field="slot-tag"][data-slot="${SLOT}"][data-tag="${tag.id}"]`));
     g.set(`[data-field="slot-tag"][data-slot="${SLOT}"][data-tag="${tag.id}"]`, true);
