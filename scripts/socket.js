@@ -15,9 +15,19 @@ import * as work from "./queue/work.js";
 import { runWorkshopAside, runWorkshopStart } from "./workshop/store.js";
 import { runFollowLead } from "./research/leads.js";
 import { guard } from "./queue/relay.js";
+import { senderOf } from "./queue/common.js";
 import { runDefinitionsFor } from "./data/playerDefs.js";
 
 let socket = null;
+
+/**
+ * The relayed "search": WHO is searching is the socket's own sender (`this.socketdata.userId`), never the `userId` in the payload (a Player could send the GM's id and search with any character).
+ * Without a socket sender only a call made on this GM client itself is accepted (senderOf). Exported for the tests.
+ */
+export function searchRelayed(payload, context) {
+  const user = senderOf(payload, context);
+  return exploration.runSearch({ actorId: payload?.actorId, sceneId: payload?.sceneId, userId: user.id });
+}
 
 /** Register with socketlib. Returns the socket, or null (and says why in the console) if socketlib would not register us. */
 export function ensureSocket() {
@@ -37,7 +47,7 @@ export function ensureSocket() {
   }
   // EVERY handler is wrapped in guard(): real socketlib hides the message of anything a handler throws, so a refusal
   // must travel as data (see queue/relay.js). A test walks every registered handler and fails if one can still throw.
-  registered.register("search", guard("search", options => exploration.runSearch(options)));
+  registered.register("search", guard("search", function search(payload) { return searchRelayed(payload, this); }));
   // Craft, gather and share are queued and cancelled on the GM client (see queue/work.js). `this` carries socketlib's sender, if it gives one.
   registered.register("queueSubmit", guard("queueSubmit", function queueSubmit(payload) { return queueStore.runSubmit(payload, this); }));
   registered.register("queueCancel", guard("queueCancel", function queueCancel(payload) { return queueStore.runCancel(payload, this); }));

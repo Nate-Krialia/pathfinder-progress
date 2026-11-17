@@ -13,7 +13,7 @@ import * as queue from "../scripts/queue/store.js";
 import * as audit from "../scripts/audit/store.js";
 import * as research from "../scripts/research/store.js";
 import * as gmLog from "../scripts/gm-log.js";
-import { _resetSocketForTests, ensureSocket, installSocketHooks, socketStatus } from "../scripts/socket.js";
+import { _resetSocketForTests, ensureSocket, installSocketHooks, searchRelayed, socketStatus } from "../scripts/socket.js";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { asPage, chatLeaks, openDowntime, seedRecords } from "./helpers.js";
@@ -1050,4 +1050,62 @@ test("MANIFEST: any source file that uses socketlib forces both the requirement 
   const m = manifest();
   assert.strictEqual(m.socket, true, `${users.join(", ")} use socketlib, so module.json needs "socket": true`);
   assert.ok(m.relationships.requires.some(r => r.id === "socketlib"));
+});
+
+// The relayed search takes WHO is searching from the socket sender, never from the payload ---------------------------------
+async function relayedSearchWorld() {
+  const { bb, scene } = await world({ anchors: 0 });
+  await standOn(scene, bb);
+  await hiddenNode(scene, { dc: 10 });
+  globalThis.game.user.isGM = true;            // the handler runs on the GM client
+  globalThis.game.user.id = "gm1";
+  bb.perceptionRolls.push(roll(2, 18, 12));
+  return { bb, scene };
+}
+const payloadFor = (bb, scene, userId) => ({ actorId: bb.id, sceneId: scene.id, userId });
+const fromSocket = userId => ({ socketdata: { userId } });
+
+test("RELAYED SEARCH: a Player who sends the GM's id in the payload is still the Player (the socket sender): not their character, so refused, and nothing is used up or rolled", async () => {
+  const { bb, scene } = await relayedSearchWorld();
+  const result = await searchRelayed(payloadFor(bb, scene, "gm1"), fromSocket("u-other"));      // u-other does not own bb; the payload claims to be the GM
+  assert.match(result.message, /only search with a character you own/);
+  assert.deepEqual(result.spotted, []);
+  assert.deepEqual(state(scene).searches ?? {}, {}, "bb's one search was not burned");
+  assert.equal(bb.perceptionRolls.length, 1, "no Perception roll was made");
+});
+
+test("RELAYED SEARCH: the owner's own search works whatever userId the payload carries; a GM sender may search with any character; the registered handler does the same and never throws", async () => {
+  const lib = fakeSocketlib();
+  globalThis.socketlib = lib;
+  _resetSocketForTests();
+  const hooks = fakeHooks();
+  installSocketHooks(hooks);
+  hooks.fire("socketlib.ready");
+  const handler = lib.functions.get("search");
+  assert.ok(handler, "the handler is registered");
+  {
+    const { bb, scene } = await relayedSearchWorld();
+    const owner = await handler.call(fromSocket("u-player"), payloadFor(bb, scene, "u-other"));      // a wrong userId in the payload changes nothing
+    assert.equal(owner.message, "You search the area. You spot: Herb Patch.");
+  }
+  {
+    const { bb, scene } = await relayedSearchWorld();
+    const gm = await handler.call(fromSocket("gm1"), payloadFor(bb, scene, "u-other"));
+    assert.equal(gm.message, "You search the area. You spot: Herb Patch.", "a GM sender may search with any character");
+  }
+  {
+    const { bb, scene } = await relayedSearchWorld();
+    const refused = await handler.call(fromSocket("u-other"), payloadFor(bb, scene, "gm1"));
+    assert.match(refused.message, /only search with a character you own/, "through the registered handler too");
+    assert.deepEqual(state(scene).searches ?? {}, {});
+  }
+  globalThis.socketlib = undefined;
+});
+
+test("RELAYED SEARCH: with no socket sender only a call made on this GM client itself is accepted (its own id); any other payload id is refused", async () => {
+  const { bb, scene } = await relayedSearchWorld();
+  await assert.rejects(async () => searchRelayed(payloadFor(bb, scene, "u-player"), undefined), /did not say who is asking/);
+  assert.equal(bb.perceptionRolls.length, 1);
+  const own = await searchRelayed(payloadFor(bb, scene, "gm1"), undefined);
+  assert.equal(own.message, "You search the area. You spot: Herb Patch.");
 });

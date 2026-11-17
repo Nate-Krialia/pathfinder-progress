@@ -232,7 +232,8 @@ async function world({ iron = 3, fang = 3, copper = 2000, downtime = 6, withGM =
         // Like the REAL socketlib: if the handler throws, the caller never sees the message, only this generic text.
         // (The real reason stays in the GM's console.) A guarded handler never throws, so this must never happen.
         try {
-          return await als.run({ user: gm }, () => env.handlers.get(name).call(env.relayContext, payload));
+          const sender = game.user.id;       // like the REAL socketlib: the handler's `this.socketdata.userId` is the user who SENT the message (the relayed search takes its user from here)
+          return await als.run({ user: gm }, () => env.handlers.get(name).call(env.relayContext ?? { socketdata: { userId: sender } }, payload));
         } catch (error) {
           env.handlerThrows.push({ name, message: error.message });
           throw new Error(`An exception occured during remote execution of handler '${name}'. Please see Gamemaster's error console for details.`);
