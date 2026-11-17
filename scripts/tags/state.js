@@ -45,24 +45,42 @@ export function loadCaps() {
   return { problems };
 }
 
-/** GM: replace the cap table: { v: 1, roles: { <role>: { <cap>: n } } }. Anything left out keeps its default. Players never see it. */
+/**
+ * GM: replace the cap table: { v: 1, roles: { <role>: { <cap>: n } } }. Anything left out keeps its default. Players never see it.
+ * The write and the in-memory table change together under the "tagCaps" lock (a leaf lock), so overlapping saves land in the order they were asked for.
+ */
 export async function setCaps(table) {
   requireGM("tags.setCaps");
   const clean = { v: 1, roles: structuredClone(table?.roles ?? {}), ...(table?.limits && Object.keys(table.limits).length ? { limits: structuredClone(table.limits) } : {}) };
   const problems = capsProblems(clean);
   if (problems.length) throw new TagError(problems.join(" "), { problems });
-  await game.settings.set(MODULE_ID, TAGS.capsSetting, clean);
-  setCurrentCaps(clean);
+  await withLock(CAPS_LOCK, async () => {
+    await game.settings.set(MODULE_ID, TAGS.capsSetting, clean);
+    setCurrentCaps(clean);
+  });
   await logWorldEvent("tags: changed the caps");
   return { table: structuredClone(clean), effective: getCaps(), limits: getLimits() };
 }
 export const capsNow = () => { requireGM("tags.caps"); return { table: structuredClone(getCapsTable()), effective: getCaps(), limits: getLimits() }; };
 
-async function commit(api, next, what) {
-  await game.settings.set(MODULE_ID, TAGS.ledgerSetting, encodeLedger(next));     // a separate, dot-free copy: whatever Foundry does to what it is given, `next` stays as written
-  setLedger(next);
+/**
+ * The ledger is changed read-clone-write: the whole of that runs under the "tagLedger" lock (a leaf lock: nothing inside asks for another), on a copy of the ledger as it is INSIDE the lock,
+ * so two overlapping changes (two quick saves, a macro tagging items in a loop) both land instead of the second erasing the first. `change(draft)` edits the copy (and may throw TagError).
+ * The definitions are published and the change logged AFTER the lock is let go.
+ */
+export const LEDGER_LOCK = "tagLedger";
+export const CAPS_LOCK = "tagCaps";
+async function changeLedger(api, what, change) {
+  const result = await withLock(LEDGER_LOCK, async () => {
+    const draft = structuredClone(getLedger());
+    const out = change(draft);
+    await game.settings.set(MODULE_ID, TAGS.ledgerSetting, encodeLedger(draft));     // a separate, dot-free copy: whatever Foundry does to what it is given, `draft` stays as written
+    setLedger(draft);
+    return out;
+  });
   await api.publishDefinitions?.();
   await logWorldEvent(what);
+  return result;
 }
 
 /** GM: tag an item. `ref` is a material id or an item UUID; `entry` is { tags: [tagId], tier?, name? }. Refuses (in plain words) what entryProblems finds. */
@@ -71,9 +89,7 @@ export async function setEntry(api, ref, entry) {
   const clean = { tags: [...(entry?.tags ?? [])], ...(entry?.tier !== undefined && entry?.tier !== null ? { tier: entry.tier } : {}), ...(String(entry?.name ?? "").trim() ? { name: String(entry.name).trim() } : {}) };
   const problems = entryProblems(ref, clean, api.definitions);
   if (problems.length) throw new TagError(problems.join(" "), { problems });
-  const next = structuredClone(getLedger());
-  next.items[ref] = clean;
-  await commit(api, next, `tags: tagged ${ref}`);
+  await changeLedger(api, `tags: tagged ${ref}`, draft => { draft.items[ref] = clean; });
   return structuredClone(clean);
 }
 
@@ -100,10 +116,10 @@ export async function refsOf(api, itemOrUuid) {
 /** GM: take an item out of the ledger. */
 export async function removeEntry(api, ref) {
   requireGM("tags.removeEntry");
-  if (!getLedger().items[ref]) throw new TagError("That item is not tagged.");
-  const next = structuredClone(getLedger());
-  delete next.items[ref];
-  await commit(api, next, `tags: untagged ${ref}`);
+  await changeLedger(api, `tags: untagged ${ref}`, draft => {
+    if (!draft.items[ref]) throw new TagError("That item is not tagged.");
+    delete draft.items[ref];
+  });
   return true;
 }
 
