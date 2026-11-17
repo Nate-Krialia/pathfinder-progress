@@ -10,6 +10,7 @@ import { craftedId, decodeLedger, effectiveTags, effectiveTier, emptyLedger, enc
 import { getCaps, getCapsTable, getFrozenStore, getLimits, getLedger, setCurrentCaps, setCurrentFrozen, setCurrentLedger } from "./current.js";
 import { emptyFrozen, frozenProblems, recordFromPlan } from "./frozen.js";
 import { capsProblems } from "./stack.js";
+import { withLock } from "../queue/lock.js";
 import { craftedRef } from "./ledger.js";
 
 export { getLedger, getCaps, getFrozenStore };
@@ -167,10 +168,26 @@ export function loadFrozen() {
   return { problems };
 }
 
+/**
+ * Every change to the frozen store is read-clone-write, so two overlapping changes (two crafts resolving at once, a hook removing a record while a craft adds one) would each clone the SAME
+ * store and the second write would erase the first. They all go through this one keyed lock, and each decision (does the record exist, is it held) is made on the store as it is INSIDE
+ * the lock. "tagCrafted" is a LEAF lock: nothing in here asks for another lock, and none of the functions below calls another locked function while holding it (they share the unlocked
+ * `change` helper). The queue's per-actor (and node) locks are taken first, then this one; see scripts/queue/lock.js.
+ */
+export const FROZEN_LOCK = "tagCrafted";
 async function writeFrozen(next) {
   await game.settings.set(MODULE_ID, TAGS.frozenSetting, next);
   setCurrentFrozen(next);
 }
+/** Run `change(draft)` on a copy of the store inside the lock; it returns { write: false, result } to leave the store alone, else its `result` is returned after the write. */
+const changeFrozen = change => withLock(FROZEN_LOCK, async () => {
+  const draft = structuredClone(getFrozenStore());
+  const out = change(draft);
+  if (out?.write === false) return out.result;
+  await writeFrozen(draft);
+  return out?.result;
+});
+const skip = result => ({ write: false, result });
 
 /**
  * GM client, when a craft with tagged slots resolves: store its frozen result and return { id, undo }. The id goes on the crafted item (its `crafted` flag). Returns null for a craft
@@ -180,46 +197,49 @@ export async function freezeCraft(plan) {
   const record = recordFromPlan(plan);
   if (!record) return null;
   const id = foundry.utils.randomID();
-  const next = structuredClone(getFrozenStore());
-  next.items[id] = record;
-  await writeFrozen(next);
+  await changeFrozen(draft => { draft.items[id] = record; });
   return { id, undo: () => removeFrozen(id) };
 }
 
 /** GM: put a frozen result back (a crafted ingredient came back out of escrow; the hook had removed its record when the item left the bag). */
 export async function restoreFrozen(id, record) {
-  if (!game.user?.isGM || !id || !record || getFrozenStore().items[id]) return false;
-  const next = structuredClone(getFrozenStore());
-  next.items[id] = structuredClone(record);
-  await writeFrozen(next);
-  return true;
+  if (!game.user?.isGM || !id || !record) return false;
+  return changeFrozen(draft => {
+    if (draft.items[id]) return skip(false);
+    draft.items[id] = structuredClone(record);
+    return { result: true };
+  });
 }
 
 /** GM: mark a frozen result as held while its item waits in a queued craft's escrow, so the item leaving the bag (or a prune) does not drop it. The record stays in the GM-only store: it is never copied into the queued action (an actor flag). */
 export async function holdFrozen(id) {
-  if (!game.user?.isGM || !id || !getFrozenStore().items[id]) return null;
-  const was = !!getFrozenStore().items[id].held;
-  if (!was) await setHeld(id, true);
+  if (!game.user?.isGM || !id) return null;
+  const was = await changeFrozen(draft => {
+    if (!draft.items[id]) return skip(null);
+    const held = !!draft.items[id].held;
+    if (held) return skip(true);
+    draft.items[id].held = true;
+    return { result: false };
+  });
+  if (was === null) return null;
   return { undo: () => (was ? null : setHeld(id, false)) };
 }
 /** GM: the held item came back to a bag (or the hold was undone). */
-export const releaseFrozen = id => (game.user?.isGM && id && getFrozenStore().items[id]?.held ? setHeld(id, false) : false);
-async function setHeld(id, held) {
-  if (!getFrozenStore().items[id]) return false;
-  const next = structuredClone(getFrozenStore());
-  if (held) next.items[id].held = true; else delete next.items[id].held;
-  await writeFrozen(next);
-  return true;
-}
+export const releaseFrozen = id => (game.user?.isGM && id ? changeFrozen(draft => (draft.items[id]?.held ? (delete draft.items[id].held, { result: true }) : skip(false))) : false);
+const setHeld = (id, held) => changeFrozen(draft => {
+  if (!draft.items[id]) return skip(false);
+  if (held) draft.items[id].held = true; else delete draft.items[id].held;
+  return { result: true };
+});
 
 /** GM: forget a frozen result (the item is gone, or the craft was rolled back). Quiet when it is not there. */
 export async function removeFrozen(id) {
   if (!game.user?.isGM) return false;
-  if (!getFrozenStore().items[id]) return false;
-  const next = structuredClone(getFrozenStore());
-  delete next.items[id];
-  await writeFrozen(next);
-  return true;
+  return changeFrozen(draft => {
+    if (!draft.items[id]) return skip(false);
+    delete draft.items[id];
+    return { result: true };
+  });
 }
 
 /** Every crafted item the world can see (actors' items and world items) that carries this freeze id. */
@@ -231,12 +251,12 @@ export function itemsWithFreezeId(id) {
 /** GM safety net: drop every frozen result that no item in the world carries any more. Unlinked token actors are not searched, so this is run by hand (api.tags.pruneFrozen()), never on its own. */
 export async function pruneFrozen() {
   requireGM("tags.pruneFrozen");
-  const gone = Object.keys(getFrozenStore().items).filter(id => !getFrozenStore().items[id].held && itemsWithFreezeId(id).length === 0);
-  if (!gone.length) return { removed: [] };
-  const next = structuredClone(getFrozenStore());
-  for (const id of gone) delete next.items[id];
-  await writeFrozen(next);
-  return { removed: gone };
+  return changeFrozen(draft => {
+    const gone = Object.keys(draft.items).filter(id => !draft.items[id].held && itemsWithFreezeId(id).length === 0);
+    if (!gone.length) return skip({ removed: [] });
+    for (const id of gone) delete draft.items[id];
+    return { result: { removed: gone } };
+  });
 }
 
 /** GM, read one frozen result (for the GM and for tests). */

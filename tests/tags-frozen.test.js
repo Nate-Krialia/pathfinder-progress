@@ -196,3 +196,57 @@ test("S2b CANARIES: the scan fails when a kind, an override or a frozen record i
   assert.ok(findTagLeaks([{ data: { kind: "tag", id: "t", bySlot: {} } }], {}).length >= 1, "a bySlot set");
   assert.ok(findCanaries({ flag: text({ freezeId: "abc", contributions: [] }) }, K).length >= 1, "a frozen record in a flag");
 });
+
+// Overlapping changes to the frozen store (review finding 2) ----------------------------------------------------------------
+import * as tagState from "../scripts/tags/state.js";
+const planOf = name => ({ frozen: { recipeId: `r-${name}`, name, tier: 2, native: [], inherited: [], uses: [], roles: {}, contributions: [] } });
+/** The settings write takes a moment (as a real one does, a round trip to the server): this is the gap in which a second clone used to be taken. */
+const slowFrozenWrites = ms => {
+  const real = game.settings.set;
+  game.settings.set = async (scope, key, value) => { if (key === "tagCrafted") await new Promise(r => setTimeout(r, ms)); return real(scope, key, value); };
+  return () => { game.settings.set = real; };
+};
+
+test("FROZEN LOCK: two crafts freezing at the same time keep BOTH records (each used to clone the same store, and the second write erased the first)", async () => {
+  const w = await frozenWorld();
+  const restore = slowFrozenWrites(25);
+  try {
+    const [a, b] = await as(w.gm, () => Promise.all([tagState.freezeCraft(planOf("A")), tagState.freezeCraft(planOf("B"))]));
+    assert.notEqual(a.id, b.id);
+    const saved = Object.keys(env.values.tagCrafted.items).sort();
+    assert.deepEqual(saved, [a.id, b.id].sort(), "both records are in the saved setting");
+    assert.deepEqual(Object.keys(getFrozenStore().items).sort(), [a.id, b.id].sort(), "and in memory");
+  } finally { restore(); }
+});
+
+test("FROZEN LOCK: a freeze, a removal and a hold that overlap each land (a record is added, one is removed, one is held, the rest is untouched)", async () => {
+  const w = await frozenWorld();
+  const [x, y, z] = await as(w.gm, async () => [await tagState.freezeCraft(planOf("X")), await tagState.freezeCraft(planOf("Y")), await tagState.freezeCraft(planOf("Z"))]);
+  const restore = slowFrozenWrites(20);
+  try {
+    const [fresh, removed, hold, released] = await as(w.gm, () => Promise.all([tagState.freezeCraft(planOf("N")), tagState.removeFrozen(x.id), tagState.holdFrozen(y.id), tagState.releaseFrozen(z.id)]));
+    const items = env.values.tagCrafted.items;
+    assert.equal(removed, true); assert.ok(hold && typeof hold.undo === "function"); assert.equal(released, false, "z was not held");
+    assert.deepEqual(Object.keys(items).sort(), [fresh.id, y.id, z.id].sort());
+    assert.equal(items[y.id].held, true);
+    assert.equal(items[z.id].held, undefined);
+    assert.deepEqual(Object.keys(getFrozenStore().items).sort(), Object.keys(items).sort(), "memory agrees with the saved setting");
+  } finally { restore(); }
+});
+
+test("FROZEN LOCK: no function that holds the lock calls another that takes it (a nested take would never finish): every operation completes, in any mix, and undo works", async () => {
+  const w = await frozenWorld();
+  const done = await as(w.gm, async () => {
+    const r = await tagState.freezeCraft(planOf("K"));
+    const hold = await tagState.holdFrozen(r.id);
+    assert.equal(await tagState.releaseFrozen(r.id), true);
+    await tagState.holdFrozen(r.id);
+    await hold.undo();                                   // the hold was taken fresh, so undoing it releases it again
+    assert.equal(await tagState.restoreFrozen(r.id, { recipeId: "dup" }), false, "an existing record is not replaced");
+    assert.deepEqual(await tagState.pruneFrozen(), { removed: [r.id] }, "no item carries it, and it is not held now");
+    assert.equal(await tagState.restoreFrozen(r.id, { recipeId: "back", name: "Back" }), true);
+    await r.undo();
+    return Object.keys(env.values.tagCrafted.items);
+  });
+  assert.deepEqual(done, []);
+});
