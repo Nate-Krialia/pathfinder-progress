@@ -161,3 +161,54 @@ test("DAMAGED CAPS: the same, under its own key; the ledger's backup is untouche
     });
   } finally { spy.restore(); }
 });
+
+// A failed publish or log after a SAVED change is a warning, not a failure (review finding 6) --------------------------------------------
+const spyWarn = () => {
+  const out = { console: [], notes: [] }, realConsole = console.warn, realNote = ui.notifications.warn;
+  console.warn = (...a) => out.console.push(a.map(String).join(" "));
+  ui.notifications.warn = t => out.notes.push(t);
+  out.restore = () => { console.warn = realConsole; ui.notifications.warn = realNote; };
+  return out;
+};
+const failingAuditWrites = () => { const real = game.settings.set; game.settings.set = async (scope, key, value) => { if (key === "auditLedger") throw new Error("the log could not be written"); return real(scope, key, value); }; return () => { game.settings.set = real; }; };
+
+test("SAVED BUT NOT LOGGED: logWorldEvent throws after setEntry saved: the call resolves, the entry is saved, and the GM gets a warning and a note", async () => {
+  const w = await tagWorld();
+  const spy = spyWarn(), restore = failingAuditWrites();
+  try {
+    const saved = await as(w.gm, () => api().tags.setEntry(A, { tags: ["venom-tooth"], tier: 2, name: "Item A" }));
+    assert.deepEqual(saved, { tags: ["venom-tooth"], tier: 2, name: "Item A" }, "it resolved with the saved entry");
+    assert.ok(getLedger().items[A], "in memory");
+    assert.ok(decodeLedger(env.values.tagLedger).items[A], "and saved in the world");
+    assert.match(spy.console.join("\n"), /the tag change was saved, but writing the audit log line failed/);
+    assert.deepEqual(spy.notes, ["The tag change was saved, but writing the audit log line failed (see the console)."]);
+    await as(w.gm, () => api().tags.removeEntry(A));       // removeEntry takes the same path
+    assert.equal(getLedger().items[A], undefined);
+    await as(w.gm, () => api().tags.setCaps({ v: 1, roles: { basePower: { maxTier: 2 } } }));   // and so does the caps save
+    assert.equal(env.values.tagCaps.roles.basePower.maxTier, 2);
+    assert.match(spy.notes.at(-1), /The caps change was saved, but writing the audit log line failed/);
+  } finally { restore(); spy.restore(); }
+});
+
+test("SAVED BUT NOT PUBLISHED: publishDefinitions throws after the save: the call resolves, the entry is saved, the log line is still written, and the GM is told", async () => {
+  const w = await tagWorld();
+  const spy = spyWarn();
+  const realPublish = api().publishDefinitions;
+  api().publishDefinitions = async () => { throw new Error("could not tell the players"); };
+  try {
+    await as(w.gm, () => api().tags.setEntry(A, { tags: ["venom-tooth"], tier: 2, name: "Item A" }));
+    assert.ok(decodeLedger(env.values.tagLedger).items[A], "saved");
+    assert.match(spy.console.join("\n"), /was saved, but publishing the definitions to the players failed/);
+    assert.deepEqual(spy.notes, ["The tag change was saved, but publishing the definitions to the players failed (see the console)."]);
+    assert.ok(Object.values(env.values.auditLedger?._events?.history ?? []).some(h => /tags: tagged/.test(h.text)), "the log step still ran");
+  } finally { api().publishDefinitions = realPublish; spy.restore(); }
+});
+
+test("SAVED AND PUBLISHED: nothing to warn about when both steps work", async () => {
+  const w = await tagWorld();
+  const spy = spyWarn();
+  try {
+    await as(w.gm, () => api().tags.setEntry(A, { tags: ["venom-tooth"], tier: 2, name: "Item A" }));
+    assert.deepEqual([spy.console, spy.notes], [[], []]);
+  } finally { spy.restore(); }
+});
