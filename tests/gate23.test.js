@@ -145,6 +145,9 @@ async function playGate(options) {
   api.editorLeftovers = [];
   installFakeApplication();
   await fakeWindowWorld(options);
+  // A real save resolves a moment AFTER the ledger shows the entry (the setting write): the window finishes by resetting its form. The fake models that gap (`saveMs`), so a step that changes a field the moment the ledger changes is caught.
+  const realSetEntry = api.tags.setEntry, saveMs = options?.saveMs ?? 400;
+  api.tags.setEntry = async (...args) => { const out = await realSetEntry.apply(api.tags, args); await wait(saveMs); return out; };
   const base = { drivers: { gm: makeDomDriver({ as, user: gm }), player: makeDomDriver({ as, user: testUser }) }, state: {}, assert, wait, extras: {} };
   const results = {};
   const play = async (n, who) => { const out = await sink(() => playStep({ script, n, who, base, runBlock: async () => { results[n] = await runBlock(n, who === "player" ? testUser : gm); } })); results[`lines${n}`] = out.lines; return results[n]; };
@@ -317,6 +320,32 @@ test("GATE 23 Step 5: every tab switch is printed whole (tabs offered, tabGroups
       assert.ok(d.after.dataFields.includes(field), `${field} is in the DOM after the switch`);
       assert.deepEqual(d.pageErrors, []);
       assert.ok("tabGroups" in d.before && "tabGroups" in d.after);
+    }
+    await runBlock(7, gm);
+  });
+});
+
+test("GATE 23 Step 5: the Source dropdown's options and the source change are printed (redraw, draft source, every data-field), and the save messages are waited for; the item is picked with the Item UUID box", async () => {
+  const { gm, results, expectPass } = await playGate({});
+  await quietly(async () => {
+    await runBlock(2, gm);
+    await expectPass(5);
+    const lines = results.lines5.join("\n");
+    const change = results.lines5.find(l => /^REPORT source changed to item: /.test(l));
+    assert.ok(change, lines);
+    const d = JSON.parse(change.replace(/^REPORT source changed to item: /, ""));
+    assert.deepEqual(d.sourceBefore.options.map(o => o.value), ["material", "item"]);
+    assert.ok(d.sourceBefore.options.every(o => o.label.length > 0), "labels are printed");
+    assert.equal(d.sourceBefore.value, "material");
+    assert.equal(d.sourceAfter.value, "item");
+    assert.equal(d.redrew, true);
+    assert.equal(d.draftSourceNow, "item");
+    assert.ok(d.dataFieldsNow.includes("uuid") && d.dataFieldsNow.includes("name") && d.dataFieldsNow.includes("source"), JSON.stringify(d.dataFieldsNow));
+    assert.match(d.pickedWith, /Item UUID/);
+    for (const name of ["Gate G23 Iron", "Gate G23 Charm"]) {
+      const saved = results.lines5.find(l => l.startsWith(`REPORT the window's save message for ${name}: `));
+      assert.ok(saved, `a save report for ${name}`);
+      assert.equal(JSON.parse(saved.replace(/^REPORT [^:]+: /, "")).shown, true);
     }
     await runBlock(7, gm);
   });

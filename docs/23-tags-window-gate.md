@@ -242,6 +242,7 @@ await (async () => {
 - Run the block below in the GM window. It opens the Item tags window and, inside it, creates a tag **Gate G23 Bite**, gives it priority 7, tags the material **Gate G23 Iron**, tags the item **Gate G23 Charm** (by its uuid, which has dots in it), and gives the real recipe's `fang` slot a requirement for the tag.
 - You should see: `PASS:` lines and `ALL PASS`. After each save the block waits for the write and prints the saved values: the ledger setting, the tag, the recipe's slot, and what `api.tags.refsOf` says about the Charm.
 - You should see: a `REPORT the window when it opened:` line, and one `REPORT switch to the … tab:` line per tab switch: the tab buttons with their group, `tabGroups`, the active tab, the `data-field` names found before and after, the tab that was active when the field was looked for, and any page error.
+- You should see: a `REPORT source changed to item:` line: the Source dropdown's options (value and label) and value before and after, whether the form redrew, the draft's source right after the change and now, and every `data-field` in the window; and a `REPORT the window's save message for …:` line after each save.
 - The block closes the window before it ends.
 
 ```js
@@ -275,6 +276,18 @@ await (async () => {
     console.log(`REPORT switch to the ${tab} tab: ${JSON.stringify({ asked: tab, lookedFor: field, found: Boolean(found), activeTabWhenLooked: activeWhenLooked, before, after: tabInfo(), pageErrors: errors })}`);
     return found;
   };
+  // The "Source" dropdown picks what the form tags (a material, or an ordinary item by its uuid). Its options and value are printed, and every change to it says whether the form redrew and what the DOM holds afterwards.
+  const sourceInfo = () => { const el = g.within('[data-field="source"]'); return el ? { value: el.value, disabled: el.disabled, options: [...el.options].map(o => ({ value: o.value, label: o.textContent.trim() })) } : null; };
+  // The window resets its form AFTER the ledger changes (the save finishes with a "Saved ..." message), so a change made as soon as the ledger shows the entry can be wiped by that reset: wait for the message first.
+  const savedShown = async name => { const ok = await g.until(() => new RegExp(`Saved ${name}\\.`).test(g.windowText())); console.log(`REPORT the window's save message for ${name}: ${JSON.stringify({ shown: Boolean(ok), message: g.windowText().slice(-160), draftSource: g.app()?.ui?.draft?.source ?? null })}`); return ok; };
+  const switchSource = async value => {
+    const before = g.within('[data-field="source"]'), valueBefore = sourceInfo();
+    g.set('[data-field="source"]', value);
+    const draftSourceRightAfter = g.app()?.ui?.draft?.source ?? null;
+    await g.until(() => g.app()?.ui?.draft?.source === value && g.within(`[data-field="${value === "item" ? "uuid" : "material"}"]`));
+    const after = g.within('[data-field="source"]');
+    console.log(`REPORT source changed to ${value}: ${JSON.stringify({ pickedWith: 'the "Source" dropdown [data-field="source"], then (for an item) the "Item UUID" text box and the "Look it up" button', sourceBefore: valueBefore, sourceAfter: sourceInfo(), redrew: before !== after, draftSourceRightAfterTheChange: draftSourceRightAfter, draftSourceNow: g.app()?.ui?.draft?.source ?? null, activeTab: g.app()?.ui?.tab ?? null, dataFieldsNow: tabInfo().dataFields })}`);
+  };
   try {
     // the Tags tab: a new tag, then its priority
     await goTab("tags", "new-tag-name");
@@ -295,11 +308,11 @@ await (async () => {
     g.set(`[data-field="tag"][data-tag="${tag.id}"]`, true);
     g.click('[data-action="save-entry"]');
     const iron = await g.until(() => api.tags.ledger().items["g23-iron"]);
+    await savedShown("Gate G23 Iron");
     g.check("the material Gate G23 Iron is tagged and read back through the API (the ledger entry, tagsOf and the saved setting are printed)", Boolean(iron) && api.tags.tagsOf("g23-iron").join() === tag.id, JSON.stringify({ entry: iron ?? null, tagsOf: api.tags.tagsOf("g23-iron"), saved: saved() }));
     // an ordinary item, by uuid (the uuid has dots in it)
     await g.until(() => g.within('[data-field="source"]'));
-    g.set('[data-field="source"]', "item");
-    await g.until(() => g.within('[data-field="uuid"]'));
+    await switchSource("item");
     g.set('[data-field="uuid"]', charm.uuid);
     g.click('[data-action="lookup"]');
     await g.until(() => /Found Gate G23 Charm/.test(g.windowText()));
@@ -308,6 +321,7 @@ await (async () => {
     g.set('[data-field="tier"]', "2");
     g.click('[data-action="save-entry"]');
     const entry = await g.until(() => api.tags.ledger().items[charm.uuid]);
+    await savedShown("Gate G23 Charm");
     const refs = await api.tags.refsOf(charm);
     g.check("the item Gate G23 Charm is tagged by its uuid and read back through refsOf (the ledger entry, refsOf and the saved setting, whose key has no dots, are printed)", Boolean(entry) && refs.matched === charm.uuid && refs.tags.join() === tag.id && refs.tier === 2, JSON.stringify({ entry: entry ?? null, refsOf: refs, saved: saved() }));
     g.check("the window said the copies of an item with no source will not match", /Copies of this item will not match this tag/.test(g.windowText()), JSON.stringify({ message: g.windowText().slice(-260) }));
