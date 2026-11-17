@@ -365,6 +365,7 @@ export const TAGS = {
   maxPassCap: 6,
   maxDepth: 3,                           // Slice 3: how many crafted items may be nested inside each other (a GM setting in the caps table overrides it)
   frozenSetting: "tagCrafted",           // Slice 2b: GM-only record of what each crafted item was made of (tags, tiers, the stacked result), keyed by an opaque id on the item
+  backupSetting: "tagBackup",            // a damaged ledger / caps table is kept here ONCE, as a JSON string (so no uuid or name ever becomes an object key), before the empty one replaces it
   capsSetting: "tagCaps",                // Slice 2a: the GM-set cap per role (one world-wide table)
   // PF2e bonus types a tag effect may carry (GM-set per effect; "untyped" is the default and means none). Stored and carried on the stacked result; 2a emits no typed modifier yet.
   bonusTypes: ["untyped", "item", "status", "circumstance"],

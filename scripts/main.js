@@ -171,6 +171,7 @@ Hooks.once("init", () => {
   game.settings.register(MODULE_ID, TAGS.ledgerSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
   game.settings.register(MODULE_ID, TAGS.frozenSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });   // what each crafted item was made of (Slice 2b); GM data
   game.settings.register(MODULE_ID, TAGS.capsSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });   // the GM-set cap per role (Slice 2a); GM data
+  game.settings.register(MODULE_ID, TAGS.backupSetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });   // the one-time copy of a damaged ledger / caps table (JSON strings); GM only
   game.settings.register(MODULE_ID, DISCOVERY.overlaySetting, { scope: "world", config: false, type: new foundry.data.fields.ObjectField(), default: {} });
 
   game.settings.register(MODULE_ID, "extraPacks", {

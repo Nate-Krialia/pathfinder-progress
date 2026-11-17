@@ -105,3 +105,59 @@ test("SECOND GM: a Player client never reads any of it (it would have wiped the 
   await fireHookAs(w.gm, "updateSetting", [{ key: KEY("downtimeState") }]);
   assert.ok(getLedger().items[A]);
 });
+
+// A damaged setting is backed up once, then replaced as before (review finding 5) --------------------------------------------------
+import { loadCaps, loadLedger } from "../scripts/tags/state.js";
+const dotted = (value, path = "") => (value && typeof value === "object" ? Object.entries(value).flatMap(([k, v]) => [...(k.includes(".") ? [`${path}/${k}`] : []), ...dotted(v, `${path}/${k}`)]) : []);
+const spyWarnings = () => { const lines = [], real = ui.notifications.warn; ui.notifications.warn = text => lines.push(text); return { lines, restore: () => { ui.notifications.warn = real; } }; };
+const DAMAGED_LEDGER = { v: 1, items: { [A]: "not an entry", "Compendium.pf2e.equipment-srd.Item.CCCCCCCCCCCCCCCC": { tags: 7 } } };
+
+test("DAMAGED LEDGER: kept once as a JSON string in the backup setting, one warning, loaded as empty; a save then replaces it; a second damaged load keeps the FIRST copy", async () => {
+  const w = await tagWorld();
+  const spy = spyWarnings();
+  try {
+    await quietly(async () => {
+      env.values.tagLedger = structuredClone(DAMAGED_LEDGER);
+      const first = await as(w.gm, async () => { const r = loadLedger(); await r.backedUp; return r; });
+      assert.ok(first.problems.length, "it failed validation");
+      assert.deepEqual(getLedger().items, {}, "loaded as empty, as before");
+      assert.equal(typeof env.values.tagBackup.ledger, "string");
+      assert.deepEqual(JSON.parse(env.values.tagBackup.ledger), DAMAGED_LEDGER, "the backup holds the original");
+      assert.deepEqual(dotted(env.values.tagBackup), [], "no object key anywhere in the backup has a dot (the uuid is inside the string)");
+      assert.equal(spy.lines.length, 1);
+      assert.match(spy.lines[0], /tag ledger is damaged/);
+      // saving a tag replaces the damaged ledger in the world, as before
+      await as(w.gm, () => api().tags.setEntry(A, { tags: ["venom-tooth"], tier: 2, name: "Item A" }));
+      assert.deepEqual(Object.keys(decodeLedger(env.values.tagLedger).items), [A]);
+      assert.deepEqual(JSON.parse(env.values.tagBackup.ledger), DAMAGED_LEDGER, "the backup still holds the original");
+      // a second damaged load never replaces the backup
+      env.values.tagLedger = { v: 1, items: { other: 3 } };
+      const second = await as(w.gm, async () => { const r = loadLedger(); await r.backedUp; return r; });
+      assert.deepEqual(await second.backedUp, { kept: false });
+      assert.deepEqual(JSON.parse(env.values.tagBackup.ledger), DAMAGED_LEDGER, "the FIRST damaged value is still the one kept");
+      assert.equal(spy.lines.length, 2, "one warning per damaged load");
+    });
+  } finally { spy.restore(); }
+});
+
+test("DAMAGED CAPS: the same, under its own key; the ledger's backup is untouched; a healthy load keeps nothing and says nothing", async () => {
+  const w = await tagWorld();
+  const spy = spyWarnings();
+  try {
+    await quietly(async () => {
+      await as(w.gm, async () => { env.values.tagLedger = structuredClone(DAMAGED_LEDGER); await loadLedger().backedUp; });
+      env.values.tagCaps = { v: 1, roles: { nonsense: { maxTier: 9 } } };
+      const r = await as(w.gm, async () => { const x = loadCaps(); await x.backedUp; return x; });
+      assert.ok(r.problems.length);
+      assert.deepEqual(JSON.parse(env.values.tagBackup.caps), { v: 1, roles: { nonsense: { maxTier: 9 } } });
+      assert.deepEqual(JSON.parse(env.values.tagBackup.ledger), DAMAGED_LEDGER, "the ledger backup is still there");
+      assert.deepEqual(Object.keys(env.values.tagBackup).sort(), ["caps", "ledger"]);
+      assert.equal(getCaps().basePower.maxTier, 5, "the defaults apply");
+      const before = spy.lines.length;
+      await as(w.gm, () => api().tags.setCaps({ v: 1, roles: { basePower: { maxTier: 2 } } }));
+      const healthy = loadCaps();
+      assert.equal(healthy.backedUp, undefined);
+      assert.equal(spy.lines.length, before, "a healthy load says nothing");
+    });
+  } finally { spy.restore(); }
+});
