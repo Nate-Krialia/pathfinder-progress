@@ -21,6 +21,9 @@ test("ENTRY: an ApplicationV1 item sheet gets exactly one GM-only Item tags butt
   as(gm, () => handlers.get(V1_HOOK)({ item, element: { 0: {}, length: 1 } }, v1));
   as(gm, () => handlers.get(V1_HOOK)({ item }, v1));
   assert.deepEqual(v1.filter(b => b.class === "pfp-item-tags").map(b => [b.label, typeof b.onclick]), [["Item tags", "function"]], "exactly one, never twice");
+  const mine = v1.find(b => b.class === "pfp-item-tags");
+  assert.doesNotMatch(mine.class, /\s/, "the class is ONE token: V1 finds a clicked button with classList.contains(button.class), which a class with a space never matches");
+  assert.equal(`header-button control ${mine.class}`.split(" ").includes(mine.class), true, "the drawn anchor's class list holds the button object's class");
   const player = [{ class: "close" }];
   as(testUser, () => handlers.get(V1_HOOK)({ item }, player));
   assert.equal(player.length, 1, "a Player gets none");

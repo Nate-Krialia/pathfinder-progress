@@ -36,9 +36,10 @@ const sink = async fn => {
  * What the real window sits in: scene controls with the module's button drawn (when the module's hook put the tool in), items that know their own uuid and have a sheet. `v2: false` makes the sheet an old-style
  * (ApplicationV1-like) one with a jQuery-like element that fires get<Class>HeaderButtons for its class chain (`v1Hooks: false` makes it fire nothing, the case the gate must report with its cause); `button: false` leaves the scene-controls button undrawn.
  */
-function fakeWindowWorld({ v2 = true, button = true, v1Hooks = true } = {}) {
+function fakeWindowWorld({ v2 = true, button = true, v1Hooks = true, v1BindMs = 500 } = {}) {
   const { ApplicationV2 } = foundry.applications.api;
   const gm = getUsers().gm;
+  globalThis.jQuery = { fn: { jquery: "3.7.1" }, _data: (el, type) => (type === "events" ? el.__events : undefined) };
   const controls = { tokens: { tools: { select: { name: "select" } } } };
   Hooks.events = new Proxy({}, { get: (_, name) => listeners[name] ?? undefined, ownKeys: () => Object.keys(listeners), getOwnPropertyDescriptor: (_, name) => (name in listeners ? { enumerable: true, configurable: true, value: listeners[name] } : undefined) });
   return as(gm, async () => {
@@ -57,10 +58,17 @@ function fakeWindowWorld({ v2 = true, button = true, v1Hooks = true } = {}) {
           constructor: { name: "FakeEquipmentSheet" }, item, document: item, rendered: false, element: null,
           _getHeaderButtons() { const list = [{ class: "close", label: "Close" }]; if (v1Hooks) for (const cls of chain) for (const fn of listeners[`get${cls}HeaderButtons`] ?? []) fn(sheet, list); return list; },
           async render() {
-            const root = document.createElement("div");
-            root.innerHTML = `<header class="window-header">${sheet._getHeaderButtons().map((b, i) => `<a class="header-button ${b.class}" data-i="${i}">${b.label ?? ""}</a>`).join("")}</header>`;
+            // Foundry's V1 window (as the gate's real run shows it): a header button is drawn as <a class="header-button control {class}">, the click handler is bound a little AFTER the draw (v1BindMs),
+            // and a click finds its button object by `classList.contains(button.class)`; a class with a space in it never matches.
             const buttons = sheet._getHeaderButtons();
-            root.querySelectorAll(".header-button").forEach(a => a.addEventListener("click", () => buttons[Number(a.dataset.i)].onclick?.()));
+            const root = document.createElement("div");
+            root.innerHTML = `<header class="window-header">${buttons.map(b => `<a class="header-button control ${b.class}">${b.label ?? ""}</a>`).join("")}</header>`;
+            const bind = () => root.querySelectorAll(".header-button").forEach(a => {
+              const handler = event => { event.preventDefault?.(); buttons.find(b => a.classList.contains(b.class)).onclick(event); };
+              a.addEventListener("click", handler);
+              a.__events = { click: [handler] };
+            });
+            setTimeout(bind, v1BindMs).unref?.();
             sheet.element = { 0: root, length: 1, find: sel => root.querySelectorAll(sel) };
             sheet.rendered = true;
           },
@@ -182,7 +190,7 @@ test("GATE 23 Step 4 on an ApplicationV1 sheet that fires no header hook: a clea
     assert.match(out, /FAILED/);
     const line = results.lines4.find(l => /^FAIL: the item sheet shows the module's header button/.test(l));
     assert.ok(line, results.lines4.join("\n"));
-    assert.match(line, /"sheetClass":"FakeEquipmentSheet".*"isApplicationV2":false.*"elementIsJQuery":true.*"headerButtonsV1":\["close"\],"headerButtonsDrawn":\[\{"tag":"a","class":"header-button close".*"headerHooksRegistered":\{[^}]*"getItemSheetHeaderButtons":\d/, "the cause is printed in full");
+    assert.match(line, /"sheetClass":"FakeEquipmentSheet".*"isApplicationV2":false.*"elementIsJQuery":true.*"headerButtonsV1":\["close"\],"headerButtonsDrawn":\[\{"tag":"a","class":"header-button control close".*"headerHooksRegistered":\{[^}]*"getItemSheetHeaderButtons":\d/, "the cause is printed in full");
     await runBlock(7, gm);
   });
 });
@@ -254,6 +262,38 @@ test("GATE 23 Step 4: a window that is only in ui.windows (ApplicationV1 list) i
       assert.match(lines, /PASS: clicking it opens the Item tags window/, lines);
       assert.match(lines, /"list":"ui\.windows","id":"9","cls":"[^"]*","title":"Item tags"/, "the V1 list is printed with the window's class and title");
     } finally { proto.render = realRender; for (const w of Object.values(ui.windows)) await w.close?.(); delete ui.windows; }
+    await runBlock(7, gm);
+  });
+});
+
+test("GATE 23 Step 4: the report prints the drawn class, the button object's class and classList.contains (true), and how long after the draw the click was made; the class is ONE token", async () => {
+  const { gm, results, play } = await playGate({ v2: false });
+  await quietly(async () => {
+    await runBlock(2, gm);
+    assert.equal(await play(4, "gm"), "ALL PASS", results.lines4.join("\n"));
+    const line = results.lines4.find(l => /^REPORT the button's class and the timing: /.test(l));
+    assert.ok(line, results.lines4.join("\n"));
+    const c = JSON.parse(line.replace(/^REPORT the button's class and the timing: /, ""));
+    assert.equal(c.buttonClassAttribute, "header-button control pfp-item-tags");
+    assert.equal(c.buttonObjectClass, "pfp-item-tags");
+    assert.doesNotMatch(c.buttonObjectClass, /\s/, "a single token");
+    assert.equal(c.classListContainsButtonObjectClass, true);
+    assert.ok(c.msSinceDrawAtClick >= 1200, `the click waited for the window's own handlers: ${c.msSinceDrawAtClick} ms`);
+    const data = JSON.parse(results.lines4.find(l => /^REPORT what the click did: /.test(l)).replace(/^REPORT what the click did: /, ""));
+    assert.equal(data.handler.jqueryClickHandlers, 1);
+    await runBlock(7, gm);
+  });
+});
+
+test("GATE 23 Step 4: when Foundry never binds the header click, the report says so (no handlers, the class check true, the wait) and the step FAILs cleanly", async () => {
+  const { gm, results, play } = await playGate({ v2: false, v1BindMs: 600000 });
+  await quietly(async () => {
+    await runBlock(2, gm);
+    assert.match(await play(4, "gm"), /FAILED/);
+    const line = results.lines4.find(l => /^FAIL: clicking it opens the Item tags window/.test(l));
+    assert.ok(line, results.lines4.join("\n"));
+    assert.match(line, /"classCheck":\{"buttonClassAttribute":"header-button control pfp-item-tags","buttonObjectClass":"pfp-item-tags","classListContainsButtonObjectClass":true/);
+    assert.match(line, /"jqueryClickHandlers":null/);
     await runBlock(7, gm);
   });
 });

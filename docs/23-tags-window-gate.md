@@ -140,6 +140,7 @@ await (async () => {
 - Run the block below in the GM window. It opens the real sheet of **Gate G23 Charm**, looks for the module's header button, clicks it and checks the Item tags window opens aimed at that item.
 - You should see: `PASS:` lines and `ALL PASS`.
 - You should see: one `REPORT what the click did:` line on every run: the button's attributes, its click handler, the windows from `foundry.applications.instances` AND `ui.windows` (class and title) before the click and 0, 1 and 3 seconds after, and every console debug, warning and error line meanwhile.
+- You should see: a line `REPORT the button's class and the timing:` with the drawn button's exact `class` attribute, the button object's `class`, whether `classList.contains` of that class is true on the drawn button, and how many milliseconds after the sheet drew the click was made.
 - You should see: the same line also covers a direct call of the button's own `onclick`: what it returned, the windows around it, and the item name, uuid and type the module resolved (its `console.debug` lines).
 - If the button is missing, the FAIL line prints which sheet class opened, whether it is an ApplicationV2, the header buttons as drawn, and the hooks Foundry has registered for header controls: that shows the cause. PF2e's item sheets are ApplicationV1: the module adds its button through `getItemSheetHeaderButtons` there and through `getHeaderControlsApplicationV2` on an ApplicationV2 sheet.
 - The block closes the item sheet and the window before it ends.
@@ -156,6 +157,7 @@ await (async () => {
   const sheet = item.sheet;
   await sheet.render({ force: true });
   await g.until(() => sheet.rendered && sheet.element);
+  const renderedAt = Date.now();
   const isV2 = sheet instanceof foundry.applications.api.ApplicationV2;
   const controls = typeof sheet._getHeaderControls === "function" ? sheet._getHeaderControls().map(c => c.action ?? c.label ?? "?") : null;
   const v1Buttons = typeof sheet._getHeaderButtons === "function" ? sheet._getHeaderButtons().map(b => b.class ?? b.label ?? "?") : null;
@@ -176,9 +178,12 @@ await (async () => {
   const show = list => list.map(({ list: l, id, cls, title }) => ({ list: l, id, cls, title }));
   const taggerOpen = () => listWindows().find(isTagger) ?? null;
   const buttonObject = typeof sheet._getHeaderButtons === "function" ? sheet._getHeaderButtons().find(b => b.class === "pfp-item-tags") ?? null : null;
+  await sleep(Math.max(0, 1200 - (Date.now() - renderedAt)));      // a real person clicks well after the sheet has drawn; Foundry's V1 window may bind its header-button clicks a moment after drawing, so the click waits at least 1.2 s
   let jq = null;
   try { jq = (globalThis.jQuery ?? globalThis.$)?._data?.(button, "events") ?? null; } catch (e) { jq = { error: String(e) }; }
   const drawnButton = { tag: button.tagName.toLowerCase(), attributes: Object.fromEntries([...button.attributes].map(a => [a.name, a.value])), text: button.textContent.trim() };
+  const jqLib = globalThis.jQuery ?? globalThis.$;
+  const classCheck = { buttonClassAttribute: button.getAttribute("class"), buttonObjectClass: buttonObject?.class ?? null, classListContainsButtonObjectClass: buttonObject ? button.classList.contains(buttonObject.class) : null, jQueryGlobal: typeof globalThis.jQuery, dollarGlobal: typeof globalThis.$, jqueryVersion: jqLib?.fn?.jquery ?? null, msSinceDrawAtReport: Date.now() - renderedAt };
   const handler = { jqueryEventTypes: jq ? Object.keys(jq) : null, jqueryClickHandlers: jq?.click?.length ?? null, nativeOnclickProperty: typeof button.onclick, buttonObjectFound: Boolean(buttonObject), buttonObjectOnclick: typeof buttonObject?.onclick, buttonObjectKeys: buttonObject ? Object.keys(buttonObject) : null };
   const said = [];
   const real = { error: console.error, warn: console.warn, debug: console.debug };
@@ -192,7 +197,7 @@ await (async () => {
   const click = await timeline();
   let direct = null;
   try {
-    await sample(click, () => button.click());
+    await sample(click, () => { classCheck.msSinceDrawAtClick = Date.now() - renderedAt; button.click(); });
     // The button's own onclick, called directly with a fake click event: what it returns, and what the windows do. Printed on every run, so a click that never reaches the handler and a handler that opens nothing can be told apart.
     direct = await timeline();
     const fakeEvent = { type: "click", preventDefault() {} };
@@ -213,7 +218,8 @@ await (async () => {
   const draft = app?.ui?.draft ?? null;
   const inEither = list => list.some(w => isTagger(w));
   const clickOpened = inEither(click["0s"]) || inEither(click["1s"]) || inEither(click["3s"]);
-  const clickReport = { drawnButton, handler, windowsAroundTheClick: click, windowsAroundTheDirectCall: direct, directCallReturned: direct.returned, consoleDuringBoth: said, openedFor: draft ? { name: draft.name, uuid: draft.uuid } : null, itemExpected: { name: item.name, uuid: item.uuid, type: item.type } };
+  const clickReport = { drawnButton, classCheck, handler, windowsAroundTheClick: click, windowsAroundTheDirectCall: direct, directCallReturned: direct.returned, consoleDuringBoth: said, openedFor: draft ? { name: draft.name, uuid: draft.uuid } : null, itemExpected: { name: item.name, uuid: item.uuid, type: item.type } };
+  console.log(`REPORT the button's class and the timing: ${JSON.stringify(classCheck)}`);
   console.log(`REPORT what the click did: ${JSON.stringify(clickReport)}`);
   g.check("clicking it opens the Item tags window (found in foundry.applications.instances or ui.windows; everything the click and a direct call did is printed)", clickOpened, JSON.stringify(clickReport));
   g.check("calling the button's own onclick directly opens it too (a diagnostic; printed above)", inEither(direct["0s"]) || inEither(direct["1s"]) || inEither(direct["3s"]), JSON.stringify({ directCallReturned: direct.returned, windows: direct["3s"] }));
