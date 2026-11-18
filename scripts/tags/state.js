@@ -243,16 +243,6 @@ export async function freezeCraft(plan) {
   return { id, undo: () => removeFrozen(id) };
 }
 
-/** GM: put a frozen result back (a crafted ingredient came back out of escrow; the hook had removed its record when the item left the bag). */
-export async function restoreFrozen(id, record) {
-  if (!game.user?.isGM || !id || !record) return false;
-  return changeFrozen(draft => {
-    if (draft.items[id]) return skip(false);
-    draft.items[id] = structuredClone(record);
-    return { result: true };
-  });
-}
-
 /** GM: mark a frozen result as held while its item waits in a queued craft's escrow, so the item leaving the bag (or a prune) does not drop it. The record stays in the GM-only store: it is never copied into the queued action (an actor flag). */
 export async function holdFrozen(id) {
   if (!game.user?.isGM || !id) return null;

@@ -183,3 +183,44 @@ test("3b: nothing about inheritance reaches a player (passCap, inherited tags, t
   const payloads = { definitions: text(registry), queue: text(rows), compendium: text(await as(w.annUser, () => api().compendium.view(w.ann))), actorFlags: text(w.ann.rawFlags()), itemFlags: text(blade.flags[M]), chat: text(env.chat) };
   assert.deepEqual(findCanaries(payloads, C), []);
 });
+
+// A commission craft that consumes a crafted ingredient (stage 1 finding 4) ---------------------------------------------------------------------
+/** Ann holds a crafted dagger; the GM issues a commission (NPC patron, Ann supplies her own stock) whose mount slot takes the dagger. Deleting the dagger fires the deleteItem hook, as Foundry does. */
+async function commissionUsingTheDagger() {
+  const w = await nestedWorld();
+  const dagger = await craftDagger(w);
+  const id = dagger.getFlag(M, "crafted").freezeId;
+  const realDelete = dagger.delete.bind(dagger);
+  dagger.delete = async () => { await realDelete(); await fireHookAs(w.gm, "deleteItem", [dagger]); };
+  const { commission } = await as(w.gm, () => api().commissions.issue({ patron: "Old Brannock", crafter: w.ann, recipe: "mount-blade", selection: { edge: "iron", mount: ref(id) }, payout: 1 }));
+  await as(w.gm, () => api().commissions.accept(commission.id));
+  return { w, dagger, id, commission };
+}
+const carriers = (w, id) => w.ann.items.filter(i => i.getFlag(M, "crafted")?.freezeId === id);
+
+test("COMMISSION ROLLBACK: when the commission craft fails AFTER it consumed the crafted dagger, the dagger comes back WITH its frozen record, not held, and no record is left behind", async () => {
+  const { w, id, commission } = await commissionUsingTheDagger();
+  const realUpdate = w.ann.update;
+  w.ann.update = async () => { throw new Error("boom: the crafter could not be updated"); };      // the step after the items and gold moved
+  try {
+    await assert.rejects(as(w.gm, () => api().commissions.craft(commission.id, { degree: "success", gateChecked: true })), /boom/);
+  } finally { w.ann.update = realUpdate; }
+  assert.equal(carriers(w, id).length, 1, "the dagger is back in the bag");
+  assert.ok(env.values.tagCrafted.items[id], "and its frozen record is still there (the hook dropped it while the item was out, before)");
+  assert.equal(env.values.tagCrafted.items[id].held, undefined, "no hold is left on it");
+  assert.deepEqual(Object.keys(env.values.tagCrafted.items), [id], "and it is the only record");
+  assert.equal(api().commissions.get(commission.id).status, "accepted", "the commission is still open");
+  // the dagger is still a working ingredient
+  const pv = await as(w.gm, () => api().previewCraft(w.ann, "mount-blade", { edge: "iron", mount: ref(id) }, "oakhaven-forge"));
+  assert.ok(pv.ok, pv.errors?.join(" | "));
+});
+
+test("COMMISSION SUCCESS: the used-up crafted dagger takes its record with it and nothing is left held", async () => {
+  const { w, id, commission } = await commissionUsingTheDagger();
+  await as(w.gm, () => api().commissions.craft(commission.id, { degree: "success", gateChecked: true }));
+  assert.equal(carriers(w, id).length, 0, "the dagger was used up");
+  assert.equal(env.values.tagCrafted.items[id], undefined, "so its record went");
+  const records = Object.values(env.values.tagCrafted?.items ?? {});
+  assert.equal(records.length, 0, "an NPC patron takes no item, so nothing new is frozen either");
+  assert.ok(records.every(r => !r.held), "and nothing is left held");
+});

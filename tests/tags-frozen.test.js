@@ -242,9 +242,7 @@ test("FROZEN LOCK: no function that holds the lock calls another that takes it (
     assert.equal(await tagState.releaseFrozen(r.id), true);
     await tagState.holdFrozen(r.id);
     await hold.undo();                                   // the hold was taken fresh, so undoing it releases it again
-    assert.equal(await tagState.restoreFrozen(r.id, { recipeId: "dup" }), false, "an existing record is not replaced");
     assert.deepEqual(await tagState.pruneFrozen(), { removed: [r.id] }, "no item carries it, and it is not held now");
-    assert.equal(await tagState.restoreFrozen(r.id, { recipeId: "back", name: "Back" }), true);
     await r.undo();
     return Object.keys(env.values.tagCrafted.items);
   });
