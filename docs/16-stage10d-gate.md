@@ -463,6 +463,7 @@ await (async () => {
 // [Player] Gate Friend has never held Gate Ore: the baseline shows the slot, the tier needed and the effect, not the material's name.
 await (async () => {
   const p = globalThis.__p4 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
+  await p.until(() => p.api.compendium.view(p.friend).entries.experiments.some(e => e.recipeId === "g4-axe"));   // the GM's step 19 reaches this window as a later update: wait for the Axe entry (the checks say what was read if it never came)
   const axe = p.api.compendium.view(p.friend).entries.experiments.find(e => e.recipeId === "g4-axe");
   p.check("the Gate Axe entry exists with its baseline", axe?.baseline?.baseTier === 1, JSON.stringify(axe?.baseline));
   p.check("the slot, the tier it needs and the effect are shown", axe?.baseline?.slots?.[0]?.slot === "head" && axe.baseline.slots[0].needs === "tier 1 or higher" && axe.baseline.slots[0].effects.basePower === "T1");

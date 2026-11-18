@@ -204,3 +204,19 @@ test("GATE 16 step 14: what the GM's step 13 craft taught reaches the Player's w
     assert.ok(player.lines.some(l => /^FAIL: both effects are known, learned by crafting/.test(l)), player.lines.join("\n"));
   } finally { finish16(); }
 });
+
+test("GATE 16 step 20: the Gate Axe entry the GM's step 19 research made reaches the Player's window later; the step waits for it (and fails without the wait)", async () => {
+  const { testUser } = await playGate16({ stopBefore: 20, echoFrom: 19, echoActor: "Gate Friend" });
+  try {
+    const player = await runCollecting(GATE16.get(20), testUser);
+    assert.equal(player.value, "ALL PASS", player.lines.join("\n"));
+  } finally { finish16(); }
+  const again = await playGate16({ stopBefore: 20, echoFrom: 19, echoActor: "Gate Friend" });
+  try {
+    const noWait = GATE16.get(20).replace(/  await p\.until\([^\n]*\n/, "");
+    assert.notEqual(noWait, GATE16.get(20), "the mutation changed the block");
+    const player = await runCollecting(noWait, again.testUser);
+    assert.notEqual(player.value, "ALL PASS");
+    assert.ok(player.lines.some(l => /^FAIL: the Gate Axe entry exists with its baseline/.test(l)), player.lines.join("\n"));
+  } finally { finish16(); }
+});
