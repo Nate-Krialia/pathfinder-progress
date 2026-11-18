@@ -89,3 +89,42 @@ test("DAMAGED EDITOR STORE: a store with an unknown outer shape is not wiped by 
     assert.deepEqual(JSON.parse(env.values.tagBackup.editor), odd);
   });
 });
+
+// Import refuses what the loader would reject, and an edit of nothing (1b #11) -------------------------------------------------------
+import { BUNDLE_FORMAT, planImport } from "../scripts/editor/exchange.js";
+import { emptyStore } from "../scripts/editor/layer.js";
+const bundleOf = records => ({ format: BUNDLE_FORMAT, v: 1, records });
+const newTag = id => ({ kind: "tag", id, mode: "new", fields: { name: "T", theme: "t" } });
+
+test("IMPORT: an id with a dot, capitals, a space or no text is refused before anything is stored (the whole bundle imports nothing)", () => {
+  for (const id of ["iron.x", "Iron", "has space", "", 5, null, "__proto__.x"]) {
+    const plan = planImport(bundleOf([newTag("fine"), newTag(id)]), emptyStore(), {});
+    assert.match(plan.problems.join(" "), /Record 2 has an id that cannot be used/, `id ${JSON.stringify(id)}`);
+  }
+  assert.deepEqual(planImport(bundleOf([newTag("fine-1"), newTag("fine_2")]), emptyStore(), {}).problems, [], "ordinary slugs are fine");
+  // a patch with a dotted id is refused the same way (it used to be stored as a leftover under a dotted key)
+  const patch = { kind: "material", id: "iron.x", mode: "patch", fields: { name: "X" } };
+  assert.match(planImport(bundleOf([patch]), emptyStore(), { definedIds: new Set(["material:iron.x"]) }).problems.join(" "), /cannot be used/);
+});
+
+test("IMPORT: an edit of a definition that does not exist here is refused (skipped with its reason), never stored as a leftover; an edit of one that exists is accepted", async () => {
+  const gone = { kind: "material", id: "no-such-metal", mode: "patch", fields: { name: "X" } };
+  const iron = { kind: "material", id: "iron", mode: "patch", fields: { name: "Cold Iron" } };
+  const plan = planImport(bundleOf([gone, iron]), emptyStore(), { definedIds: new Set(["material:iron"]) });
+  assert.deepEqual(plan.skip, [{ key: "material:no-such-metal", reason: "edits a definition that does not exist in this world" }]);
+  assert.deepEqual(plan.add.map(r => r.id), ["iron"]);
+  assert.deepEqual(plan.problems, []);
+  // through the editor: nothing is written for the missing one and no leftover appears
+  const w = await editorWorld();
+  await quietly(async () => {
+    const result = await as(w.gm, () => api().editor.importRecords(bundleOf([gone])));
+    assert.deepEqual(result.added, []);
+    assert.equal(result.skipped[0].reason, "edits a definition that does not exist in this world");
+    assert.equal(env.values.editorDefinitions, undefined, "the setting was not written");
+    assert.deepEqual(api().editorLeftovers, [], "and no leftover was made");
+    const ok = await as(w.gm, () => api().editor.importRecords(bundleOf([iron])));
+    assert.deepEqual(ok.added, ["material:iron"]);
+    assert.equal(env.values.editorDefinitions.records["material:iron"].fields.name, "Cold Iron");
+    await assert.rejects(as(w.gm, () => api().editor.importRecords(bundleOf([{ ...gone, id: "a.b" }]))), /cannot be used/);
+  });
+});
