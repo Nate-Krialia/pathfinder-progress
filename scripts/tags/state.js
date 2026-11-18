@@ -8,10 +8,10 @@ import * as adapter from "../adapter/pf2e.js";
 import { logWorldEvent } from "../audit/store.js";
 import { craftedId, decodeLedger, effectiveTags, effectiveTier, emptyLedger, encodeLedger, entryProblems, isCraftedRef, ledgerProblems, slotFit } from "./ledger.js";
 import { getCaps, getCapsTable, getFrozenStore, getLimits, getLedger, setCurrentCaps, setCurrentFrozen, setCurrentLedger } from "./current.js";
-import { emptyFrozen, frozenProblems, recordFromPlan } from "./frozen.js";
+import { emptyFrozen, frozenProblems, recordFromPlan, salvageFrozen } from "./frozen.js";
 import { capsProblems } from "./stack.js";
 import { withLock } from "../queue/lock.js";
-import { BACKUP_LOCK, reportDamaged } from "../backup.js";
+import { BACKUP_LOCK, backUpOnce, reportDamaged } from "../backup.js";
 import { afterSave } from "../after-save.js";
 import { craftedRef } from "./ledger.js";
 
@@ -33,12 +33,11 @@ const requireGM = what => { if (!game.user?.isGM) throw new Error(`${what}: GM o
  */
 export { BACKUP_LOCK };
 const BACKUP_WHAT = { ledger: "tag ledger", caps: "tag caps table", frozen: "frozen craft store" };
-function reportDamagedTag(kind, problems, raw) {
-  const loadedAs = kind === "caps" ? "the defaults" : "empty";
+function reportDamagedTag(kind, problems, raw, loadedAs = kind === "caps" ? "as the defaults" : "as empty", nextStep = "the next save replaces the damaged one") {
   return reportDamaged({
     kind, what: BACKUP_WHAT[kind], raw, problems,
-    consoleText: `the saved ${BACKUP_WHAT[kind]} is damaged, so it was loaded as ${loadedAs}:`,
-    note: `The saved ${BACKUP_WHAT[kind]} is damaged and was loaded as ${loadedAs}. A copy of the damaged data is kept once in the "${TAGS.backupSetting}" world setting; the next save replaces the damaged one.`
+    consoleText: `the saved ${BACKUP_WHAT[kind]} is damaged, so it was loaded ${loadedAs}:`,
+    note: `The saved ${BACKUP_WHAT[kind]} is damaged and was loaded ${loadedAs}. A copy of the damaged data is kept once in the "${TAGS.backupSetting}" world setting; ${nextStep}.`
   });
 }
 
@@ -197,17 +196,45 @@ export async function setSlotNeeds(api, recipeId, slotName, needs) {
 
 // Frozen craft results (Slice 2b) ------------------------------------------------------------------------------------------------
 /**
- * GM, at ready: read the GM-only record of what crafted items were made of. A damaged one is kept ONCE as a backup (scripts/backup.js, key "frozen"), the GM is told once per damaged load,
- * and it is treated as empty (the module keeps working: crafted items whose record is missing fall back quietly, as for any missing record). The next freeze replaces the damaged setting,
- * which is why the raw copy is taken first.
+ * GM, at ready: read the GM-only record of what crafted items were made of. A damaged store is kept ONCE as a backup (scripts/backup.js, key "frozen") and the GM is told once per damaged
+ * load. Only the damaged RECORDS are left out: every sound record is kept, so one bad record does not take the crafted items' effects with it (a crafted item whose record is missing falls
+ * back quietly, as for any missing record). A store whose outer shape is unknown has nothing to salvage and loads empty. The setting itself is not touched until the next freeze or
+ * api.tags.repairFrozen() writes the sound records back; the raw copy is taken first.
  */
 export function loadFrozen() {
   if (!game.user?.isGM) { setCurrentFrozen(emptyFrozen()); return { problems: [] }; }
   const raw = game.settings.get(MODULE_ID, TAGS.frozenSetting);
   if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0)) { setCurrentFrozen(emptyFrozen()); return { problems: [] }; }
   const problems = frozenProblems(raw);
-  setCurrentFrozen(problems.length ? emptyFrozen() : structuredClone(raw));
-  return problems.length ? { problems, backedUp: reportDamagedTag("frozen", problems, raw) } : { problems };
+  if (!problems.length) { setCurrentFrozen(structuredClone(raw)); return { problems }; }
+  const fixed = salvageFrozen(raw);
+  setCurrentFrozen(fixed.store);
+  const kept = Object.keys(fixed.store.items).length;
+  const backedUp = fixed.usable
+    ? reportDamagedTag("frozen", problems, raw, `without ${fixed.dropped.length} damaged record${fixed.dropped.length === 1 ? "" : "s"} (${kept} sound one${kept === 1 ? " was" : "s were"} kept)`, "api.tags.repairFrozen() or the next craft saves the sound ones")
+    : reportDamagedTag("frozen", problems, raw);
+  return { problems, kept, dropped: fixed.dropped, backedUp };
+}
+
+/**
+ * GM: put a damaged saved frozen store right by writing back only its sound records (the damaged ones are in the backup, kept first). Nothing to do for a healthy store. A store with an
+ * unknown outer shape cannot be salvaged record by record: that is refused unless `{ reset: true }` (it then starts empty; the raw copy stays in the backup).
+ * Lock: tagCrafted (a leaf lock), like every other change to the store.
+ */
+export async function repairFrozen({ reset = false } = {}) {
+  requireGM("tags.repairFrozen");
+  return withLock(FROZEN_LOCK, async () => {
+    const raw = game.settings.get(MODULE_ID, TAGS.frozenSetting);
+    if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0) || !frozenProblems(raw).length) return { repaired: false, dropped: [] };
+    await backUpOnce("frozen", raw, BACKUP_WHAT.frozen);
+    const fixed = salvageFrozen(raw);
+    if (!fixed.usable && !reset) throw new TagError("The saved frozen craft results have an unknown shape, so there is nothing to salvage record by record. A copy is kept in the \"tagBackup\" setting. api.tags.repairFrozen({ reset: true }) starts the store empty.");
+    await writeFrozen(fixed.store);
+    return { repaired: true, dropped: fixed.dropped };
+  }).then(async result => {
+    if (result.repaired) await afterSave("the frozen store repair", [["writing the audit log line", () => logWorldEvent(`tags: repaired the saved frozen craft results (dropped ${result.dropped.length})`)]]);
+    return result;
+  });
 }
 
 /**

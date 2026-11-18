@@ -435,6 +435,7 @@ Hooks.once("ready", async () => {
       removeTagOverride: (recipeId, tagId, slotKind) => tagState.setTagOverride(api, recipeId, tagId, slotKind, null),
       frozen: freezeId => tagState.frozenResult(freezeId),
       pruneFrozen: () => tagState.pruneFrozen(),
+      repairFrozen: options => tagState.repairFrozen(options),
       caps: () => tagState.capsNow(),
       setCaps: table => tagState.setCaps(table),
       open: () => openTagger(api)

@@ -12,12 +12,26 @@ export const emptyFrozen = () => ({ v: 1, items: {} });
 
 const isObject = v => v !== null && typeof v === "object" && !Array.isArray(v);
 
+const recordDamaged = rec => !isObject(rec) || typeof rec.recipeId !== "string" || !isObject(rec.roles);
+const hasItems = store => isObject(store) && store.v === 1 && isObject(store.items);
+
 /** What a stored frozen store must look like; a damaged one is an error to show, never silently replaced. */
 export function frozenProblems(store) {
-  if (!isObject(store) || store.v !== 1 || !isObject(store.items)) return ["the saved frozen craft results have an unknown shape"];
+  if (!hasItems(store)) return ["the saved frozen craft results have an unknown shape"];
   const problems = [];
-  for (const [id, rec] of Object.entries(store.items)) if (!isObject(rec) || typeof rec.recipeId !== "string" || !isObject(rec.roles)) problems.push(`the frozen result "${id}" is damaged`);
+  for (const [id, rec] of Object.entries(store.items)) if (recordDamaged(rec)) problems.push(`the frozen result "${id}" is damaged`);
   return problems;
+}
+
+/**
+ * The sound records of a damaged store, and the ids of the damaged ones: { usable, store, dropped }. A store whose OUTER shape is unknown has nothing to salvage record by record:
+ * `usable` is false and the store comes back empty.
+ */
+export function salvageFrozen(raw) {
+  if (!hasItems(raw)) return { usable: false, store: emptyFrozen(), dropped: [] };
+  const items = {}, dropped = [];
+  for (const [id, rec] of Object.entries(raw.items)) { if (recordDamaged(rec)) dropped.push(id); else items[id] = structuredClone(rec); }
+  return { usable: true, store: { v: 1, items }, dropped };
 }
 
 /** The record to store for a plan, or null when the craft has no tagged slot (an old craft is not frozen). */
