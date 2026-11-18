@@ -212,3 +212,58 @@ test("SAVED AND PUBLISHED: nothing to warn about when both steps work", async ()
     assert.deepEqual([spy.console, spy.notes], [[], []]);
   } finally { spy.restore(); }
 });
+
+// A damaged frozen store is backed up once too (round 2, stage 1 finding 7 remainder) ----------------------------------------------------
+import { loadFrozen } from "../scripts/tags/state.js";
+import * as tagState from "../scripts/tags/state.js";
+import { getFrozenStore } from "../scripts/tags/current.js";
+const DAMAGED_FROZEN = { v: 1, items: { abc123: { recipeId: "dagger", roles: {}, uses: [] }, "bad.one": "not a record", dmg: { recipeId: 7 } } };
+
+test("DAMAGED FROZEN STORE: kept once in the backup setting as a JSON string (a dotted key inside it never becomes an object key), one warning per load, loaded as empty; the next freeze replaces it and the backup keeps the original", async () => {
+  const w = await tagWorld();
+  const spy = spyWarnings();
+  try {
+    await quietly(async () => {
+      env.values.tagCrafted = structuredClone(DAMAGED_FROZEN);
+      const first = await as(w.gm, async () => { const r = loadFrozen(); await r.backedUp; return r; });
+      assert.ok(first.problems.length, "it failed validation");
+      assert.deepEqual(getFrozenStore().items, {}, "loaded as empty, as before");
+      assert.equal(typeof env.values.tagBackup.frozen, "string");
+      assert.deepEqual(JSON.parse(env.values.tagBackup.frozen), DAMAGED_FROZEN, "the backup holds the original");
+      assert.deepEqual(dotted(env.values.tagBackup), [], "no object key anywhere in the backup has a dot (the dotted key is inside the string)");
+      assert.equal(spy.lines.length, 1);
+      assert.match(spy.lines[0], /frozen craft store is damaged and was loaded as empty/);
+      // the next freeze replaces the damaged setting, as before
+      const frozen = await as(w.gm, () => tagState.freezeCraft({ frozen: { recipeId: "r-new", name: "New", tier: 2, native: [], inherited: [], uses: [], roles: {}, contributions: [] } }));
+      assert.deepEqual(Object.keys(env.values.tagCrafted.items), [frozen.id]);
+      assert.deepEqual(JSON.parse(env.values.tagBackup.frozen), DAMAGED_FROZEN, "the backup still holds the original");
+      // a second damaged load never replaces the backup
+      env.values.tagCrafted = { v: 1, items: { other: 3 } };
+      const second = await as(w.gm, async () => { const r = loadFrozen(); await r.backedUp; return r; });
+      assert.deepEqual(await second.backedUp, { kept: false });
+      assert.deepEqual(JSON.parse(env.values.tagBackup.frozen), DAMAGED_FROZEN, "the FIRST damaged value is still the one kept");
+      assert.equal(spy.lines.length, 2, "one warning per damaged load");
+      // a healthy store keeps nothing and says nothing
+      env.values.tagCrafted = { v: 1, items: {} };
+      assert.equal(as(w.gm, () => loadFrozen()).backedUp, undefined);
+      assert.equal(spy.lines.length, 2);
+    });
+  } finally { spy.restore(); }
+});
+
+test("DAMAGED FROZEN STORE: a second GM's damaged write read in through the settings echo is backed up the same way, and the backup keys of ledger, caps, frozen and editor sit side by side", async () => {
+  const w = await tagWorld();
+  const spy = spyWarnings();
+  try {
+    await quietly(async () => {
+      env.values.tagLedger = structuredClone(DAMAGED_LEDGER);
+      await as(w.gm, async () => { await loadLedger().backedUp; });
+      env.values.tagCrafted = structuredClone(DAMAGED_FROZEN);
+      await fireHookAs(w.gm, "updateSetting", [{ key: `${M}.tagCrafted` }]);        // the echo reloads it (finding 4's hook)
+      await new Promise(r => setTimeout(r, 30));
+      assert.deepEqual(JSON.parse(env.values.tagBackup.frozen), DAMAGED_FROZEN);
+      assert.deepEqual(JSON.parse(env.values.tagBackup.ledger), DAMAGED_LEDGER, "the ledger backup is untouched");
+      assert.deepEqual(Object.keys(env.values.tagBackup).sort(), ["frozen", "ledger"]);
+    });
+  } finally { spy.restore(); }
+});

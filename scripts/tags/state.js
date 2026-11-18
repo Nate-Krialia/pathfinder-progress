@@ -34,7 +34,7 @@ const requireGM = what => { if (!game.user?.isGM) throw new Error(`${what}: GM o
 export { BACKUP_LOCK };
 const BACKUP_WHAT = { ledger: "tag ledger", caps: "tag caps table", frozen: "frozen craft store" };
 function reportDamagedTag(kind, problems, raw) {
-  const loadedAs = kind === "ledger" ? "empty" : "the defaults";
+  const loadedAs = kind === "caps" ? "the defaults" : "empty";
   return reportDamaged({
     kind, what: BACKUP_WHAT[kind], raw, problems,
     consoleText: `the saved ${BACKUP_WHAT[kind]} is damaged, so it was loaded as ${loadedAs}:`,
@@ -196,14 +196,18 @@ export async function setSlotNeeds(api, recipeId, slotName, needs) {
 
 
 // Frozen craft results (Slice 2b) ------------------------------------------------------------------------------------------------
-/** GM, at ready: read the GM-only record of what crafted items were made of. A damaged one is reported and treated as empty. */
+/**
+ * GM, at ready: read the GM-only record of what crafted items were made of. A damaged one is kept ONCE as a backup (scripts/backup.js, key "frozen"), the GM is told once per damaged load,
+ * and it is treated as empty (the module keeps working: crafted items whose record is missing fall back quietly, as for any missing record). The next freeze replaces the damaged setting,
+ * which is why the raw copy is taken first.
+ */
 export function loadFrozen() {
   if (!game.user?.isGM) { setCurrentFrozen(emptyFrozen()); return { problems: [] }; }
   const raw = game.settings.get(MODULE_ID, TAGS.frozenSetting);
   if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0)) { setCurrentFrozen(emptyFrozen()); return { problems: [] }; }
   const problems = frozenProblems(raw);
   setCurrentFrozen(problems.length ? emptyFrozen() : structuredClone(raw));
-  return { problems };
+  return problems.length ? { problems, backedUp: reportDamagedTag("frozen", problems, raw) } : { problems };
 }
 
 /**
