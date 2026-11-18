@@ -18,6 +18,7 @@ import { buildRegistry } from "./build.js";
 import { exportBundle, planImport } from "./exchange.js";
 import { emptyStore, keyOf, repairStore } from "./layer.js";
 import { backUpOnce } from "../backup.js";
+import { afterSave } from "../after-save.js";
 import { withLock } from "../queue/lock.js";
 import { EDITOR_SETTING, readEditorStore, writeEditorStore } from "./setting.js";
 
@@ -78,9 +79,11 @@ async function commitStore(api, candidate) {
   await writeEditorStore(candidate);
   for (const [kind, id, rec] of memoryOnly) if (!built.registry[kind].has(id)) built.registry[kind].set(id, rec);
   install(api, built);
-  await api.publishDefinitions?.();
   return built;
 }
+
+/** After a change is saved and installed: tell the players the definitions changed and write the log line. A failure of either is a warning, never a failed save (see after-save.js). */
+const saved = (api, logText) => afterSave("the editor change", [["publishing the definitions to the players", () => api.publishDefinitions?.()], ...(logText ? [["writing the audit log line", () => logWorldEvent(logText)]] : [])]);
 
 /** Does this definition come from the packs or the editor (so an edit can be saved), as opposed to existing only in memory? */
 export const canEdit = (api, key) => isSaved(api, key);
@@ -109,8 +112,7 @@ async function repairIn(api, { reset = false } = {}) {
   const built = buildRegistry(base(api), fixed.store);
   for (const [kind, id, rec] of memoryOnly) if (!built.registry[kind].has(id)) built.registry[kind].set(id, rec);
   install(api, built);
-  await api.publishDefinitions?.();
-  await logWorldEvent(`editor: repaired the saved definitions (dropped ${fixed.dropped.length})`);
+  await saved(api, `editor: repaired the saved definitions (dropped ${fixed.dropped.length})`);
   return { repaired: true, dropped: fixed.dropped };
 }
 
@@ -203,7 +205,7 @@ async function createIn(api, kind, fields, { makeItem = true } = {}) {
   const record = api.definitions[kind].get(id);
   let item = null;
   if (makeItem && kind !== "tag") item = await adapter.createWorldItem(kind, record, { folder: await adapter.ensureItemFolder(kind === "material" ? "Materials" : "Notes") });
-  await logWorldEvent(`editor: created ${kind} "${record.name}"`);
+  await saved(api, `editor: created ${kind} "${record.name}"`);
   return { key: keyOf(kind, id), record, item };
 }
 
@@ -242,7 +244,7 @@ async function updateIn(api, key, fields, { confirmed = false } = {}) {
   const next = withRecord(store, rec);
   if (rec.mode === "patch" && !Object.keys(rec.fields).length) delete next.records[key];     // nothing left to patch: the pack's definition shows again
   await commitStore(api, next);
-  await logWorldEvent(`editor: edited ${key}`);
+  await saved(api, `editor: edited ${key}`);
   return entry(api, key);
 }
 
@@ -268,7 +270,7 @@ async function removeIn(api, key) {
   delete next.records[key];
   await commitStore(api, next);
   for (const c of adapter.copiesOf(kindOf(key), idOf(key))) if (c.actor === null && c.item.getFlag?.(MODULE_ID, "template")) await c.item.delete();
-  await logWorldEvent(`editor: deleted ${key}`);
+  await saved(api, `editor: deleted ${key}`);
   return true;
 }
 
@@ -338,6 +340,7 @@ async function foldOverlayIn(api) {
   if (!folded.length) return { folded: [], leftovers: Object.keys(left) };
   await commitStore(api, store);
   await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, left);
+  await saved(api);
   return { folded, leftovers: Object.keys(left) };
 }
 
@@ -354,7 +357,7 @@ async function clearLeftoverIn(api, key) {
   const overlay = overlayNow();
   if (key in overlay) { const next = { ...overlay }; delete next[key]; await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, next); }
   const store = current();
-  if (store.records[key]) { const next = clone(store); delete next.records[key]; await commitStore(api, next); }
+  if (store.records[key]) { const next = clone(store); delete next.records[key]; await commitStore(api, next); await saved(api); }
   return true;
 }
 
@@ -381,7 +384,7 @@ async function importRecordsIn(api, bundle, { replace = false, makeItems = true 
     const key = keyOf(rec.kind, rec.id);
     if (!adapter.copiesOf(rec.kind, rec.id).length) await makeItem(api, key);
   }
-  await logWorldEvent(`editor: imported ${incoming.length} record${incoming.length === 1 ? "" : "s"}`);
+  await saved(api, `editor: imported ${incoming.length} record${incoming.length === 1 ? "" : "s"}`);
   return { added: plan.add.map(r => keyOf(r.kind, r.id)), replaced: plan.replace.map(r => keyOf(r.kind, r.id)), skipped: plan.skip };
 }
 

@@ -194,3 +194,77 @@ test("EDITOR LOCK: no editor change waits on itself: update, revert, retire, rem
     });
   });
 });
+
+// A failed publish or log AFTER a saved editor change is a warning, not a failed save (1b #8) ------------------------------------------------
+const spyWarn = () => {
+  const out = { console: [], notes: [] }, realConsole = console.warn, realNote = ui.notifications.warn;
+  console.warn = (...a) => out.console.push(a.map(String).join(" "));
+  ui.notifications.warn = t => out.notes.push(t);
+  out.restore = () => { console.warn = realConsole; ui.notifications.warn = realNote; };
+  return out;
+};
+const failingAuditWrites = () => { const real = game.settings.set; game.settings.set = async (scope, key, value) => { if (key === "auditLedger") throw new Error("the log could not be written"); return real(scope, key, value); }; return () => { game.settings.set = real; }; };
+const failingPublish = () => { const real = api().publishDefinitions; api().publishDefinitions = async () => { throw new Error("could not tell the players"); }; return () => { api().publishDefinitions = real; }; };
+const PUBLISH_NOTE = "The editor change was saved, but publishing the definitions to the players failed (see the console).";
+
+test("SAVED BUT NOT PUBLISHED: publishDefinitions throws after create: it resolves, the record and the world item exist ONCE (no retry, no -2 id), one console warning and one GM note", async () => {
+  const w = await editorWorld();
+  const spy = spyWarn(), restore = failingPublish();
+  try {
+    const made = await as(w.gm, () => api().editor.create("material", { name: "Fresh Metal", tier: 1 }));
+    assert.equal(made.key, "material:fresh-metal");
+    assert.ok(made.item, "the world item was made");
+    assert.deepEqual(Object.keys(env.values.editorDefinitions.records), ["material:fresh-metal"], "saved, one record, no -2");
+    assert.ok(api().definitions.material.has("fresh-metal") && !api().definitions.material.has("fresh-metal-2"));
+    assert.equal(spy.console.filter(l => /was saved, but publishing the definitions to the players failed/.test(l)).length, 1);
+    assert.deepEqual(spy.notes, [PUBLISH_NOTE], "the GM is told once");
+  } finally { restore(); spy.restore(); }
+});
+
+test("SAVED BUT NOT LOGGED: the audit write throws after create, update, remove, import and repair: each resolves with the change saved, and the GM gets ONE note per change", async () => {
+  const w = await editorWorld();
+  const spy = spyWarn(), restore = failingAuditWrites();
+  const LOG_NOTE = "The editor change was saved, but writing the audit log line failed (see the console).";
+  try {
+    await as(w.gm, async () => {
+      const made = await creating("Logless Tag");
+      assert.ok(env.values.editorDefinitions.records["tag:logless-tag"], "create saved");
+      await api().editor.update(made.key, { theme: "edited" }, { confirmed: true });
+      assert.equal(env.values.editorDefinitions.records["tag:logless-tag"].fields.theme, "edited", "update saved");
+      await api().editor.importRecords({ format: "pathfinder-progress-editor", v: 1, records: [{ kind: "tag", id: "imported-tag", mode: "new", fields: { name: "Imported Tag", theme: "i" } }] });
+      assert.ok(env.values.editorDefinitions.records["tag:imported-tag"], "import saved");
+      await api().editor.remove(made.key);
+      assert.equal(env.values.editorDefinitions.records["tag:logless-tag"], undefined, "remove saved");
+      env.values.editorDefinitions = { v: 1, records: { ...env.values.editorDefinitions.records, "tag:oops": { kind: "tag", id: "other" } } };
+      assert.equal((await api().editor.repair()).repaired, true);
+      assert.deepEqual(Object.keys(env.values.editorDefinitions.records), ["tag:imported-tag"], "repair saved");
+    });
+    assert.deepEqual(spy.notes, [LOG_NOTE, LOG_NOTE, LOG_NOTE, LOG_NOTE, LOG_NOTE], "one note for each of the five changes");
+  } finally { restore(); spy.restore(); }
+});
+
+test("SAVED BUT BOTH FAILED: one note names both steps; the slot saves from the tags code resolve too (they used to throw a TagError for a saved change)", async () => {
+  const w = await editorWorld();
+  await as(w.gm, () => creating("Edge Tag"));
+  const spy = spyWarn(), restoreLog = failingAuditWrites(), restorePublish = failingPublish();
+  try {
+    await as(w.gm, async () => {
+      const slot = await api().tags.setSlotNeeds(DAGGER, "fang", { all: ["edge-tag"] });
+      assert.deepEqual(slot.needs, { all: ["edge-tag"] }, "the slot save resolved with the saved slot");
+      assert.deepEqual((await api().tags.setSlotKind(DAGGER, "blade", "edge")).kind, "edge");
+    });
+    assert.ok(env.values.editorDefinitions.records[`recipe:${DAGGER}`].fields.slots.find(s => s.name === "fang").needs, "saved in the world");
+    assert.equal(spy.notes.length, 2, "one note per saved change");
+    assert.equal(spy.notes[0], "The editor change was saved, but publishing the definitions to the players and writing the audit log line failed (see the console).");
+    assert.equal(spy.console.filter(l => /was saved, but/.test(l)).length, 4, "and each failed step is a console warning");
+  } finally { restoreLog(); restorePublish(); spy.restore(); }
+});
+
+test("SAVED AND PUBLISHED: nothing to warn about when both steps work", async () => {
+  const w = await editorWorld();
+  const spy = spyWarn();
+  try {
+    await as(w.gm, () => creating("Quiet Tag"));
+    assert.deepEqual([spy.console, spy.notes], [[], []]);
+  } finally { spy.restore(); }
+});

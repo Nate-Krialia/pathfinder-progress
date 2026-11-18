@@ -12,6 +12,7 @@ import { emptyFrozen, frozenProblems, recordFromPlan } from "./frozen.js";
 import { capsProblems } from "./stack.js";
 import { withLock } from "../queue/lock.js";
 import { BACKUP_LOCK, reportDamaged } from "../backup.js";
+import { afterSave } from "../after-save.js";
 import { craftedRef } from "./ledger.js";
 
 export { getLedger, getCaps, getFrozenStore };
@@ -96,19 +97,6 @@ async function changeLedger(api, what, change) {
   });
   await afterSave("the tag change", [["publishing the definitions to the players", () => api.publishDefinitions?.()], ["writing the audit log line", () => logWorldEvent(what)]]);
   return result;
-}
-
-/**
- * The change is ALREADY saved when these run. Failing to publish the definitions or to write the log line must not look like a failed save (the window would show an error for a saved
- * change): each is tried, and a failure is a console warning and one note to the GM saying what was saved and what was not.
- */
-async function afterSave(what, steps) {
-  for (const [label, step] of steps) {
-    try { await step(); } catch (error) {
-      console.warn(`${MODULE_ID} | ${what} was saved, but ${label} failed`, error);
-      globalThis.ui?.notifications?.warn?.(`${what[0].toUpperCase()}${what.slice(1)} was saved, but ${label} failed (see the console).`);
-    }
-  }
 }
 
 /** GM: tag an item. `ref` is a material id or an item UUID; `entry` is { tags: [tagId], tier?, name? }. Refuses (in plain words) what entryProblems finds. */
