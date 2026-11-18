@@ -18,6 +18,8 @@ import { propertiesOpen } from "../discovery/store.js";
 import { W } from "../discovery/words.js";
 import { overlayLedger } from "../tags/ledger.js";
 import { getLedger } from "../tags/current.js";
+import * as tagState from "../tags/state.js";
+import { consumeStackWithUndo, undoThenThrow } from "../queue/common.js";
 
 const d100 = () => Math.floor(CONFIG.Dice.randomUniform() * 100) + 1;
 
@@ -162,27 +164,50 @@ export async function craft({ actor, recipeId, selection, station, degree: force
 
   const outcome = resolveOutcome({ plan, degree, rng: d100, config: CRAFTING });
 
-  // Apply: fee, materials, then the item.
-  await adapter.removeGp(actor, outcome.feeConsumed);
-  await adapter.consumeMaterialStacks(actor, outcome.consumeByStack);
-
+  // Apply: fee, materials, then the item. Every write registers its undo the moment it is made, and a failure undoes the list in reverse, so a craft that fails part-way costs nothing
+  // (it used to keep the fee and the materials and make no item). A craft with a tagged slot is frozen like every other (queue, commission): the item carries the opaque id.
+  const undos = [];
+  const heldIds = [];
   let created = null;
-  if (outcome.made) {
-    const base = await adapter.loadItemSource(plan.outputUuid);
-    const data = adapter.buildCraftedItemData(base, plan.description, {
-      ...plan.provenance,
-      crafter: actor.id,
-      degree: outcome.degree
-    }, { name: plan.resultName ?? undefined });
-    created = await adapter.createItemOnActor(actor, data);
+  try {
+    await adapter.removeGp(actor, outcome.feeConsumed);
+    if (outcome.feeConsumed > 0) undos.push({ what: `${outcome.feeConsumed} gp on ${actor.name}`, run: () => adapter.addCopper(actor, Math.round(outcome.feeConsumed * 100)) });
+    for (const [stackId, units] of Object.entries(outcome.consumeByStack ?? {})) {
+      const { freezeId } = await consumeStackWithUndo(actor, stackId, units, undos);
+      if (freezeId) heldIds.push({ stackId, freezeId });
+    }
+    if (outcome.made) {
+      const base = await adapter.loadItemSource(plan.outputUuid);
+      const frozenRef = await tagState.freezeCraft(plan);
+      if (frozenRef) undos.push({ what: "the frozen tag result", run: () => frozenRef.undo() });
+      const data = adapter.buildCraftedItemData(base, plan.description, {
+        ...plan.provenance,
+        crafter: actor.id,
+        degree: outcome.degree,
+        ...(frozenRef ? { freezeId: frozenRef.id } : {})
+      }, { name: plan.resultName ?? undefined });
+      created = await adapter.createItemOnActor(actor, data);
+      undos.push({ what: `the new item on ${actor.name}`, run: () => created.delete() });
+    }
+  } catch (error) {
+    await undoThenThrow(undos, error);
+  }
+  // The craft is made: a crafted ingredient that was used up takes its held record with it; one still in the bag has its hold lifted.
+  for (const { stackId, freezeId } of heldIds) {
+    try { await (actor.items.get(stackId) ? tagState.releaseFrozen(freezeId) : tagState.removeFrozen(freezeId)); }
+    catch (error) { console.error(`${MODULE_ID} | could not settle a crafted ingredient's frozen record`, error); }
   }
 
   if (outcome.made) await noteCrafted(api.definitions, actor, api.definitions.recipe.get(recipeId), plan.uses);   // only a success teaches; best-effort
 
-  await ChatMessage.create({
-    speaker: ChatMessage.getSpeaker({ actor }),
-    content: formatSummary({ crafterName: actor.name, plan, outcome, itemName: created?.name })
-  });
+  try {
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor }),
+      content: formatSummary({ crafterName: actor.name, plan, outcome, itemName: created?.name })
+    });
+  } catch (error) {
+    console.error(`${MODULE_ID} | the craft is done, but the chat message failed`, error);       // the item exists and the fee is paid: a chat failure must not look like a failed craft
+  }
 
   console.log(`${MODULE_ID} | craft`, { recipe: recipeId, degree, made: outcome.made, lossRolls: outcome.lossRolls });
   return { outcome, item: created };

@@ -269,3 +269,76 @@ test("FROZEN UNDO: a successful commission craft with a character patron keeps i
   assert.ok(item, "the patron got the dagger");
   assert.deepEqual(recordIds(), [item.getFlag(M, "crafted").freezeId], "and its record");
 });
+
+// The direct GM craft() undoes a failure and freezes a tagged craft (stage 1 finding 16) --------------------------------------------------------
+import { getCopper } from "../scripts/adapter/pf2e.js";
+const SEL_DAGGER = { blade: "iron", fang: "spider-fang" };
+const direct = (w, extra = {}) => as(w.gm, () => api().craft({ actor: w.ann, recipeId: DAGGER, selection: SEL_DAGGER, degree: "success", ...extra }));
+const bag = (w, id) => w.ann.items.filter(i => i.getFlag(M, "material")?.materialId === id).reduce((n, i) => n + (i.system?.quantity ?? 1), 0);
+
+test("DIRECT CRAFT: when making the item fails, the fee and the materials come back and no frozen record is left", async () => {
+  const w = await nestedWorld();
+  const [coppers, iron, fang] = [getCopper(w.ann), bag(w, "iron"), bag(w, "spider-fang")];
+  const realCreate = w.ann.createEmbeddedDocuments;
+  w.ann.createEmbeddedDocuments = async () => { throw new Error("boom: the bag would not take the item"); };
+  try {
+    await assert.rejects(direct(w), /boom/);
+  } finally { w.ann.createEmbeddedDocuments = realCreate; }
+  assert.equal(getCopper(w.ann), coppers, "the fee is back");
+  assert.deepEqual([bag(w, "iron"), bag(w, "spider-fang")], [iron, fang], "and the materials");
+  assert.deepEqual(recordIds(), [], "and the record that was written a moment before is undone");
+  assert.equal(w.ann.items.filter(i => i.getFlag(M, "crafted")).length, 0);
+});
+
+test("DIRECT CRAFT: a craft of a recipe with a ledger entry is frozen like every other (the item carries an opaque id and the record exists); a plain craft still costs what it did", async () => {
+  const w = await nestedWorld();
+  const coppers = getCopper(w.ann), iron = bag(w, "iron");
+  const result = await direct(w);
+  const flag = result.item.getFlag(M, "crafted");
+  assert.equal(typeof flag.freezeId, "string");
+  assert.deepEqual(recordIds(), [flag.freezeId]);
+  assert.ok(getCopper(w.ann) < coppers, "the fee was paid");
+  assert.ok(bag(w, "iron") < iron, "and materials used");
+});
+
+test("DIRECT CRAFT: a crafted ingredient is held while it is consumed: a failure hands the dagger back with its record, success takes the used-up record with it", async () => {
+  const w = await nestedWorld();
+  const dagger = await craftDagger(w);
+  const id = dagger.getFlag(M, "crafted").freezeId;
+  const realDelete = dagger.delete.bind(dagger);
+  dagger.delete = async () => { await realDelete(); await fireHookAs(w.gm, "deleteItem", [dagger]); };
+  const mount = { edge: "iron", mount: ref(id) };
+  const realCreate = w.ann.createEmbeddedDocuments;
+  // failure first: creating the new item throws (the dagger was recreated by the rollback through the same call, so let that one through)
+  let calls = 0;
+  w.ann.createEmbeddedDocuments = async (...args) => { if (calls++ === 0) throw new Error("boom: the bag would not take the item"); return realCreate.apply(w.ann, args); };
+  try {
+    await assert.rejects(as(w.gm, () => api().craft({ actor: w.ann, recipeId: "mount-blade", selection: mount, degree: "success" })), /boom/);
+  } finally { w.ann.createEmbeddedDocuments = realCreate; }
+  assert.equal(w.ann.items.filter(i => i.getFlag(M, "crafted")?.freezeId === id).length, 1, "the dagger is back");
+  assert.ok(env.values.tagCrafted.items[id], "with its record");
+  assert.equal(env.values.tagCrafted.items[id].held, undefined, "not held");
+  assert.deepEqual(recordIds(), [id], "and nothing else");
+  // now it succeeds: the dagger (re-created, a new item object) is used up and its record goes
+  const again = w.ann.items.find(i => i.getFlag(M, "crafted")?.freezeId === id);
+  const again0 = again.delete.bind(again);
+  again.delete = async () => { await again0(); await fireHookAs(w.gm, "deleteItem", [again]); };
+  const ok = await as(w.gm, () => api().craft({ actor: w.ann, recipeId: "mount-blade", selection: mount, degree: "success" }));
+  assert.equal(env.values.tagCrafted.items[id], undefined, "the used-up dagger took its record");
+  assert.deepEqual(recordIds(), [ok.item.getFlag(M, "crafted").freezeId], "the new item has the only record");
+  assert.ok(Object.values(env.values.tagCrafted.items).every(r => !r.held));
+});
+
+test("DIRECT CRAFT: a failed chat message does not make a finished craft look failed", async () => {
+  const w = await nestedWorld();
+  const realChat = ChatMessage.create;
+  const logged = [];
+  const realError = console.error;
+  ChatMessage.create = async () => { throw new Error("chat is down"); };
+  console.error = (...a) => logged.push(a.map(String).join(" "));
+  try {
+    const result = await direct(w);
+    assert.ok(result.item, "the item exists and the call resolved");
+  } finally { ChatMessage.create = realChat; console.error = realError; }
+  assert.match(logged.join("\n"), /the craft is done, but the chat message failed/);
+});

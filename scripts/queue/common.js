@@ -77,6 +77,31 @@ export async function undoThenThrow(undos, error) {
   throw error;
 }
 
+/**
+ * Take `units` out of ONE stack, with its undo: the stack is snapshotted first, and the undo puts the quantity back (or makes the item again if the stack was used up). A crafted
+ * ingredient's frozen record is HELD while its item is out of the bag (the deleteItem hook would otherwise drop it the moment the stack is used up, and a rollback would hand the item back
+ * with nothing behind its freeze id); the hold's undo is registered BEFORE the consume's, so undoing in reverse puts the item back first and lifts the hold after.
+ * Returns { freezeId }: the id of the held record, or null.
+ */
+export async function consumeStackWithUndo(actor, stackId, units, undos) {
+  const item = actor.items.get(stackId);
+  if (!item) throw new Error(`${actor.name} no longer has that stack of materials`);
+  const snapshot = { quantity: item.system?.quantity ?? 1, data: item.toObject() };
+  const freezeId = item.getFlag?.(MODULE_ID, "crafted")?.freezeId;
+  const hold = freezeId ? await tagState.holdFrozen(freezeId) : null;
+  if (hold) undos.push({ what: "the hold on a crafted ingredient's record", run: () => hold.undo() });
+  await adapter.consumeMaterialStacks(actor, { [stackId]: units });
+  undos.push({
+    what: `materials on ${actor.name}`,
+    run: async () => {
+      const existing = actor.items.get(stackId);
+      if (existing) await existing.update({ "system.quantity": snapshot.quantity });
+      else await adapter.createItemOnActor(actor, snapshot.data);
+    }
+  });
+  return { freezeId: hold ? freezeId : null };
+}
+
 /** Take the materials (one stack at a time, each with its own undo) and the fee. Returns the undos. */
 export async function takeEscrow(actor, byStack, feeCopper) {
   const undos = [];
