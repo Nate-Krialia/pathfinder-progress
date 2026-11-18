@@ -224,3 +224,48 @@ test("COMMISSION SUCCESS: the used-up crafted dagger takes its record with it an
   assert.equal(records.length, 0, "an NPC patron takes no item, so nothing new is frozen either");
   assert.ok(records.every(r => !r.held), "and nothing is left held");
 });
+
+// The frozen record's undo is registered the moment the record exists (stage 1 finding 15) ------------------------------------------------------
+/** Bob (a character patron) supplies the materials and gets the dagger; the GM issues and accepts the commission. DAGGER has a ledger entry in nestedWorld, so a craft of it is frozen. */
+async function patronCommission() {
+  const w = await nestedWorld();
+  await as(w.gm, async () => { await api().giveMaterial(w.bob, "iron", 3); await api().giveMaterial(w.bob, "spider-fang", 3); await api().grantFormula(w.bob, DAGGER); });
+  const { commission } = await as(w.gm, () => api().commissions.issue({ patron: w.bob, crafter: w.ann, recipe: DAGGER, selection: { blade: "iron", fang: "spider-fang" }, materialsFrom: "patron", payout: 1 }));
+  await as(w.gm, () => api().commissions.accept(commission.id));
+  return { w, commission };
+}
+const recordIds = () => Object.keys(env.values.tagCrafted?.items ?? {});
+const stackOf = (actor, id) => actor.items.filter(i => i.getFlag(M, "material")?.materialId === id).reduce((n, i) => n + (i.system?.quantity ?? 1), 0);
+
+test("FROZEN UNDO: a commission craft that fails while the steps are applied leaves NO frozen record behind (the undo was registered after the steps before)", async () => {
+  const { w, commission } = await patronCommission();
+  const ironBefore = stackOf(w.bob, "iron"), copperBefore = (await import("../scripts/adapter/pf2e.js")).getCopper(w.bob);
+  const realCreate = w.bob.createEmbeddedDocuments;
+  w.bob.createEmbeddedDocuments = async () => { throw new Error("boom: the patron's bag would not take the dagger"); };      // the last step: the item for the patron
+  try {
+    await assert.rejects(as(w.gm, () => api().commissions.craft(commission.id, { degree: "success", gateChecked: true })), /boom/);
+  } finally { w.bob.createEmbeddedDocuments = realCreate; }
+  assert.deepEqual(recordIds(), [], "no frozen record survives a craft that did not happen");
+  assert.equal(stackOf(w.bob, "iron"), ironBefore, "the patron's materials are back");
+  assert.equal((await import("../scripts/adapter/pf2e.js")).getCopper(w.bob), copperBefore, "and the gold");
+  assert.equal(api().commissions.get(commission.id).status, "accepted");
+});
+
+test("FROZEN UNDO: a failure BETWEEN the freeze and the steps (the item data cannot be built) leaves no frozen record either", async () => {
+  const { w, commission } = await patronCommission();
+  const realFromUuid = globalThis.fromUuid;
+  globalThis.fromUuid = async () => ({ toObject: () => ({ name: "Dagger", type: "weapon", system: {}, flags: {}, notClonable() {} }) });      // structuredClone of this throws, after the record was written
+  try {
+    await assert.rejects(as(w.gm, () => api().commissions.craft(commission.id, { degree: "success", gateChecked: true })));
+  } finally { globalThis.fromUuid = realFromUuid; }
+  assert.deepEqual(recordIds(), [], "the record written a moment earlier was undone");
+  assert.equal(api().commissions.get(commission.id).status, "accepted");
+});
+
+test("FROZEN UNDO: a successful commission craft with a character patron keeps its one record (the undo is only for failure)", async () => {
+  const { w, commission } = await patronCommission();
+  await as(w.gm, () => api().commissions.craft(commission.id, { degree: "success", gateChecked: true }));
+  const item = w.bob.items.find(i => i.getFlag(M, "crafted"));
+  assert.ok(item, "the patron got the dagger");
+  assert.deepEqual(recordIds(), [item.getFlag(M, "crafted").freezeId], "and its record");
+});

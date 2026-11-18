@@ -304,47 +304,45 @@ async function rollBack(undos) {
   if (failures.length) throw new Error(`could not undo: ${failures.join("; ")}. Check these by hand.`);
 }
 
-async function applySteps(steps, actors) {
-  const undos = [];
-  const holds = [];      // crafted ingredients whose frozen record is held while they are consumed: settled once the whole craft has committed
-  try {
-    for (const step of steps) {
-      const actor = actors.get(step.actorId);
-      if (step.op === "consume") {
-        // One stack at a time, each with its own undo, so a failure part-way through is fully reversible.
-        for (const [stackId, units] of Object.entries(step.byStack)) {
-          const item = actor.items.get(stackId);
-          const snapshot = { quantity: item.system?.quantity ?? 1, data: item.toObject() };
-          // A crafted ingredient's frozen record is held while the item is out of the bag, exactly as takeEscrow does for a queued craft: the deleteItem hook would otherwise drop it the
-          // moment the stack is used up, and a rollback would hand the item back with nothing behind its freeze id.
-          const freezeId = item.getFlag?.(MODULE_ID, "crafted")?.freezeId;
-          const hold = freezeId ? await tagState.holdFrozen(freezeId) : null;
-          if (hold) { undos.push({ what: "the hold on a crafted ingredient's record", run: () => hold.undo() }); holds.push({ actor, stackId, freezeId }); }
-          await adapter.consumeMaterialStacks(actor, { [stackId]: units });
-          undos.push({
-            what: `materials on ${actor.name}`,
-            run: async () => {
-              const existing = actor.items.get(stackId);
-              if (existing) await existing.update({ "system.quantity": snapshot.quantity });
-              else await adapter.createItemOnActor(actor, snapshot.data);
-            }
-          });
-        }
-      } else if (step.op === "gold") {
-        const apply = step.copper < 0 ? () => adapter.removeCopper(actor, -step.copper) : () => adapter.addCopper(actor, step.copper);
-        const reverse = step.copper < 0 ? () => adapter.addCopper(actor, -step.copper) : () => adapter.removeCopper(actor, step.copper);
-        await apply();
-        undos.push({ what: `${step.copper / 100} gp on ${actor.name}`, run: reverse });
-      } else if (step.op === "item") {
-        const created = await adapter.createItemOnActor(actor, step.data);
-        undos.push({ what: `the item on ${actor.name}`, run: () => created.delete() });
+/**
+ * Move the gold and items the steps call for. Every write adds its undo to `undos` (the CALLER's list, which also holds what was written before this, such as the frozen record); a failure
+ * throws and the caller rolls the whole list back once. Returns the crafted ingredients whose frozen record is held: { actor, stackId, freezeId }.
+ */
+async function applySteps(steps, actors, undos) {
+  const holds = [];
+  for (const step of steps) {
+    const actor = actors.get(step.actorId);
+    if (step.op === "consume") {
+      // One stack at a time, each with its own undo, so a failure part-way through is fully reversible.
+      for (const [stackId, units] of Object.entries(step.byStack)) {
+        const item = actor.items.get(stackId);
+        const snapshot = { quantity: item.system?.quantity ?? 1, data: item.toObject() };
+        // A crafted ingredient's frozen record is held while the item is out of the bag, exactly as takeEscrow does for a queued craft: the deleteItem hook would otherwise drop it the
+        // moment the stack is used up, and a rollback would hand the item back with nothing behind its freeze id.
+        const freezeId = item.getFlag?.(MODULE_ID, "crafted")?.freezeId;
+        const hold = freezeId ? await tagState.holdFrozen(freezeId) : null;
+        if (hold) { undos.push({ what: "the hold on a crafted ingredient's record", run: () => hold.undo() }); holds.push({ actor, stackId, freezeId }); }
+        await adapter.consumeMaterialStacks(actor, { [stackId]: units });
+        undos.push({
+          what: `materials on ${actor.name}`,
+          run: async () => {
+            const existing = actor.items.get(stackId);
+            if (existing) await existing.update({ "system.quantity": snapshot.quantity });
+            else await adapter.createItemOnActor(actor, snapshot.data);
+          }
+        });
       }
+    } else if (step.op === "gold") {
+      const apply = step.copper < 0 ? () => adapter.removeCopper(actor, -step.copper) : () => adapter.addCopper(actor, step.copper);
+      const reverse = step.copper < 0 ? () => adapter.addCopper(actor, -step.copper) : () => adapter.removeCopper(actor, step.copper);
+      await apply();
+      undos.push({ what: `${step.copper / 100} gp on ${actor.name}`, run: reverse });
+    } else if (step.op === "item") {
+      const created = await adapter.createItemOnActor(actor, step.data);
+      undos.push({ what: `the item on ${actor.name}`, run: () => created.delete() });
     }
-  } catch (error) {
-    await rollBack(undos).catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
-    throw error;
   }
-  return { undos, holds };
+  return holds;
 }
 
 /** The craft has committed: a crafted ingredient that was used up takes its held record with it; one that is still in the bag has its hold lifted. Best-effort, logged. */
@@ -449,38 +447,41 @@ async function craftLocked(api, id, options) {
   if (delivered) formulas = dropLoan(formulas, c.id).list;
 
   // ---- The steps that move gold and items ----
-  let itemData = null;
-  let frozenRef = null;
-  if (outcome.made && patronActor) {
-    const base = await adapter.loadItemSource(plan.outputUuid);
-    frozenRef = await tagState.freezeCraft(plan);        // Slice 2b: the tagged part of the craft, frozen on the GM client (the item carries only an opaque id)
-    itemData = adapter.buildCraftedItemData(base, plan.description, {
-      ...plan.provenance, crafter: crafter.id, degree: outcome.degree, commission: c.id, patron: patronActor.id, ...(frozenRef ? { freezeId: frozenRef.id } : {})
-    }, { name: plan.resultName ?? undefined });
-  }
-  const supplier = c.materialsFrom === "npc" ? { kind: "npc" } : { kind: c.materialsFrom, actorId: ready.ctx.supplierActor.id };
-  const steps = buildSteps({ patron: c.patron, crafterId: crafter.id, supplier, outcome, payoutCopper: toCopper(c.payout), itemData });
-
-  const consumedUnits = outcome.consumed.filter(u => u.units > 0).map(u => ({ materialId: u.materialId, units: u.units }));
-  const entry = {
-    at: now, type: "craft", degree: outcome.degree, made: outcome.made,
-    feeGp: patronActor ? plan.fee : 0, feePayer: patronActor ? patronActor.name : "waived (NPC patron)",
-    materialsFrom: c.materialsFrom, materialsConsumed: consumedUnits, materialsKept: outcome.kept.filter(u => u.units > 0).map(u => ({ materialId: u.materialId, units: u.units })),
-    ...(outcome.made ? { itemName: plan.resultName ?? plan.recipeName, itemTo: patronActor ? patronActor.name : "no item (NPC patron)", payoutGp: c.payout, payoutFrom: patronActor ? patronActor.name : "the NPC" } : {}),
-    ...(Object.keys(learnLog).length ? { learn: learnLog } : {})
-  };
-  const next = {
-    ...c, attempts: c.attempts + 1, learnAttempted: c.learnAttempted || learn.eligible,
-    status: outcome.made ? "delivered" : "inProgress",
-    ...(outcome.made ? { delivered: { itemName: plan.resultName ?? plan.recipeName, degree: outcome.degree, at: now } } : {}),
-    log: logEntry(c, entry, now)
-  };
-
-  // ---- Writes ----
-  const actors = new Map([[crafter.id, crafter], ...(patronActor ? [[patronActor.id, patronActor]] : [])]);
-  const { undos, holds } = await applySteps(steps, actors);
-  if (frozenRef) undos.push({ what: "the frozen tag result", run: () => frozenRef.undo() });
+  // Everything written from here on is undone, in reverse, if any later step fails. The frozen record is the FIRST thing written, so its undo is registered the moment it exists: a
+  // failure while the item data, the steps or the log entry are being built can no longer leave a record that no item carries.
+  const undos = [];
+  let holds = [], steps, entry, next;
   try {
+    let itemData = null;
+    if (outcome.made && patronActor) {
+      const base = await adapter.loadItemSource(plan.outputUuid);
+      const frozenRef = await tagState.freezeCraft(plan);        // Slice 2b: the tagged part of the craft, frozen on the GM client (the item carries only an opaque id)
+      if (frozenRef) undos.push({ what: "the frozen tag result", run: () => frozenRef.undo() });
+      itemData = adapter.buildCraftedItemData(base, plan.description, {
+        ...plan.provenance, crafter: crafter.id, degree: outcome.degree, commission: c.id, patron: patronActor.id, ...(frozenRef ? { freezeId: frozenRef.id } : {})
+      }, { name: plan.resultName ?? undefined });
+    }
+    const supplier = c.materialsFrom === "npc" ? { kind: "npc" } : { kind: c.materialsFrom, actorId: ready.ctx.supplierActor.id };
+    steps = buildSteps({ patron: c.patron, crafterId: crafter.id, supplier, outcome, payoutCopper: toCopper(c.payout), itemData });
+
+    const consumedUnits = outcome.consumed.filter(u => u.units > 0).map(u => ({ materialId: u.materialId, units: u.units }));
+    entry = {
+      at: now, type: "craft", degree: outcome.degree, made: outcome.made,
+      feeGp: patronActor ? plan.fee : 0, feePayer: patronActor ? patronActor.name : "waived (NPC patron)",
+      materialsFrom: c.materialsFrom, materialsConsumed: consumedUnits, materialsKept: outcome.kept.filter(u => u.units > 0).map(u => ({ materialId: u.materialId, units: u.units })),
+      ...(outcome.made ? { itemName: plan.resultName ?? plan.recipeName, itemTo: patronActor ? patronActor.name : "no item (NPC patron)", payoutGp: c.payout, payoutFrom: patronActor ? patronActor.name : "the NPC" } : {}),
+      ...(Object.keys(learnLog).length ? { learn: learnLog } : {})
+    };
+    next = {
+      ...c, attempts: c.attempts + 1, learnAttempted: c.learnAttempted || learn.eligible,
+      status: outcome.made ? "delivered" : "inProgress",
+      ...(outcome.made ? { delivered: { itemName: plan.resultName ?? plan.recipeName, degree: outcome.degree, at: now } } : {}),
+      log: logEntry(c, entry, now)
+    };
+
+    // ---- Writes ----
+    const actors = new Map([[crafter.id, crafter], ...(patronActor ? [[patronActor.id, patronActor]] : [])]);
+    holds = await applySteps(steps, actors, undos);
     await withRecord(next, () => commitCrafter(crafter, { formulas, projects, extra: options.extraUpdate, note: `commission ${c.id}` }));
   } catch (error) {
     await rollBack(undos).catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
