@@ -128,3 +128,69 @@ test("IMPORT: an edit of a definition that does not exist here is refused (skipp
     await assert.rejects(as(w.gm, () => api().editor.importRecords(bundleOf([{ ...gone, id: "a.b" }]))), /cannot be used/);
   });
 });
+
+// Overlapping editor changes keep both (1b #2) ---------------------------------------------------------------------------------------
+import { DAGGER } from "./fake-world.js";
+const slowEditorWrites = ms => {
+  const real = game.settings.set;
+  game.settings.set = async (scope, key, value) => { if (key === "editorDefinitions") await new Promise(r => setTimeout(r, ms)); return real(scope, key, value); };
+  return () => { game.settings.set = real; };
+};
+const creating = (name, extra = {}) => api().editor.create("tag", { name, theme: `${name} things`, ...extra }, { makeItem: false });
+
+test("EDITOR LOCK: two overlapping creates with the SAME name keep both records and get different ids", async () => {
+  const w = await editorWorld();
+  const restore = slowEditorWrites(25);
+  try {
+    const [a, b] = await quietly(() => as(w.gm, () => Promise.all([creating("Twin Tag"), creating("Twin Tag")])));
+    assert.notEqual(a.key, b.key, "different ids");
+    assert.deepEqual(Object.keys(env.values.editorDefinitions.records).sort(), [a.key, b.key].sort(), "both are in the saved setting");
+    assert.ok(api().definitions.tag.has("twin-tag") && api().definitions.tag.has("twin-tag-2"), "and both are in the registry");
+  } finally { restore(); }
+});
+
+test("EDITOR LOCK: two overlapping creates with DIFFERENT names keep both (each used to start from the same store, and the second write erased the first)", async () => {
+  const w = await editorWorld();
+  const restore = slowEditorWrites(25);
+  try {
+    await quietly(() => as(w.gm, () => Promise.all([creating("Alpha Tag"), creating("Beta Tag"), creating("Gamma Tag")])));
+    assert.deepEqual(Object.keys(env.values.editorDefinitions.records).sort(), ["tag:alpha-tag", "tag:beta-tag", "tag:gamma-tag"]);
+    for (const id of ["alpha-tag", "beta-tag", "gamma-tag"]) assert.ok(api().definitions.tag.has(id), id);
+  } finally { restore(); }
+});
+
+test("EDITOR LOCK: two overlapping changes to ONE recipe's slots (a need on one slot, a kind on another) both land: each works its slot list out from the recipe as it is inside the lock", async () => {
+  const w = await editorWorld();
+  await quietly(() => as(w.gm, () => creating("Edge Tag")));
+  const restore = slowEditorWrites(25);
+  try {
+    await quietly(() => as(w.gm, () => Promise.all([api().tags.setSlotNeeds(DAGGER, "fang", { all: ["edge-tag"] }), api().tags.setSlotKind(DAGGER, "blade", "edge")])));
+  } finally { restore(); }
+  const slots = api().definitions.recipe.get(DAGGER).slots;
+  assert.deepEqual(slots.find(s => s.name === "fang").needs, { all: ["edge-tag"] }, "the need on fang");
+  assert.equal(slots.find(s => s.name === "blade").kind, "edge", "the kind on blade");
+  const saved = env.values.editorDefinitions.records[`recipe:${DAGGER}`].fields.slots;
+  assert.ok(saved.find(s => s.name === "fang").needs && saved.find(s => s.name === "blade").kind, "and both are in the saved setting");
+});
+
+test("EDITOR LOCK: no editor change waits on itself: update, revert, retire, remove, setTrack, foldOverlay, clearLeftover, importRecords, repair and updateWith all finish, in any mix, and a refused change frees the lock", async () => {
+  const w = await editorWorld();
+  await quietly(async () => {
+    await as(w.gm, async () => {
+      const made = await creating("Cycle Tag");
+      await api().editor.update(made.key, { theme: "changed" }, { confirmed: true });
+      await api().editor.updateWith(made.key, rec => ({ theme: `${rec.theme}!` }), { confirmed: true });
+      await api().editor.retire("material:iron", true);
+      await api().editor.retire("material:iron", false);
+      assert.equal(await api().editor.foldOverlay().then(r => r.folded.length), 0);
+      assert.deepEqual(await api().editor.repair(), { repaired: false, dropped: [] });
+      await assert.rejects(api().editor.updateWith("tag:does-not-exist", () => ({})), /There is no tag:does-not-exist to edit/);
+      await assert.rejects(api().editor.remove("tag:does-not-exist"), /cannot be deleted/);      // a refusal ...
+      await api().editor.remove(made.key);                                                          // ... does not leave the lock held
+      const pack = await api().editor.update("material:iron", { name: "Cold Iron" }, { confirmed: true });
+      assert.equal(pack.editedFields.includes("name"), true);
+      await api().editor.revert("material:iron");
+      assert.equal(env.values.editorDefinitions.records["material:iron"], undefined, "the revert took the patch back");
+    });
+  });
+});

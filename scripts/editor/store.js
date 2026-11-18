@@ -18,6 +18,7 @@ import { buildRegistry } from "./build.js";
 import { exportBundle, planImport } from "./exchange.js";
 import { emptyStore, keyOf, repairStore } from "./layer.js";
 import { backUpOnce } from "../backup.js";
+import { withLock } from "../queue/lock.js";
 import { EDITOR_SETTING, readEditorStore, writeEditorStore } from "./setting.js";
 
 const requireGM = what => { if (!game.user?.isGM) throw new Error(`${what}: GM only`); };
@@ -96,7 +97,7 @@ export const damaged = () => readEditorStore().problems;
  * GM: put a damaged store right by dropping ONLY its damaged records (the sound ones stay and load again). The raw damaged value is kept once in the backup setting first. A store whose
  * outer shape is unknown has nothing to salvage record by record: that is refused unless `{ reset: true }` is passed (it then starts empty; the raw copy stays in the backup).
  */
-export async function repair(api, { reset = false } = {}) {
+async function repairIn(api, { reset = false } = {}) {
   requireGM("editor.repair");
   const { problems, raw } = readEditorStore();
   if (!problems.length) return { repaired: false, dropped: [] };
@@ -187,7 +188,7 @@ function defaultsFor(kind, fields) {
  * Create a definition AND its linked world item. `fields` for a material: { name, tier?, value?, bulk?, img?, description?, tag?, label?, research?, effectBlocks?, id? };
  * for a note: { name, recipeId, preset?: "plan" | "research", ... }. Returns { key, record, item }.
  */
-export async function create(api, kind, fields, { makeItem = true } = {}) {
+async function createIn(api, kind, fields, { makeItem = true } = {}) {
   requireGM("editor.create");
   if (!["material", "note", "tag"].includes(kind)) throw new EditorError(`the editor makes materials, notes and tags (not "${kind}")`);
   if (!String(fields?.name ?? "").trim()) throw new EditorError("Give it a name first.");
@@ -225,7 +226,7 @@ export function impactOf(api, key, fields) {
  * Change fields of a definition. A field set to `undefined` or `null` is removed (a patch field goes back to the pack's value). If characters already know something that
  * this changes, nothing is written until the caller passes `confirmed: true` (the window asks the GM first).
  */
-export async function update(api, key, fields, { confirmed = false } = {}) {
+async function updateIn(api, key, fields, { confirmed = false } = {}) {
   requireGM("editor.update");
   const store = current();
   const record = api.definitions[kindOf(key)]?.get(idOf(key));
@@ -246,17 +247,17 @@ export async function update(api, key, fields, { confirmed = false } = {}) {
 }
 
 /** Take back an edit of a pack definition (every field, or one). */
-export async function revert(api, key, field) {
+async function revertIn(api, key, field) {
   requireGM("editor.revert");
   const rec = current().records[key];
   if (!rec || rec.mode !== "patch") throw new EditorError("That item has no edits to take back.");
-  return update(api, key, field ? { [field]: undefined } : Object.fromEntries(Object.keys(rec.fields).map(f => [f, undefined])), { confirmed: true });
+  return updateIn(api, key, field ? { [field]: undefined } : Object.fromEntries(Object.keys(rec.fields).map(f => [f, undefined])), { confirmed: true });
 }
 
-export const retire = (api, key, retired = true) => update(api, key, { retired: retired ? true : undefined }, { confirmed: true });
+const retireIn = (api, key, retired = true) => updateIn(api, key, { retired: retired ? true : undefined }, { confirmed: true });
 
 /** Delete an editor-made definition that nothing uses. A pack's definition can only be retired. */
-export async function remove(api, key) {
+async function removeIn(api, key) {
   requireGM("editor.remove");
   const store = current();
   const rec = store.records[key];
@@ -293,13 +294,13 @@ export async function makeItem(api, key) {
 const overlayNow = () => game.settings.get(MODULE_ID, DISCOVERY.overlaySetting) ?? {};
 
 /** Set (or with null clear) one item's research track. Clearing also works for an ORPHANED overlay entry (its item is gone). */
-export async function setTrack(api, key, track) {
+async function setTrackIn(api, key, track) {
   requireGM("setTrack");
   const kind = kindOf(key), exists = Boolean(api.definitions?.[kind]?.get(idOf(key)));
   if (track === null) {
     const overlay = overlayNow();
     if (key in overlay) { const next = { ...overlay }; delete next[key]; await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, next); }
-    if (exists && current().records[key]?.fields?.research) await update(api, key, { research: undefined }, { confirmed: true });
+    if (exists && current().records[key]?.fields?.research) await updateIn(api, key, { research: undefined }, { confirmed: true });
     else if (!exists && !(key in overlay) && !current().records[key]) throw new EditorError(`There is no track for ${key}.`);
     return true;
   }
@@ -313,7 +314,7 @@ export async function setTrack(api, key, track) {
       if (!recipeId || !api.definitions.recipe.get(recipeId)) throw new Error(`setTrack: milestone ${i + 1}: pick a formula that exists`);
     }
   });
-  await update(api, key, { research: track }, { confirmed: true });
+  await updateIn(api, key, { research: track }, { confirmed: true });
   // The editor's record is now the only source: an older overlay entry for the same item would otherwise still win.
   const overlay = overlayNow();
   if (key in overlay) { const next = { ...overlay }; delete next[key]; await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, next); }
@@ -321,7 +322,7 @@ export async function setTrack(api, key, track) {
 }
 
 /** Fold the old tracks overlay into the editor's records (once; later calls find nothing). Overlay entries whose item is gone stay as leftovers. */
-export async function foldOverlay(api) {
+async function foldOverlayIn(api) {
   requireGM("editor.foldOverlay");
   const overlay = overlayNow();
   const folded = [], left = {};
@@ -348,7 +349,7 @@ export function leftovers(api) {
 }
 
 /** Remove one leftover: the saved edit and/or the orphaned track. */
-export async function clearLeftover(api, key) {
+async function clearLeftoverIn(api, key) {
   requireGM("editor.clearLeftover");
   const overlay = overlayNow();
   if (key in overlay) { const next = { ...overlay }; delete next[key]; await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, next); }
@@ -365,7 +366,7 @@ export function exportRecords(api, keys = null) {
 }
 
 /** Bring records from a bundle into this world. Clashes are skipped (or replaced with `replace`); a bundle that would break a definition imports nothing. */
-export async function importRecords(api, bundle, { replace = false, makeItems = true } = {}) {
+async function importRecordsIn(api, bundle, { replace = false, makeItems = true } = {}) {
   requireGM("editor.importRecords");
   const defined = new Set();
   for (const kind of ["material", "note", "tag"]) for (const id of api.definitions[kind].keys()) if (!current().records[keyOf(kind, id)]) defined.add(keyOf(kind, id));
@@ -383,5 +384,32 @@ export async function importRecords(api, bundle, { replace = false, makeItems = 
   await logWorldEvent(`editor: imported ${incoming.length} record${incoming.length === 1 ? "" : "s"}`);
   return { added: plan.add.map(r => keyOf(r.kind, r.id)), replaced: plan.replace.map(r => keyOf(r.kind, r.id)), skipped: plan.skip };
 }
+
+// The public entry points, LOCKED --------------------------------------------------------------------------------------------------
+/**
+ * Every change to the saved definitions is read-clone-write (and then the registry is rebuilt and installed). Two overlapping changes would each start from the SAME store and the second write
+ * would erase the first (two quick creates; two slot saves on one recipe), and two creates could pick the same free id. So each change takes this one keyed lock and decides on the store
+ * as it is INSIDE the lock (the `...In` functions above read it fresh). "editorStore" is a LEAF lock: nothing inside asks for another lock (the work is the store, the registry rebuild,
+ * the world item, the audit line and the definitions revision), and the `...In` functions never take it, so one editor change calling another cannot wait on itself.
+ * Where it sits among the others: the tag and queue code take their own locks (actor, node, tagLedger, tagCaps, tagCrafted, tagBackup) and never hold one while asking for this.
+ */
+export const EDITOR_LOCK = "editorStore";
+const locked = async (what, fn) => { requireGM(what); return withLock(EDITOR_LOCK, fn); };
+export const create = (api, kind, fields, options) => locked("editor.create", () => createIn(api, kind, fields, options));
+export const update = (api, key, fields, options) => locked("editor.update", () => updateIn(api, key, fields, options));
+/** Like `update`, but `build(record)` makes the fields from the definition AS IT IS inside the lock (a caller that works a whole list out first, such as a recipe's slots, would otherwise use a stale one). */
+export const updateWith = (api, key, build, options) => locked("editor.update", () => {
+  const record = api.definitions?.[kindOf(key)]?.get(idOf(key));
+  if (!record) throw new EditorError(`There is no ${key} to edit.`);
+  return updateIn(api, key, build(clone(record)), options);
+});
+export const revert = (api, key, field) => locked("editor.revert", () => revertIn(api, key, field));
+export const retire = (api, key, retired) => locked("editor.retire", () => retireIn(api, key, retired));
+export const remove = (api, key) => locked("editor.remove", () => removeIn(api, key));
+export const setTrack = (api, key, track) => locked("setTrack", () => setTrackIn(api, key, track));
+export const foldOverlay = api => locked("editor.foldOverlay", () => foldOverlayIn(api));
+export const clearLeftover = (api, key) => locked("editor.clearLeftover", () => clearLeftoverIn(api, key));
+export const importRecords = (api, bundle, options) => locked("editor.importRecords", () => importRecordsIn(api, bundle, options));
+export const repair = (api, options) => locked("editor.repair", () => repairIn(api, options));
 
 export { emptyStore, EDITOR_SETTING };

@@ -159,8 +159,8 @@ export async function setSlotKind(api, recipeId, slotName, kind) {
   if (!recipe.slots.some(s => s.name === slotName)) throw new TagError(`${recipe.name} has no slot "${slotName}".`);
   const clean = kind === null || kind === undefined || String(kind).trim() === "" ? null : String(kind).trim();
   if (clean !== null && !/^[a-z0-9][a-z0-9_-]*$/.test(clean)) throw new TagError("A kind is lowercase letters, numbers, - or _ (for example blade or decoration).");
-  const slots = recipe.slots.map(s => { if (s.name !== slotName) return s; const { kind: _old, ...rest } = s; return clean ? { ...rest, kind: clean } : rest; });
-  try { await api.editor.update(`recipe:${recipeId}`, { slots }, { confirmed: true }); } catch (error) { throw new TagError(error.message, error.details); }
+  const change = fresh => ({ slots: fresh.slots.map(s => { if (s.name !== slotName) return s; const { kind: _old, ...rest } = s; return clean ? { ...rest, kind: clean } : rest; }) });
+  try { await api.editor.updateWith(`recipe:${recipeId}`, change, { confirmed: true }); } catch (error) { throw new TagError(error.message, error.details); }
   return api.definitions.recipe.get(recipeId).slots.find(s => s.name === slotName);
 }
 
@@ -172,9 +172,13 @@ export async function setTagOverride(api, recipeId, tagId, slotKind, set) {
   requireGM("tags.setTagOverride");
   const recipe = api.definitions?.recipe?.get(recipeId);
   if (!recipe) throw new TagError(`There is no recipe "${recipeId}".`);
-  const others = (recipe.tagOverrides ?? []).filter(o => !(o.tag === tagId && o.slot === slotKind));
-  const next = set ? [...others, { tag: tagId, slot: slotKind, ...(set.power !== undefined ? { power: set.power } : {}), blocks: structuredClone(set.blocks ?? []) }] : others;
-  try { await api.editor.update(`recipe:${recipeId}`, { tagOverrides: next.length ? next : undefined }, { confirmed: true }); } catch (error) { throw new TagError(error.message, error.details); }
+  // the list is worked out from the recipe AS IT IS inside the editor's lock, so two overlapping changes to one recipe both land
+  const change = fresh => {
+    const others = (fresh.tagOverrides ?? []).filter(o => !(o.tag === tagId && o.slot === slotKind));
+    const next = set ? [...others, { tag: tagId, slot: slotKind, ...(set.power !== undefined ? { power: set.power } : {}), blocks: structuredClone(set.blocks ?? []) }] : others;
+    return { tagOverrides: next.length ? next : undefined };
+  };
+  try { await api.editor.updateWith(`recipe:${recipeId}`, change, { confirmed: true }); } catch (error) { throw new TagError(error.message, error.details); }
   return structuredClone(api.definitions.recipe.get(recipeId).tagOverrides ?? []);
 }
 
@@ -190,12 +194,14 @@ export async function setSlotNeeds(api, recipeId, slotName, needs) {
   const clean = needs ? { all: [...new Set(needs.all ?? [])], ...(needs.optional ? { optional: true } : {}) } : null;
   if (clean && clean.all.length === 0) throw new TagError("Pick at least one tag for the slot to need (or take the requirement away).");
   for (const t of clean?.all ?? []) if (!api.definitions.tag?.has(t)) throw new TagError(`"${t}" is not a tag yet: create it first.`);
-  const slots = recipe.slots.map(s => {
-    if (s.name !== slotName) return s;
-    const { needs: _old, ...rest } = s;
-    return clean ? { ...rest, needs: clean } : rest;
+  const change = fresh => ({
+    slots: fresh.slots.map(s => {
+      if (s.name !== slotName) return s;
+      const { needs: _old, ...rest } = s;
+      return clean ? { ...rest, needs: clean } : rest;
+    })
   });
-  try { await api.editor.update(`recipe:${recipeId}`, { slots }, { confirmed: true }); }
+  try { await api.editor.updateWith(`recipe:${recipeId}`, change, { confirmed: true }); }
   catch (error) { throw new TagError(error.message, error.details); }
   return api.definitions.recipe.get(recipeId).slots.find(s => s.name === slotName);
 }

@@ -395,6 +395,7 @@ Hooks.once("ready", async () => {
     editor: {
       create: (kind, fields, options) => editorStore.create(api, kind, fields, options),
       update: (key, fields, options) => editorStore.update(api, key, fields, options),
+      updateWith: (key, build, options) => editorStore.updateWith(api, key, build, options),
       revert: (key, field) => editorStore.revert(api, key, field),
       retire: (key, retired) => editorStore.retire(api, key, retired),
       remove: key => editorStore.remove(api, key),

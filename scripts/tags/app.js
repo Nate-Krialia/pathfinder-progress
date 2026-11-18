@@ -82,9 +82,14 @@ export function build() {
       });
     }
 
+    /** One change at a time: a second click (a double-click on Save or Create) while the first is still being saved does nothing, instead of starting a second save of the same thing. */
+    #busy = false;
     async #run(fn) {
+      if (this.#busy) return undefined;
+      this.#busy = true;
       try { this.ui.message = await fn(); }
       catch (error) { this.ui.message = error.message; if (!error.details) console.warn(`${MODULE_ID} | item tags: ${error.message}`); }
+      finally { this.#busy = false; }
       return this.render();
     }
 

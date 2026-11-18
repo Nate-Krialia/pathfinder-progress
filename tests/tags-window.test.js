@@ -349,3 +349,26 @@ test("WINDOW: a click on a button that DOES use the reserved name \"tab\" withou
   assert.equal(app.ui.tab, before, "nothing switched");
   assert.match(errors.join("\n"), /You must pass both the tab and tab group identifier/);
 });
+
+test("WINDOW BUSY: a double-click on Create tag starts ONE save, not two (the second click while the first is still being saved does nothing)", async () => {
+  const { app, el, set, text } = await windowFor();
+  let calls = 0;
+  const realCreate = app.api.editor.create;
+  app.api.editor.create = async (...args) => { calls++; await wait(40); return realCreate(...args); };
+  try {
+    await click0(el, "pfp-tab", '[data-tab="tags"]');
+    await set('[data-field="new-tag-name"]', "Double Click");
+    const button = el().querySelector('[data-action="create-tag"]');
+    button.click(); button.click();
+    await wait(200);
+    assert.equal(calls, 1, "only one create was started");
+    assert.match(text(), /Made the tag Double Click/);
+    assert.deepEqual([...api().definitions.tag.values()].filter(t => t.name === "Double Click").map(t => t.id), ["double-click"], "and there is one such tag");
+    // after the first finished, the next click works again
+    await set('[data-field="new-tag-name"]', "Second Tag");
+    el().querySelector('[data-action="create-tag"]').click();
+    await wait(200);
+    assert.equal(calls, 2);
+  } finally { app.api.editor.create = realCreate; }
+});
+async function click0(el, action, where) { el().querySelector(`[data-action="${action}"]${where}`).click(); await wait(30); }
