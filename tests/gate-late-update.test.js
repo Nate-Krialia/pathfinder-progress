@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { as, enableEcho, getApi, getUsers, makeRegistry, quietly, world } from "./fake-world.js";
+import { as, enableEcho, fireHookAs, getApi, getUsers, M, makeRegistry, quietly, world } from "./fake-world.js";
 
 /** A gate doc's blocks by step number, run like a browser console (top-level await wrapped, the last expression is the value). */
 function gateBlocks(file) {
@@ -159,4 +159,48 @@ test("GATE 13 step 18: Gate Absent's queued gather, put there by the GM's step 1
     assert.notEqual(player.value, "ALL PASS");
     assert.ok(player.lines.some(l => /^FAIL: Gate Absent has a queued gather to try to cancel/.test(l)), player.lines.join("\n"));
   } finally { finish13(); }
+});
+
+// ---- gate 16 -------------------------------------------------------------------------------------------------------------------------------
+const GATE16 = gateBlocks("docs/16-stage10d-gate.md");
+const roll16 = (degree, total, natural) => ({ options: { degreeOfSuccess: degree }, total, dice: [{ faces: 20, results: [{ result: natural, active: true }] }] });
+
+/** Play gate 16 up to (not including) `stopBefore`, as tests/gate16.test.js plays it (steps 7 and 9 and 17 have their own fake-side work). */
+async function playGate16({ stopBefore, echoFrom, echoActor, delay = 250 }) {
+  const w = await world({ downtime: 0, iron: 0, fang: 0, perClientDefinitions: true });
+  const api = getApi();
+  const { gm, testUser } = getUsers();
+  const GM_STEPS = new Set([5, 7, 11, 13, 17, 19]);
+  await quietly(async () => {
+    await as(gm, () => (0, eval)(wrap(GATE16.get(2))));
+    await as(testUser, () => (0, eval)(wrap(GATE16.get(3))));
+    for (let step = 4; step < stopBefore; step++) {
+      if (step === 9) { api.definitions = makeRegistry(); delete globalThis.__g4; await as(gm, () => (0, eval)(wrap(GATE16.get(2)))); }
+      if (step === echoFrom) enableEcho(game.actors.getName(echoActor), testUser, delay);
+      const user = GM_STEPS.has(step) ? gm : testUser;
+      if (!user.isGM && globalThis.__p4) await as(user, () => api.definitions.refresh());
+      if (step === 7) game.actors.getName("Gate Smith").rolls.push(roll16(2, 22, 12));
+      const { value, lines } = await runCollecting(GATE16.get(step), user);
+      assert.equal(value, "ALL PASS", `gate 16 step ${step}: ${lines.filter(l => l.startsWith("FAIL")).join("\n")}`);
+      if (step === 17) await fireHookAs(testUser, "updateActor", [game.actors.getName("Gate Friend")], { flags: { [M]: { formulas: [] } } });
+    }
+  });
+  return { testUser };
+}
+const finish16 = () => { delete globalThis.__p4; delete globalThis.__g4; };
+
+test("GATE 16 step 14: what the GM's step 13 craft taught reaches the Player's window later; the step waits for it (and fails without the wait)", async () => {
+  const { testUser } = await playGate16({ stopBefore: 14, echoFrom: 13, echoActor: "Gate Smith" });
+  try {
+    const player = await runCollecting(GATE16.get(14), testUser);
+    assert.equal(player.value, "ALL PASS", player.lines.join("\n"));
+  } finally { finish16(); }
+  const again = await playGate16({ stopBefore: 14, echoFrom: 13, echoActor: "Gate Smith" });
+  try {
+    const noWait = GATE16.get(14).replace(/  await p\.until\([^\n]*\n/, "");
+    assert.notEqual(noWait, GATE16.get(14), "the mutation changed the block");
+    const player = await runCollecting(noWait, again.testUser);
+    assert.notEqual(player.value, "ALL PASS");
+    assert.ok(player.lines.some(l => /^FAIL: both effects are known, learned by crafting/.test(l)), player.lines.join("\n"));
+  } finally { finish16(); }
 });

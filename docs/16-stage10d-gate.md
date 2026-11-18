@@ -351,6 +351,7 @@ await (async () => {
 // [Player] same window, no reload, no refresh call: the preview knows what it learned, per material and slot, not per combination.
 await (async () => {
   const p = globalThis.__p4 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
+  await p.until(() => p.api.compendium.knownEffect(p.smith, "g4-blade", "body", "g4-steel").known === true);   // what the GM's step 13 craft taught reaches this window as a later update: wait for it (the checks say what was read if it never came)
   const now = p.preview(p.smith, { body: "g4-steel", edge: "g4-star" }).plan;
   p.check("both effects are known, learned by crafting", now.slots.every(s => s.effect.known && s.effect.via === "class"), JSON.stringify(now.slots.map(s => s.effect.via)));
   p.check("the result tier is known: T2 (the steel in the body slot)", JSON.stringify(now.result) === '{"known":true,"baseTier":2}', JSON.stringify(now.result));
