@@ -245,6 +245,7 @@ await (async () => {
 // [Player] materials, the wolf (yield still locked: nothing shown, no question marks) and the region.
 await (async () => {
   const p = globalThis.__p2 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
+  await p.until(() => p.api.compendium.view(p.hero).entries.regions.length === 1);   // the GM's step 7 reaches this window as a later update: wait for it (the checks below say what was read if it never came)
   const view = p.api.compendium.view(p.hero);
   const wolf = view.entries.creatures.find(c => c.name === "Gate Wolf");
   p.check("2 materials, 1 creature, 1 region", view.entries.materials.length === 2 && view.entries.creatures.length === 1 && view.entries.regions.length === 1, JSON.stringify([view.entries.materials.length, view.entries.creatures.length, view.entries.regions.length]));

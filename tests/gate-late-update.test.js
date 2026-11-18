@@ -102,3 +102,21 @@ test("GATE 14 step 14: if the update never arrives the step FAILS and prints eve
     assert.ok(detail.pending.every(a => a.id));
   } finally { finish(); }
 }, { timeout: 20000 });
+
+test("GATE 14 step 8: the region the GM's expedition recorded reaches the Player's window later; the step waits for it (and fails without the wait)", async () => {
+  const { testUser } = await playGate14({ stopBefore: 8, echoFrom: 7, delay: 250 });
+  try {
+    const smith = game.actors.getName("Gate Smith");
+    const withWait = await runCollecting(GATE14.get(8), testUser);
+    assert.equal(withWait.value, "ALL PASS", withWait.lines.join("\n"));
+    assert.ok(smith.getFlag("pathfinder-progress", "compendium").regions["g2-wood"], "the region really was recorded");
+  } finally { finish(); }
+  const again = await playGate14({ stopBefore: 8, echoFrom: 7, delay: 250 });
+  try {
+    const noWait = GATE14.get(8).replace(/  await p\.until\([^\n]*\n/, "");
+    assert.notEqual(noWait, GATE14.get(8), "the mutation changed the block");
+    const player = await runCollecting(noWait, again.testUser);
+    assert.notEqual(player.value, "ALL PASS");
+    assert.ok(player.lines.some(l => /^FAIL: 2 materials, 1 creature, 1 region/.test(l)), player.lines.join("\n"));
+  } finally { finish(); }
+});
