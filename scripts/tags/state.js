@@ -300,11 +300,19 @@ export function itemsWithFreezeId(id) {
   return [...everyItem()].filter(i => i.getFlag?.(MODULE_ID, "crafted")?.freezeId === id);
 }
 
+/** The freeze ids of every crafted item in the world, in ONE pass over the items (a prune looks every record up in this set instead of searching all items once per record). */
+export function freezeIdsInWorld() {
+  const ids = new Set();
+  for (const item of everyItem()) { const id = item.getFlag?.(MODULE_ID, "crafted")?.freezeId; if (id) ids.add(id); }
+  return ids;
+}
+
 /** GM safety net: drop every frozen result that no item in the world carries any more (actors' items, world items and the items of unlinked tokens' actors). Run by hand (api.tags.pruneFrozen()), never on its own. */
 export async function pruneFrozen() {
   requireGM("tags.pruneFrozen");
   return changeFrozen(draft => {
-    const gone = Object.keys(draft.items).filter(id => !draft.items[id].held && itemsWithFreezeId(id).length === 0);
+    const carried = freezeIdsInWorld();
+    const gone = Object.keys(draft.items).filter(id => !draft.items[id].held && !carried.has(id));
     if (!gone.length) return skip({ removed: [] });
     for (const id of gone) delete draft.items[id];
     return { result: { removed: gone } };

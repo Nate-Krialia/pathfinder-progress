@@ -304,3 +304,19 @@ test("UNLINKED TOKENS: a LINKED token is not searched twice (its actor is the wo
   const { itemsWithFreezeId } = await import("../scripts/tags/state.js");
   assert.equal(itemsWithFreezeId(id).length, 1, "the linked token's items are not counted; only the world actor's own");
 });
+
+// pruneFrozen is one pass, not one search per record (stage 1 finding 25) ---------------------------------------------------------------------
+test("PRUNE SPEED: pruneFrozen reads each item once (not once per record) and removes exactly the records nothing carries", async () => {
+  const w = await frozenWorld();
+  const ids = await as(w.gm, async () => { const out = []; for (let i = 0; i < 30; i++) out.push((await tagState.freezeCraft(planOf(`R${i}`))).id); return out; });
+  let reads = 0;
+  const carriers = ids.slice(0, 10).map(id => ({ id: `fake-${id}`, getFlag: (scope, key) => { reads++; return scope === M && key === "crafted" ? { freezeId: id } : undefined; } }));
+  const others = Array.from({ length: 40 }, (_, i) => ({ id: `plain-${i}`, getFlag: () => { reads++; return undefined; } }));
+  for (const item of [...carriers, ...others]) game.items.push(item);
+  try {
+    const result = await as(w.gm, () => api().tags.pruneFrozen());
+    assert.deepEqual(result.removed.sort(), ids.slice(10).sort(), "the 20 records no item carries are gone, the 10 carried ones stay");
+    assert.equal(reads, 50, "each of the 50 world items was read exactly once");
+    assert.deepEqual(Object.keys(env.values.tagCrafted.items).sort(), ids.slice(0, 10).sort());
+  } finally { for (const item of [...carriers, ...others]) game.items.splice(game.items.indexOf(item), 1); }
+});
