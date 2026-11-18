@@ -196,7 +196,7 @@ export function cancel(actor, actionId) {
 /** On the GM client (also the socket handler): check who is asking, then cancel. */
 export async function runCancel(payload, context) {
   requireGM("cancel");
-  const user = work.callerOf(payload, context);
+  const user = work.senderOf(payload, context);
   const actor = actorFor(payload.actorId);
   work.assertOwner(actor, user, "cancel");
   return returnQueued(actor, payload.actionId, { chat: false, verb: `cancelled by ${user.name}` });

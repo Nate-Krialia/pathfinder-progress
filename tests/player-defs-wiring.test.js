@@ -231,7 +231,7 @@ test("GM UNAFFECTED: a GM client refreshes to nothing, loads everything, and its
   assert.equal(as(w.gm, () => api().previewCraft(w.ann, "longsword-basic", {})).errors.some(e => /does not know the formula/.test(e)), true);
 });
 
-test("IDENTITY: the handler trusts socketlib's sender and IGNORES the id in the payload; with no sender it falls back to the payload's", async () => {
+test("IDENTITY: the handler trusts socketlib's sender and IGNORES the id in the payload; with no sender only the local GM's own id is accepted", async () => {
   const w = await world2();
   const handler = env.handlers.get("definitionsFor");
   const bySocketlib = await handler.call({ socketdata: { userId: w.annUser.id } }, { userId: w.bobUser.id });          // Bob's id sent, Ann's is the real sender
@@ -239,9 +239,10 @@ test("IDENTITY: the handler trusts socketlib's sender and IGNORES the id in the 
   const forgedGM = await handler.call({ socketdata: { userId: w.annUser.id } }, { userId: w.gm.id });
   assert.ok(Array.isArray(forgedGM.records), "a forged GM id in the payload changes nothing");
   assert.deepEqual(await handler.call({ socketdata: { userId: w.gm.id } }, {}), { __relay: "refused", message: "The GM client loads every definition itself; there is nothing to fetch." });
-  const noSender = await handler.call(undefined, { userId: w.bobUser.id });
-  assert.deepEqual(noSender.records.filter(r => r.kind === "recipe"), [], "Bob holds none");
-  assert.deepEqual(await handler.call(undefined, { userId: "nobody" }), { __relay: "refused", message: 'the GM client does not know the user "nobody"' });
+  const NO_SENDER = { __relay: "refused", message: "This request did not say who is asking, so it was not done." };
+  assert.deepEqual(await handler.call(undefined, { userId: w.bobUser.id }), NO_SENDER, "no sender: Bob's id in the payload is not believed");
+  assert.deepEqual(await handler.call(undefined, { userId: "nobody" }), NO_SENDER);
+  assert.deepEqual(await handler.call(undefined, { userId: w.gm.id }), { __relay: "refused", message: "The GM client loads every definition itself; there is nothing to fetch." }, "the local GM's own id is the one direct call that is accepted (and refused as a GM)");
   assert.deepEqual(env.handlerThrows, []);
 });
 

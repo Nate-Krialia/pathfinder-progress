@@ -39,10 +39,10 @@ import { stationReductions } from "../workshop/rules.js";
 import * as gmLog from "../gm-log.js";
 import * as tagState from "../tags/state.js";
 import { GENERIC_FAILURE, refusal, unwrap } from "./relay.js";
-import { appendAction, assertOwner, callerOf, flagKey, gmIds, giveBack, note, ownerIds, pendingOf, recordReturned, takeEscrow, undoAll, undoThenThrow, whisper } from "./common.js";
+import { appendAction, assertOwner, callerOf, senderOf, flagKey, gmIds, giveBack, note, ownerIds, pendingOf, recordReturned, takeEscrow, undoAll, undoThenThrow, whisper } from "./common.js";
 
 // Re-exported: the queue store and the tests reach these through work.js.
-export { assertOwner, callerOf, note, recordReturned, undoAll };
+export { assertOwner, callerOf, senderOf, note, recordReturned, undoAll };
 import { planReject, planResolve, planSubmit } from "./reservation.js";
 
 export const WORK_TYPES = ["craft", "gather", "share", "build"];
@@ -122,7 +122,7 @@ export function submitWork(actor, type, params, days) {
 
 /** On the GM client: check who is asking and queue the action. `context` is socketlib's `this`, if any. */
 export async function runSubmit(payload, context) {
-  const user = callerOf(payload, context);
+  const user = senderOf(payload, context);
   const actor = game.actors.get(payload.actorId);
   if (!actor) throw refusal(`submit: no character with id "${payload.actorId}"`);
   assertOwner(actor, user, "submit");

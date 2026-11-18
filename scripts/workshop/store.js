@@ -16,7 +16,7 @@ import { abandonProject as abandonRecord } from "../research/project.js";
 import { rawList } from "../research/store.js";
 import { describeEscrow, refusalText } from "../queue/escrow.js";
 import { actorKey, withLocks } from "../queue/lock.js";
-import { assertOwner, callerOf, flagKey, giveBack, note, pendingOf, recordReturned, takeEscrow, undoThenThrow } from "../queue/common.js";
+import { assertOwner, senderOf, flagKey, giveBack, note, pendingOf, recordReturned, takeEscrow, undoThenThrow } from "../queue/common.js";
 import { refusal } from "../queue/relay.js";
 import { asGM } from "../queue/work.js";
 import { mayUse, readStations } from "../stations/store.js";
@@ -125,7 +125,7 @@ export async function grantDesign(api, actor, blueprintId) {
 // The relays ---------------------------------------------------------------------------------------------------------
 /** On the GM client (also the socket handler): check who is asking, then start. */
 export async function runWorkshopStart(payload, context) {
-  const user = callerOf(payload, context);
+  const user = senderOf(payload, context);
   const actor = game.actors.get(payload?.actorId);
   if (!actor) throw refusal(`There is no character with id "${payload?.actorId}".`);
   assertOwner(actor, user, "workshop");
@@ -138,7 +138,7 @@ export async function runWorkshopStart(payload, context) {
 }
 
 export async function runWorkshopAside(payload, context) {
-  const user = callerOf(payload, context);
+  const user = senderOf(payload, context);
   const actor = game.actors.get(payload?.actorId);
   if (!actor) throw refusal(`There is no character with id "${payload?.actorId}".`);
   assertOwner(actor, user, "workshop");

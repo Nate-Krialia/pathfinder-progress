@@ -11,7 +11,7 @@
  */
 import { COMPENDIUM, DEFINITIONS_SYNC, EXPLORATION, MODULE_ID, NODE_FLAG, QUEUE_KEYS, RESEARCH_KEYS, STATION_KEYS, WORKSHOP } from "../config.js";
 import * as adapter from "../adapter/pf2e.js";
-import { callerOf } from "../queue/common.js";
+import { senderOf } from "../queue/common.js";
 import { asGM } from "../queue/work.js";
 import { refusal } from "../queue/relay.js";
 import * as events from "../events.js";
@@ -107,12 +107,12 @@ export function gatherFacts(user) {
 // GM side ---------------------------------------------------------------------------------------------------------------
 /**
  * The `definitionsFor` socket handler. The caller is whoever socketlib says sent the message (`this.socketdata.userId`; real
- * socketlib takes it from Foundry's own socket event, not from the payload). The payload's `userId` is used only when there is no
- * socketdata at all (a direct call on a GM client). Honor system: see docs/10.
+ * socketlib takes it from Foundry's own socket event, not from the payload) (senderOf). A `userId` in the payload is believed only when it is the local GM's own id (a direct call on a
+ * GM client). Honor system: see docs/10.
  */
 export async function runDefinitionsFor(payload, context) {
   if (!game.user.isGM) throw new Error("definitionsFor: GM only");
-  const user = callerOf(payload, context);
+  const user = senderOf(payload, context);
   if (user.isGM) throw refusal("The GM client loads every definition itself; there is nothing to fetch.");
   const api = boundApi;
   if (!api?.definitions) throw refusal("The GM's definitions are not loaded yet; try again in a moment.");

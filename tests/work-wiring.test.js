@@ -663,8 +663,11 @@ test("another player cannot cancel someone else's queued item, or queue for thei
   env.relayContext = { socketdata: { userId: "u-bob" } };
   await assert.rejects(as(w.annUser, () => api.queue.cancel(w.ann, action.id)), /cancel: Bob does not own Ann/, "the sender socketlib reports wins over the id in the payload");
   env.relayContext = undefined;
+  // No socket sender: a payload id is NOT believed (only the local GM's own id is, for a direct call on the GM client), whoever it names
   assert.deepEqual(await env.handlers.get("queueCancel")({ actorId: w.ann.id, actionId: action.id, userId: "u-nobody" }),
-    { __relay: "refused", message: 'the GM client does not know the user "u-nobody"' }, "a guarded handler returns the refusal as data");
+    { __relay: "refused", message: "This request did not say who is asking, so it was not done." }, "a guarded handler returns the refusal as data");
+  assert.deepEqual(await env.handlers.get("queueCancel")({ actorId: w.ann.id, actionId: action.id, userId: w.ann.owners?.[0] ?? "u-ann" }),
+    { __relay: "refused", message: "This request did not say who is asking, so it was not done." }, "not even the real owner's id in the payload counts without a sender");
   assert.equal(snapshot(w), before);
 
   // The owner can; the handler itself only ever runs on a GM client.

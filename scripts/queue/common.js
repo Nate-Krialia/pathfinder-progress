@@ -27,9 +27,9 @@ export async function note(text) {
 }
 
 /**
- * The user behind a relayed call. socketlib may say who called (`socketdata.userId`); otherwise it is the id the
- * caller sent. Foundry cannot prove identity to a module, so this is an honor-system check (see docs/10): it stops
- * the buttons and the API being used on someone else's character, not a player determined to forge an id.
+ * The user behind a call made DIRECTLY in code (a GM using the api, a test): socketlib's sender if there is one, otherwise the id the caller sent. It trusts a `userId` in the payload, so
+ * it must NEVER be the identity check of a relayed (socket) handler: those use senderOf below, which only believes the socket's own sender, or a payload id equal to the local GM's own.
+ * Nothing relayed uses it now (queue submit and cancel, workshop start and put-aside, definitionsFor); a test scans the relayed entry points for it.
  */
 export function callerOf(payload, context) {
   const id = context?.socketdata?.userId ?? payload?.userId;
