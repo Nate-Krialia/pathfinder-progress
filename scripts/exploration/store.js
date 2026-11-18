@@ -17,6 +17,7 @@ import { exploreOdds, planExpedition, rollEncounter, simulateExpeditions } from 
 import { anchorTokenData, nodeTokenData, occupyUpdate, randomPositions, revealUpdate, vacateUpdate } from "./tokens.js";
 import { formatGmSummary } from "./summary.js";
 import { unwrap } from "../queue/relay.js";
+import { undoAll } from "../queue/common.js";
 import { noteNodesFound } from "../compendium/store.js";
 import { SEARCHED_ALREADY_TEXT, SEARCH_TEXT, searchMessage, spottedIds } from "./search.js";
 
@@ -360,14 +361,6 @@ export async function planRun(api, actor, action, { degree } = {}) {
   return { region, skill: picked.skill, rolls, encounter, plan: result.plan, days };
 }
 
-async function rollBack(undos) {
-  const failures = [];
-  for (const undo of [...undos].reverse()) {
-    try { await undo.run(); } catch (error) { failures.push(`${undo.what} (${error.message})`); }
-  }
-  if (failures.length) throw new Error(`could not undo: ${failures.join("; ")}. Check the scene by hand (api.clearMap clears what an expedition placed).`);
-}
-
 /**
  * Write the plan to the scene: the hidden node tokens (new tokens at the anchors' positions), the anchors marked
  * occupied, then the scene's GM-only state. Returns an async undo() that puts everything back; a failure part-way
@@ -403,10 +396,10 @@ export async function applyPlan(api, actor, run) {
     await writeSceneState(scene.id, next);
     undos.push({ what: "the scene's expedition state", run: () => writeSceneState(scene.id, hadState ? previousState : null) });
   } catch (error) {
-    await rollBack(undos).catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
+    await undoAll(undos, "Check the scene by hand (api.clearMap clears what an expedition placed).").catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
     throw error;
   }
-  return () => rollBack(undos);
+  return () => undoAll(undos, "Check the scene by hand (api.clearMap clears what an expedition placed).");
 }
 
 /** Tell the GMs what happened. Players are told nothing here: their result stays with the GM. */

@@ -60,12 +60,16 @@ export function assertOwner(actor, user, what) {
 }
 
 // Undo plumbing ---------------------------------------------------------------------------------------------------
-export async function undoAll(undos) {
+/**
+ * Run the undos in reverse, ALL of them (one failing does not skip the rest). If any failed, throw ONE error that lists them (`error.failures`: ["<what> (<why>)", ...]) and ends with
+ * `advice` (what the GM should check by hand). The one place this loop lives: the queue, the commissions, the direct craft, the gather and the expedition all use it.
+ */
+export async function undoAll(undos, advice = "Check these by hand.") {
   const failures = [];
   for (const undo of [...undos].reverse()) {
     try { await undo.run(); } catch (error) { failures.push(`${undo.what} (${error.message})`); }
   }
-  if (failures.length) throw new Error(`could not undo: ${failures.join("; ")}. Check these by hand.`);
+  if (failures.length) throw Object.assign(new Error(`could not undo: ${failures.join("; ")}. ${advice}`), { failures });
 }
 
 export async function undoThenThrow(undos, error) {
@@ -102,27 +106,23 @@ export async function consumeStackWithUndo(actor, stackId, units, undos) {
   return { freezeId: hold ? freezeId : null };
 }
 
+/**
+ * Give `quantity` of a material, with its undo (the new stack is deleted, or a topped-up one goes back to its old quantity). `material` is { id, name, tier }. The caller wraps this in
+ * whileHandled when the Compendium hook must stay out of it.
+ */
+export async function giveWithUndo(actor, material, quantity, undos) {
+  const before = adapter.getMaterialStacks(actor).find(s => s.materialId === material.id)?.quantity ?? 0;
+  const item = await adapter.giveMaterial(actor, material, quantity);
+  undos.push({ what: `${quantity}x ${material.id} on ${actor.name}`, run: () => (before === 0 ? item.delete() : item.update({ "system.quantity": before })) });
+  return item;
+}
+
 /** Take the materials (one stack at a time, each with its own undo) and the fee. Returns the undos. */
 export async function takeEscrow(actor, byStack, feeCopper) {
   const undos = [];
   try {
-    for (const [stackId, units] of Object.entries(byStack)) {
-      const item = actor.items.get(stackId);
-      if (!item) throw new Error(`${actor.name} no longer has that stack of materials`);
-      const snapshot = { quantity: item.system?.quantity ?? 1, data: item.toObject() };
-      const freezeId = item.getFlag?.(MODULE_ID, "crafted")?.freezeId;             // Slice 3: a crafted ingredient's frozen record goes with the item and comes back with it
-      const hold = freezeId ? await tagState.holdFrozen(freezeId) : null;           // the record stays in the GM-only store, marked held, while the item is in escrow
-      if (hold) undos.push({ what: "the hold on a crafted ingredient's record", run: () => hold.undo() });
-      await adapter.consumeMaterialStacks(actor, { [stackId]: units });
-      undos.push({
-        what: `materials on ${actor.name}`,
-        run: async () => {
-          const existing = actor.items.get(stackId);
-          if (existing) await existing.update({ "system.quantity": snapshot.quantity });
-          else await adapter.createItemOnActor(actor, snapshot.data);
-        }
-      });
-    }
+    // Slice 3: a crafted ingredient's frozen record stays in the GM-only store, marked held, while the item is in escrow, and comes back with it
+    for (const [stackId, units] of Object.entries(byStack)) await consumeStackWithUndo(actor, stackId, units, undos);
     if (feeCopper > 0) {
       await adapter.removeCopper(actor, feeCopper);
       undos.push({ what: `${gpText(feeCopper)} on ${actor.name}`, run: () => adapter.addCopper(actor, feeCopper) });
@@ -153,12 +153,7 @@ export async function giveBack(actor, units, feeCopper = 0) {
           undos.push({ what: `${u.units}x ${u.name ?? u.materialId} on ${actor.name}`, run: async () => { if (released) await tagState.holdFrozen(u.freezeId); await created.delete(); } });
           continue;
         }
-        const before = adapter.getMaterialStacks(actor).find(s => s.materialId === u.materialId)?.quantity ?? 0;
-        const item = await adapter.giveMaterial(actor, { id: u.materialId, name: u.name ?? u.materialId, tier: u.tier }, u.units);
-        undos.push({
-          what: `${u.units}x ${u.materialId} on ${actor.name}`,
-          run: () => (before === 0 ? item.delete() : item.update({ "system.quantity": before }))
-        });
+        await giveWithUndo(actor, { id: u.materialId, name: u.name ?? u.materialId, tier: u.tier }, u.units, undos);
       }
     });
     if (feeCopper > 0) {

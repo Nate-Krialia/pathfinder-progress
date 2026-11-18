@@ -24,6 +24,7 @@ import { rawList, readFormulaList } from "../research/store.js";
 import { feeForTier } from "../stations/fees.js";
 import { actorNameOf, readStations, townOfActor } from "../stations/store.js";
 import { esc } from "../queue/review.js";
+import { consumeStackWithUndo, undoAll } from "../queue/common.js";
 import { buildCommission, checkStep, commissionWarnings, gpText, isOpen, suggestPayout, toCopper } from "./commission.js";
 import { ledgerChanges } from "./changes.js";
 import { affordabilityErrors, buildSteps } from "./escrow.js";
@@ -296,14 +297,6 @@ export function prepareCommissionCraft(api, id, options = {}) {
 }
 
 // Applying steps, with an undo for each --------------------------------------------------------------------------
-async function rollBack(undos) {
-  const failures = [];
-  for (const undo of [...undos].reverse()) {
-    try { await undo.run(); } catch (error) { failures.push(`${undo.what} (${error.message})`); }
-  }
-  if (failures.length) throw new Error(`could not undo: ${failures.join("; ")}. Check these by hand.`);
-}
-
 /**
  * Move the gold and items the steps call for. Every write adds its undo to `undos` (the CALLER's list, which also holds what was written before this, such as the frozen record); a failure
  * throws and the caller rolls the whole list back once. Returns the crafted ingredients whose frozen record is held: { actor, stackId, freezeId }.
@@ -315,22 +308,9 @@ async function applySteps(steps, actors, undos) {
     if (step.op === "consume") {
       // One stack at a time, each with its own undo, so a failure part-way through is fully reversible.
       for (const [stackId, units] of Object.entries(step.byStack)) {
-        const item = actor.items.get(stackId);
-        const snapshot = { quantity: item.system?.quantity ?? 1, data: item.toObject() };
-        // A crafted ingredient's frozen record is held while the item is out of the bag, exactly as takeEscrow does for a queued craft: the deleteItem hook would otherwise drop it the
-        // moment the stack is used up, and a rollback would hand the item back with nothing behind its freeze id.
-        const freezeId = item.getFlag?.(MODULE_ID, "crafted")?.freezeId;
-        const hold = freezeId ? await tagState.holdFrozen(freezeId) : null;
-        if (hold) { undos.push({ what: "the hold on a crafted ingredient's record", run: () => hold.undo() }); holds.push({ actor, stackId, freezeId }); }
-        await adapter.consumeMaterialStacks(actor, { [stackId]: units });
-        undos.push({
-          what: `materials on ${actor.name}`,
-          run: async () => {
-            const existing = actor.items.get(stackId);
-            if (existing) await existing.update({ "system.quantity": snapshot.quantity });
-            else await adapter.createItemOnActor(actor, snapshot.data);
-          }
-        });
+        // a crafted ingredient's frozen record is held while the item is out of the bag (see consumeStackWithUndo)
+        const { freezeId } = await consumeStackWithUndo(actor, stackId, units, undos);
+        if (freezeId) holds.push({ actor, stackId, freezeId });
       }
     } else if (step.op === "gold") {
       const apply = step.copper < 0 ? () => adapter.removeCopper(actor, -step.copper) : () => adapter.addCopper(actor, step.copper);
@@ -484,7 +464,7 @@ async function craftLocked(api, id, options) {
     holds = await applySteps(steps, actors, undos);
     await withRecord(next, () => commitCrafter(crafter, { formulas, projects, extra: options.extraUpdate, note: `commission ${c.id}` }));
   } catch (error) {
-    await rollBack(undos).catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
+    await undoAll(undos).catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
     throw error;
   }
   await settleHolds(holds);

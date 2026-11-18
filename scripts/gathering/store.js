@@ -12,6 +12,7 @@ import { activateRecord, makeAnchorRecord, makeCorpseRecord, makeNodeRecord, nor
 import { checkGatherable, hiddenSuccessChance, neededD20, pickSkill, resolveGather, visiblePassChance } from "./resolve.js";
 import { formatGatherSummary } from "./summary.js";
 import { noteGather, whileHandled } from "../compendium/store.js";
+import { giveWithUndo, undoAll } from "../queue/common.js";
 
 const rollDie = sides => Math.floor(CONFIG.Dice.randomUniform() * sides) + 1;
 const PASS = ["success", "criticalSuccess"];
@@ -134,35 +135,19 @@ export function nodeInfo(api, token) {
  * back (a new stack is deleted; a topped-up stack goes back to its old quantity).
  */
 export async function grantAll(actor, gains, definitions) {
-  const done = [];
+  const undos = [];
   try {
     for (const gain of gains) {
       const material = definitions.material.get(gain.materialId);
-      const before = adapter.getMaterialStacks(actor).find(s => s.materialId === gain.materialId)?.quantity ?? 0;
       // The gather records the Compendium itself, with place and rung, once it has committed: the createItem hook stays out of it.
-      const item = await whileHandled(actor.id, [gain.materialId], () => adapter.giveMaterial(actor, material, gain.quantity));
-      done.push({ item, before });
+      await whileHandled(actor.id, [gain.materialId], () => giveWithUndo(actor, material, gain.quantity, undos));
     }
   } catch (error) {
-    const undoFailures = [];
-    for (const { item, before } of done.reverse()) {
-      try {
-        if (before === 0) await item.delete();
-        else await item.update({ "system.quantity": before });
-      } catch (undoError) {
-        undoFailures.push(undoError.message);
-      }
-    }
-    error.undoFailures = undoFailures;
+    try { await undoAll(undos); } catch (undoError) { error.undoFailures = undoError.failures ?? [undoError.message]; }
     throw error;
   }
   // The caller can still take everything back if a later step fails.
-  return async () => {
-    for (const { item, before } of [...done].reverse()) {
-      if (before === 0) await item.delete();
-      else await item.update({ "system.quantity": before });
-    }
-  };
+  return () => undoAll(undos);
 }
 
 /** A dry run: shows DCs, your modifier and the odds, and any reason the gather would be refused. Spends nothing. */
