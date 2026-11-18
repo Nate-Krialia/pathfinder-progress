@@ -120,3 +120,43 @@ test("GATE 14 step 8: the region the GM's expedition recorded reaches the Player
     assert.ok(player.lines.some(l => /^FAIL: 2 materials, 1 creature, 1 region/.test(l)), player.lines.join("\n"));
   } finally { finish(); }
 });
+
+// ---- gate 13 -------------------------------------------------------------------------------------------------------------------------------
+const GATE13 = gateBlocks("docs/13-stage10a-gate.md");
+
+/** Play gate 13 up to (not including) `stopBefore` (the step order is the one tests/work-wiring.test.js plays). */
+async function playGate13({ stopBefore, echoFrom, echoActor, delay = 250 }) {
+  const w = await world({ downtime: 0, iron: 0, fang: 0 });
+  const api = getApi();
+  const { gm, testUser } = getUsers();
+  const ORDER = [[4, testUser], [5, gm], [6, testUser], [7, testUser], [8, testUser], [9, gm], [10, testUser], [11, gm], [12, testUser], [13, gm], [14, testUser], [15, testUser], [16, gm], [17, gm], [18, testUser]];
+  await quietly(async () => {
+    await as(gm, () => (0, eval)(wrap(GATE13.get(2))));
+    await as(testUser, () => (0, eval)(wrap(GATE13.get(3))));
+    for (const [step, user] of ORDER) {
+      if (step >= stopBefore) break;
+      if (step === 9) { api.definitions = makeRegistry(); delete globalThis.__gate; await as(gm, () => (0, eval)(wrap(GATE13.get(2)))); }
+      if (step === echoFrom) enableEcho(game.actors.getName(echoActor), testUser, delay);
+      const { value, lines } = await runCollecting(GATE13.get(step), user);
+      assert.equal(value, "ALL PASS", `gate 13 step ${step}: ${lines.filter(l => l.startsWith("FAIL")).join("\n")}`);
+    }
+  });
+  return { w, testUser };
+}
+const finish13 = () => { delete globalThis.__p; delete globalThis.__gate; };
+
+test("GATE 13 step 18: Gate Absent's queued gather, put there by the GM's step 17, reaches the Player's window later; the step waits for it (and fails without the wait)", async () => {
+  const { testUser } = await playGate13({ stopBefore: 18, echoFrom: 17, echoActor: "Gate Absent" });
+  try {
+    const player = await runCollecting(GATE13.get(18), testUser);
+    assert.equal(player.value, "ALL PASS", player.lines.join("\n"));
+  } finally { finish13(); }
+  const again = await playGate13({ stopBefore: 18, echoFrom: 17, echoActor: "Gate Absent" });
+  try {
+    const noWait = GATE13.get(18).replace(/  const patience = [^\n]*\n  while \([^\n]*\n/, "");
+    assert.notEqual(noWait, GATE13.get(18), "the mutation changed the block");
+    const player = await runCollecting(noWait, again.testUser);
+    assert.notEqual(player.value, "ALL PASS");
+    assert.ok(player.lines.some(l => /^FAIL: Gate Absent has a queued gather to try to cancel/.test(l)), player.lines.join("\n"));
+  } finally { finish13(); }
+});

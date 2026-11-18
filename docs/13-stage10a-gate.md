@@ -436,6 +436,8 @@ await (async () => {
   }
   const away = game.actors.getName("Gate Absent");
   if (!away) throw new Error("cannot see Gate Absent; the GM should check its ownership allows observing");
+  const patience = Date.now() + 6000;   // the GM's step 17 reaches this window as a later update: wait for Gate Absent's queued gather to show here
+  while (Date.now() < patience && (away.getFlag(p.M, "pendingActions") ?? [])[0]?.type !== "gather") await new Promise(r => setTimeout(r, 150));
   const theirs = (away.getFlag(p.M, "pendingActions") ?? [])[0];
   p.check("Gate Absent has a queued gather to try to cancel", theirs?.type === "gather");
   const cancel = await p.refused(() => p.api.queue.cancel(away, theirs.id));
