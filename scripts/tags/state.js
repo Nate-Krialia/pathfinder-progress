@@ -284,13 +284,23 @@ export async function removeFrozen(id) {
   });
 }
 
-/** Every crafted item the world can see (actors' items and world items) that carries this freeze id. */
-export function itemsWithFreezeId(id) {
-  const all = [...(game.actors ?? [])].flatMap(a => [...(a.items ?? [])]).concat([...(game.items ?? [])]);
-  return all.filter(i => i.getFlag?.(MODULE_ID, "crafted")?.freezeId === id);
+/**
+ * Every item in the world that could carry a crafted flag: the actors' items, the world's items, and the items of the actors that UNLINKED tokens stand for. A token that is not linked to its
+ * actor has its OWN copy of it (with its own items) that is not in `game.actors`; a crafted item can sit there (an NPC's loot), so a search that skipped them would say "no item carries this
+ * record" while one does.
+ */
+function* everyItem() {
+  for (const actor of game.actors ?? []) yield* (actor.items ?? []);
+  yield* (game.items ?? []);
+  for (const scene of game.scenes ?? []) for (const token of scene.tokens ?? []) if (!token.actorLink) yield* (token.actor?.items ?? []);
 }
 
-/** GM safety net: drop every frozen result that no item in the world carries any more. Unlinked token actors are not searched, so this is run by hand (api.tags.pruneFrozen()), never on its own. */
+/** Every crafted item the world can see (actors' items, world items, the items of unlinked tokens' actors) that carries this freeze id. */
+export function itemsWithFreezeId(id) {
+  return [...everyItem()].filter(i => i.getFlag?.(MODULE_ID, "crafted")?.freezeId === id);
+}
+
+/** GM safety net: drop every frozen result that no item in the world carries any more (actors' items, world items and the items of unlinked tokens' actors). Run by hand (api.tags.pruneFrozen()), never on its own. */
 export async function pruneFrozen() {
   requireGM("tags.pruneFrozen");
   return changeFrozen(draft => {

@@ -250,3 +250,57 @@ test("FROZEN LOCK: no function that holds the lock calls another that takes it (
   });
   assert.deepEqual(done, []);
 });
+
+// Crafted items on UNLINKED token actors count (stage 1 finding 3) ---------------------------------------------------------------------------
+import { makeActor, makeScene, makeToken } from "./fake-world.js";
+/** A scene with an unlinked token whose own actor holds a copy of `item`'s crafted flag (what an NPC's loot looks like: the actor is not in game.actors). */
+async function unlinkedCopyOf(item, { linked = false } = {}) {
+  const scene = makeScene("Gate Yard");
+  game.scenes.push(scene);
+  const token = makeToken({ name: "Goon" });
+  const actor = makeActor("Goon (token)", {});
+  token.actorLink = linked;
+  token.actor = actor;
+  scene.tokens.push(token);
+  await actor.createEmbeddedDocuments("Item", [{ name: "Looted", type: "weapon", system: {}, flags: { [M]: { crafted: item.getFlag(M, "crafted") } } }]);
+  return { scene, token, actor };
+}
+
+test("UNLINKED TOKENS: pruneFrozen keeps a record whose only carrier is an item on an unlinked token's actor, and still removes a truly orphaned one", async () => {
+  const w = await frozenWorld();
+  const looted = await craftIt(w);
+  const orphan = await craftIt(w);
+  const [lootId, orphanId] = [looted, orphan].map(i => i.getFlag(M, "crafted").freezeId);
+  await unlinkedCopyOf(looted);
+  await looted.delete();                               // the player's own item is gone; the goon still carries one
+  await orphan.delete();                               // nobody carries this one
+  const result = await as(w.gm, () => api().tags.pruneFrozen());
+  assert.deepEqual(result.removed, [orphanId], "only the orphan went");
+  assert.ok(env.values.tagCrafted.items[lootId], "the record the unlinked token's actor still needs is kept");
+});
+
+test("UNLINKED TOKENS: deleting one copy keeps the record while another copy lives on an unlinked token's actor; deleting the last one removes it", async () => {
+  const w = await frozenWorld();
+  const made = await craftIt(w);
+  const id = made.getFlag(M, "crafted").freezeId;
+  const { actor } = await unlinkedCopyOf(made);
+  await made.delete();
+  await fireHookAs(w.gm, "deleteItem", [made]);
+  assert.ok(env.values.tagCrafted.items[id], "the copy on the unlinked token still carries the id");
+  const copy = actor.items.find(i => i.getFlag(M, "crafted"));
+  await copy.delete();
+  await fireHookAs(w.gm, "deleteItem", [copy]);
+  assert.equal(env.values.tagCrafted.items[id], undefined, "the last copy is gone: so is the record");
+});
+
+test("UNLINKED TOKENS: a LINKED token is not searched twice (its actor is the world actor), and a token with no actor is skipped without a crash", async () => {
+  const w = await frozenWorld();
+  const made = await craftIt(w);
+  const id = made.getFlag(M, "crafted").freezeId;
+  const { scene } = await unlinkedCopyOf(made, { linked: true });
+  const bare = makeToken({ name: "Empty" });
+  bare.actorLink = false;                                      // no .actor at all (the actor was deleted)
+  scene.tokens.push(bare);
+  const { itemsWithFreezeId } = await import("../scripts/tags/state.js");
+  assert.equal(itemsWithFreezeId(id).length, 1, "the linked token's items are not counted; only the world actor's own");
+});
