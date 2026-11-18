@@ -9,7 +9,7 @@ import { createRefCache, expandPackPatterns, parsePackList, resolveRefCached } f
 import { formatError } from "./validate.js";
 import { buildRegistry } from "../editor/build.js";
 import { emptyStore } from "../editor/layer.js";
-import { readEditorStore } from "../editor/setting.js";
+import { loadEditorStore } from "../editor/setting.js";
 
 export function packIds() {
   const extra = (game.settings.get(MODULE_ID, "extraPacks") ?? "")
@@ -120,7 +120,7 @@ export async function loadAll({ fresh = false } = {}) {
   const { sources, problems } = await collectSources();
   // The editor's world definitions are layered over the pack pages before everything is validated together (a player client has none: it reads no pack).
   let editor = { store: emptyStore(), problems: [] };
-  if (game.user.isGM) { try { editor = readEditorStore(); } catch (error) { editor = { store: emptyStore(), problems: [error.message] }; } }
+  if (game.user.isGM) { try { editor = loadEditorStore(); } catch (error) { editor = { store: emptyStore(), problems: [error.message] }; } }
   const { registry, errors, contexts, leftovers } = buildRegistry(sources, editor.store);
   const outputs = await checkOutputs(registry, contexts);
   const editorProblems = editor.problems.map(message => ({ pack: "world editor", entry: "(saved definitions)", field: "(setting)", message }));

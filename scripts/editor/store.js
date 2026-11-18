@@ -16,7 +16,8 @@ import * as playerDefs from "../data/playerDefs.js";
 import * as stations from "../stations/store.js";
 import { buildRegistry } from "./build.js";
 import { exportBundle, planImport } from "./exchange.js";
-import { emptyStore, keyOf } from "./layer.js";
+import { emptyStore, keyOf, repairStore } from "./layer.js";
+import { backUpOnce } from "../backup.js";
 import { EDITOR_SETTING, readEditorStore, writeEditorStore } from "./setting.js";
 
 const requireGM = what => { if (!game.user?.isGM) throw new Error(`${what}: GM only`); };
@@ -32,7 +33,20 @@ const kindOf = key => key.split(":")[0];
 const idOf = key => key.split(":").slice(1).join(":");
 
 const base = api => api.baseSources ?? [];
-const current = () => readEditorStore().store;
+/**
+ * The saved store for a WRITE (create, edit, remove, import, fold, clear): it THROWS while the saved definitions are damaged, naming the damaged records. A damaged store used to load as
+ * empty and the next write replaced it, taking every definition the editor had made. (The raw copy is kept once in the backup setting; api.editor.repair() drops only the damaged records.)
+ */
+function current() {
+  const { store, problems, raw } = readEditorStore();
+  if (problems.length) {
+    backUpOnce("editor", raw, "editor definitions");        // once only; the loader has usually done it already
+    throw new EditorError(`The editor's saved definitions are damaged (${problems.join("; ")}), so nothing can be saved until they are repaired. api.editor.repair() drops only the damaged records; a copy of the damaged data is kept in the "tagBackup" setting.`, { problems, damaged: true });
+  }
+  return store;
+}
+/** The saved store for READING and showing (the window's lists): a damaged one reads as empty here, but no write can go ahead (see current). */
+const viewStore = () => readEditorStore().store;
 
 /** Swap the in-memory registry for a freshly built one, the way `reload` does (the refresh hook, the station errors), without re-reading the packs. */
 function install(api, built) {
@@ -43,11 +57,14 @@ function install(api, built) {
 }
 
 /** What the packs plus the saved edits build, and the definitions that exist only in memory (a test fixture, a gate's fakes): the editor leaves those alone. */
+const memoryOnlyOf = (api, registry) => {
+  const memoryOnly = [];
+  for (const [kind, map] of Object.entries(api.definitions ?? {})) if (map instanceof Map) for (const [id, rec] of map) if (!registry[kind]?.has(id)) memoryOnly.push([kind, id, rec]);
+  return memoryOnly;
+};
 function baseline(api) {
   const built = buildRegistry(base(api), current());
-  const memoryOnly = [];
-  for (const [kind, map] of Object.entries(api.definitions ?? {})) if (map instanceof Map) for (const [id, rec] of map) if (!built.registry[kind]?.has(id)) memoryOnly.push([kind, id, rec]);
-  return { built, memoryOnly };
+  return { built, memoryOnly: memoryOnlyOf(api, built.registry) };
 }
 
 /** Check a candidate store in memory; on success write it, install the new registry (memory-only definitions kept) and tell the players. */
@@ -66,14 +83,39 @@ async function commitStore(api, candidate) {
 
 /** Does this definition come from the packs or the editor (so an edit can be saved), as opposed to existing only in memory? */
 export const canEdit = (api, key) => isSaved(api, key);
-const isSaved = (api, key) => Boolean(buildRegistry(base(api), current()).registry[kindOf(key)]?.has(idOf(key)));
+const isSaved = (api, key) => Boolean(buildRegistry(base(api), viewStore()).registry[kindOf(key)]?.has(idOf(key)));
 
 const clone = x => structuredClone(x);
 const withRecord = (store, rec) => { const next = clone(store); next.records[keyOf(rec.kind, rec.id)] = rec; return next; };
 
+// Repair ----------------------------------------------------------------------------------------------------------------
+/** What is wrong with the saved definitions right now (plain sentences; empty = fine). Reads only. */
+export const damaged = () => readEditorStore().problems;
+
+/**
+ * GM: put a damaged store right by dropping ONLY its damaged records (the sound ones stay and load again). The raw damaged value is kept once in the backup setting first. A store whose
+ * outer shape is unknown has nothing to salvage record by record: that is refused unless `{ reset: true }` is passed (it then starts empty; the raw copy stays in the backup).
+ */
+export async function repair(api, { reset = false } = {}) {
+  requireGM("editor.repair");
+  const { problems, raw } = readEditorStore();
+  if (!problems.length) return { repaired: false, dropped: [] };
+  await backUpOnce("editor", raw, "editor definitions");
+  const fixed = repairStore(raw);
+  if (!fixed.usable && !reset) throw new EditorError("The editor's saved definitions have an unknown shape, so there is nothing to salvage record by record. A copy is kept in the \"tagBackup\" setting. api.editor.repair({ reset: true }) starts the editor's definitions empty.", { problems, damaged: true });
+  const memoryOnly = memoryOnlyOf(api, buildRegistry(base(api), emptyStore()).registry);       // the registry was loaded with the damaged store read as empty
+  await writeEditorStore(fixed.store);
+  const built = buildRegistry(base(api), fixed.store);
+  for (const [kind, id, rec] of memoryOnly) if (!built.registry[kind].has(id)) built.registry[kind].set(id, rec);
+  install(api, built);
+  await api.publishDefinitions?.();
+  await logWorldEvent(`editor: repaired the saved definitions (dropped ${fixed.dropped.length})`);
+  return { repaired: true, dropped: fixed.dropped };
+}
+
 // Reading -----------------------------------------------------------------------------------------------------------
 /** Where a definition comes from: "world" (made in the editor), "pack" (untouched) or "pack, edited here". */
-export function originOf(key, store = current()) {
+export function originOf(key, store = viewStore()) {
   const rec = store.records[key];
   return rec ? (rec.mode === "new" ? "world" : "pack, edited here") : "pack";
 }
@@ -114,12 +156,12 @@ export function usageOf(api, key) {
 export function entry(api, key) {
   const record = api.definitions?.[kindOf(key)]?.get(idOf(key));
   if (!record) return null;
-  const rec = current().records[key];
+  const rec = viewStore().records[key];
   return { key, kind: kindOf(key), id: idOf(key), record: clone(record), origin: originOf(key), editedFields: rec?.mode === "patch" ? Object.keys(rec.fields) : [], retired: Boolean(record.retired) };
 }
 
 /** The editor's saved records (for the list's "made here" / "edited here" tags). */
-export const records = () => clone(current().records);
+export const records = () => clone(viewStore().records);
 
 /** Is there a WORLD item (not an actor's copy) for this definition? The window offers "Make an item" when there is not. */
 export const hasWorldItem = key => adapter.copiesOf(kindOf(key), idOf(key)).some(c => c.actor === null);
@@ -319,7 +361,7 @@ export async function clearLeftover(api, key) {
 /** The bundle (plain JSON) for the given keys, or every record the editor holds. */
 export function exportRecords(api, keys = null) {
   requireGM("editor.exportRecords");
-  return exportBundle(current(), keys);
+  return exportBundle(viewStore(), keys);
 }
 
 /** Bring records from a bundle into this world. Clashes are skipped (or replaced with `replace`); a bundle that would break a definition imports nothing. */

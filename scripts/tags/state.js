@@ -11,6 +11,7 @@ import { getCaps, getCapsTable, getFrozenStore, getLimits, getLedger, setCurrent
 import { emptyFrozen, frozenProblems, recordFromPlan } from "./frozen.js";
 import { capsProblems } from "./stack.js";
 import { withLock } from "../queue/lock.js";
+import { BACKUP_LOCK, reportDamaged } from "../backup.js";
 import { craftedRef } from "./ledger.js";
 
 export { getLedger, getCaps, getFrozenStore };
@@ -26,27 +27,18 @@ export class TagError extends Error {
 const requireGM = what => { if (!game.user?.isGM) throw new Error(`${what}: GM only`); };
 
 /**
- * A damaged ledger or caps table is loaded as empty (the rest of the module still loads), and the next save would replace it for good. So before that can happen the raw value is kept ONCE
- * in the `tagBackup` world setting, as a JSON string under a fixed key ("ledger" or "caps"): a string, so a uuid or a name inside it never becomes an object key (Foundry reads a dot in a
- * key as a path). An existing backup is never replaced. The GM is told once per damaged load, in plain words.
+ * A damaged ledger or caps table is loaded as empty (the rest of the module still loads), and the next save would replace it for good. So before that can happen the raw value is kept
+ * ONCE in the `tagBackup` world setting (scripts/backup.js), and the GM is told once per damaged load, in plain words.
  */
-export const BACKUP_LOCK = "tagBackup";
-const BACKUP_WHAT = { ledger: "tag ledger", caps: "tag caps table" };
-function backUpOnce(kind, raw) {
-  const text = JSON.stringify(raw);        // taken now: a save that follows cannot change what is kept
-  return withLock(BACKUP_LOCK, async () => {
-    const have = game.settings.get(MODULE_ID, TAGS.backupSetting);
-    const store = have && typeof have === "object" && !Array.isArray(have) ? have : {};
-    if (typeof store[kind] === "string" && store[kind] !== "") return { kept: false };
-    await game.settings.set(MODULE_ID, TAGS.backupSetting, { ...store, [kind]: text });
-    return { kept: true };
-  }).catch(error => { console.error(`${MODULE_ID} | could not keep a copy of the damaged ${BACKUP_WHAT[kind]}`, error); return { kept: false, error }; });
-}
-function reportDamaged(kind, problems, raw) {
-  console.error(`${MODULE_ID} | the saved ${BACKUP_WHAT[kind]} is damaged, so it was loaded as ${kind === "ledger" ? "empty" : "the defaults"}:`, problems);
-  const backedUp = backUpOnce(kind, raw);
-  globalThis.ui?.notifications?.warn?.(`The saved ${BACKUP_WHAT[kind]} is damaged and was loaded as ${kind === "ledger" ? "empty" : "the defaults"}. A copy of the damaged data is kept once in the "${TAGS.backupSetting}" world setting; the next save replaces the damaged one.`);
-  return backedUp;
+export { BACKUP_LOCK };
+const BACKUP_WHAT = { ledger: "tag ledger", caps: "tag caps table", frozen: "frozen craft store" };
+function reportDamagedTag(kind, problems, raw) {
+  const loadedAs = kind === "ledger" ? "empty" : "the defaults";
+  return reportDamaged({
+    kind, what: BACKUP_WHAT[kind], raw, problems,
+    consoleText: `the saved ${BACKUP_WHAT[kind]} is damaged, so it was loaded as ${loadedAs}:`,
+    note: `The saved ${BACKUP_WHAT[kind]} is damaged and was loaded as ${loadedAs}. A copy of the damaged data is kept once in the "${TAGS.backupSetting}" world setting; the next save replaces the damaged one.`
+  });
 }
 
 /** GM, at ready: read the saved ledger. A damaged one is kept once as a backup (see above), reported, and treated as empty (the rest of the module still loads). */
@@ -56,7 +48,7 @@ export function loadLedger() {
   if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0)) { setLedger(emptyLedger()); return { problems: [] }; }
   const problems = ledgerProblems(raw);
   setLedger(problems.length ? emptyLedger() : decodeLedger(raw));
-  return problems.length ? { problems, backedUp: reportDamaged("ledger", problems, raw) } : { problems };
+  return problems.length ? { problems, backedUp: reportDamagedTag("ledger", problems, raw) } : { problems };
 }
 
 /** GM, at ready: read the GM's cap table (a damaged one is kept once as a backup, reported and ignored: the defaults apply). */
@@ -66,7 +58,7 @@ export function loadCaps() {
   if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0)) { setCurrentCaps(null); return { problems: [] }; }
   const problems = capsProblems(raw);
   setCurrentCaps(problems.length ? null : structuredClone(raw));
-  return problems.length ? { problems, backedUp: reportDamaged("caps", problems, raw) } : { problems };
+  return problems.length ? { problems, backedUp: reportDamagedTag("caps", problems, raw) } : { problems };
 }
 
 /**

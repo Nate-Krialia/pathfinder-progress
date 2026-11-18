@@ -16,14 +16,24 @@ export const emptyStore = () => ({ v: STORE_VERSION, records: {} });
 export const keyOf = (kind, id) => `${kind}:${id}`;
 const ROLE_OF = { damage: "bonusDamage", resistance: "resistance", ability: "specialAbility", condition: "applyCondition" };
 
+const recordProblem = (key, rec) => (!rec || key !== keyOf(rec.kind, rec.id) || !["new", "patch"].includes(rec.mode) || typeof rec.fields !== "object" || Array.isArray(rec.fields) ? `the saved definition "${key}" is damaged` : null);
+const hasRecords = store => store && typeof store === "object" && store.v === STORE_VERSION && store.records !== null && typeof store.records === "object" && !Array.isArray(store.records);
+
 /** What a store must look like; a damaged setting is an error to show, never silently replaced. */
 export function storeProblems(store) {
-  const problems = [];
-  if (!store || typeof store !== "object" || store.v !== STORE_VERSION || typeof store.records !== "object" || Array.isArray(store.records)) return ["the editor's saved definitions have an unknown shape"];
-  for (const [key, rec] of Object.entries(store.records)) {
-    if (!rec || key !== keyOf(rec.kind, rec.id) || !["new", "patch"].includes(rec.mode) || typeof rec.fields !== "object" || Array.isArray(rec.fields)) problems.push(`the saved definition "${key}" is damaged`);
-  }
-  return problems;
+  if (!hasRecords(store)) return ["the editor's saved definitions have an unknown shape"];
+  return Object.entries(store.records).map(([key, rec]) => recordProblem(key, rec)).filter(Boolean);
+}
+
+/**
+ * The records of a damaged store that are still sound, and the keys of those that are not: { usable, store, dropped }. A store whose OUTER shape is unknown (no records at all) is not
+ * usable record by record: `usable` is false and nothing is salvaged.
+ */
+export function repairStore(raw) {
+  if (!hasRecords(raw)) return { usable: false, store: emptyStore(), dropped: [] };
+  const records = {}, dropped = [];
+  for (const [key, rec] of Object.entries(raw.records)) { if (recordProblem(key, rec)) dropped.push(key); else records[key] = rec; }
+  return { usable: true, store: { v: STORE_VERSION, records }, dropped };
 }
 
 /** A material with builder blocks gets its role values from them (the blocks are the source of truth); a record without blocks is left as it is. */
