@@ -358,14 +358,21 @@ await (async () => {
 
 ## Step 14 [Player]: the shared entry and the private one
 
+The GM's approve and reject (step 13) reach this window as a later update, so the "no share is waiting" check waits for it (up to 6 s) instead of reading at once. It prints one `REPORT pending at first read:` line first (what this window held the moment the step started), and on a pass says how many ms the wait took; on a failure it prints every pending action left (id, type, key) with the character and the user.
+
 ```js
 // [Player] Gate Ore is now both yours and shared; the rejected region stayed private; the queue holds no share any more.
 await (async () => {
   const p = globalThis.__p2 ?? (() => { throw new Error("run the Player helper (step 3) first"); })();
+  const listOf = () => p.pending().map(a => ({ id: a.id, type: a.type, key: a.params?.key ?? null }));
+  console.log(`REPORT pending at first read: ${JSON.stringify(listOf())}`);
+  const started = Date.now();
+  const noShare = await p.until(() => !p.pending().some(a => a.type === "share"), 6000);   // relayed from the GM: wait for the update to arrive here
+  const waited = Date.now() - started;
   const view = p.api.compendium.view(p.hero);
   p.check("Gate Ore is marked as both", view.entries.materials.find(m => m.id === "g2-ore")?.source === "both", JSON.stringify(view.entries.materials.map(m => [m.id, m.source])));
   p.check("Yard Wood is still only yours", view.entries.regions.find(r => r.name === "Yard Wood")?.source === "own");
-  p.check("no share is waiting", !p.pending().some(a => a.type === "share"));
+  p.check("no share is waiting", Boolean(noShare), noShare ? `waited ${waited} ms for the update` : `still pending after ${waited} ms: ${JSON.stringify({ character: p.hero.name, user: game.user.name, pending: listOf() })}`);
   p.check("hasMaterial answers for a discovered material", p.api.compendium.hasMaterial(p.hero, "g2-ore") === true && p.api.compendium.hasMaterial(p.hero, "g2-nothing") === false);
   return p.done();
 })();
