@@ -767,3 +767,33 @@ test("COMMISSION CARD: names are escaped ONCE in the chat (the crafter used to b
   assert.match(card, /Fee paid by Ael&lt;b&gt;wyn&lt;\/b&gt;/);
   assert.doesNotMatch(card, /&amp;amp;|&amp;lt;/, "never twice");
 });
+
+// Round 5 / stage 1 #11: the learn roll's progress is whispered, never public ---------------------------------------------------------
+test("LEARN ROLL CHAT: the public card has no progress or threshold; the line is whispered to the crafter's owner and the GM only", async () => {
+  const { crafter } = await world();
+  for (const actor of globalThis.game.actors) actor.testUserPermission = (user, level) => actor === crafter && user.id === "u-owner" && level === "OWNER";
+  globalThis.game.users = [{ id: "u-owner", isGM: false }, { id: "u-other", isGM: false }, { id: "gm1", isGM: true }];
+  globalThis.ChatMessage.getWhisperRecipients = () => [{ id: "gm1" }];
+  const id = await npcJob(crafter);
+  env.chat.length = 0;
+  await commissions.craftForCommission(api, id, { degree: "success", learnDegree: "success" });
+  const publicCards = env.chat.filter(m => !m.whisper?.length), whispers = env.chat.filter(m => m.whisper?.length);
+  assert.equal(publicCards.length, 1, "one public card");
+  assert.doesNotMatch(publicCards[0].content, /progress|threshold|\d+\/\d+|Learn roll/i, publicCards[0].content);
+  assert.match(publicCards[0].content, /Fee waived|Fee paid|payout/, "the card still says fee and payout");
+  assert.equal(whispers.length, 1, "one whisper");
+  assert.deepEqual([...whispers[0].whisper].sort(), ["gm1", "u-owner"], "the crafter's owner and the GM, nobody else");
+  assert.match(whispers[0].content, /Learn roll for <strong>Borin<\/strong>: progress \d+\/\d+/);
+});
+
+test("LEARN ROLL CHAT: with no learn roll there is no whisper at all", async () => {
+  const { crafter } = await world();
+  for (const actor of globalThis.game.actors) actor.testUserPermission = () => false;
+  globalThis.game.users = [{ id: "gm1", isGM: true }];
+  globalThis.ChatMessage.getWhisperRecipients = () => [{ id: "gm1" }];
+  const id = await npcJob(crafter);
+  await commissions.craftForCommission(api, id, { degree: "success", learnDegree: "success", chat: false });   // the one learn attempt is used here
+  env.chat.length = 0;
+  await commissions.craftForCommission(api, id, { degree: "failure" }).catch(() => {});
+  assert.deepEqual(env.chat.filter(m => m.whisper?.length), [], "no learn roll the second time, so nothing whispered");
+});

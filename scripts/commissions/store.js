@@ -24,6 +24,7 @@ import { rawList, readFormulaList } from "../research/store.js";
 import { feeForTier } from "../stations/fees.js";
 import { actorNameOf, readStations, townOfActor } from "../stations/store.js";
 import { esc } from "../queue/review.js";
+import { resultRecipients, whisper } from "../chat.js";
 import { consumeStackWithUndo, undoAll } from "../queue/common.js";
 import { buildCommission, checkStep, commissionWarnings, gpText, isOpen, suggestPayout, toCopper } from "./commission.js";
 import { ledgerChanges } from "./changes.js";
@@ -510,12 +511,13 @@ async function postCraftChat({ c, crafter, patronActor, plan, outcome, entry, ne
   const feeText = patronActor ? `Fee paid by ${esc(patronActor.name)}: ${outcome.feeConsumed} gp.` : "Fee waived (paid by the NPC patron).";
   const lines = [formatSummary({ crafterName: crafter.name, plan, outcome, itemName: next.delivered?.itemName, feeText })];
   lines.push(`Commission for <strong>${esc(patronName(c))}</strong>: ${outcome.made ? `delivered${patronActor ? "" : " (no item changes hands for an NPC patron)"}; payout ${esc(gpText(toCopper(c.payout)))}.` : "still open; no payout yet."}`);
-  if (entry.learn?.degree) lines.push(`Learn roll: progress ${entry.learn.progress}/${entry.learn.threshold}${entry.learn.completed ? " - formula learned!" : ""}.`);
   try {
     await ChatMessage.create({ speaker: ChatMessage.getSpeaker({ actor: crafter }), content: lines.join("<br>") });
   } catch (error) {
     console.error(`${MODULE_ID} | the commission craft is saved, but the chat message failed`, error);
   }
+  // The learn roll's progress is n/threshold, and players never see a threshold: it is whispered to the crafter's owners and the GM, never put on the public card (whisper() logs its own failure).
+  if (entry.learn?.degree) await whisper(resultRecipients(crafter), `<p>Learn roll for <strong>${esc(crafter.name)}</strong>: progress ${entry.learn.progress}/${entry.learn.threshold}${entry.learn.completed ? " - formula learned!" : ""}.</p>`);
 }
 
 // The queue ------------------------------------------------------------------------------------------------------
