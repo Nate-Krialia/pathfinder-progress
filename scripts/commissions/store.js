@@ -29,7 +29,7 @@ import { buildCommission, checkStep, commissionWarnings, gpText, isOpen, suggest
 import { ledgerChanges } from "./changes.js";
 import { affordabilityErrors, buildSteps } from "./escrow.js";
 import { addLoan, dropLoan } from "./loans.js";
-import { changeCommissions, readCommissions, writeCommissions } from "./list.js";
+import { changeCommissions, readCommissions } from "./list.js";
 import { withLock } from "../queue/lock.js";
 import * as tagState from "../tags/state.js";
 
@@ -158,7 +158,7 @@ export async function issue(api, spec) {
   if (!built.ok) throw new Error(`issue: ${built.errors.join("; ")}`);
   const access = findFormula(readFormulaList(crafter), recipe.id)?.access ?? null;
   const commission = { ...built.commission, log: [{ at: Date.now(), text: "issued by the GM" }] };
-  await writeCommissions([...readCommissions(), commission]);
+  await changeCommissions(list => { list.push(commission); });
   return { commission, warnings: commissionWarnings(commission, access), suggestion };
 }
 
@@ -180,8 +180,7 @@ export async function createFromRequest(api, patronActor, action) {
   if (!built.ok) refuse(built.errors.join("; "));
   const commission = { ...built.commission, log: [{ at: Date.now(), text: `requested by ${patronActor.name}` }] };
   // Idempotent by action id, decided INSIDE the lock: two resolves of one request make one commission.
-  await writeCommissions([...readCommissions(), commission]);
-  return commission;
+  return changeCommissions(list => list.find(c => c.id === id) ?? (list.push(commission), commission));
 }
 
 // Accept, decline, cancel ------------------------------------------------------------------------------------

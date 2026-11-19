@@ -715,6 +715,30 @@ test("COMMISSION LOCK: a cancel that comes first stops a craft that has not star
   assert.deepEqual([gp(patron), gp(crafter), commissions.getCommission(id).status], [20, 3, "cancelled"]);
 });
 
+test("COMMISSION LOCK: two commissions issued at once are BOTH in the list (each used to read the same list and the second write erased the first)", async () => {
+  const { crafter } = await world();
+  const restore = slowSettings("commissions", 20);
+  try {
+    await Promise.all([1, 2, 3].map(n => commissions.issue(api, { patron: `Patron ${n}`, crafter, recipe: DAGGER, selection: SEL })));
+  } finally { restore(); }
+  assert.deepEqual(commissions.readCommissions().map(c => c.patron.name).sort(), ["Patron 1", "Patron 2", "Patron 3"]);
+});
+
+test("COMMISSION LOCK: two requests resolved at once make two commissions, and the same request resolved twice makes one", async () => {
+  const { patron, crafter } = await world();
+  const params = { step: "request", crafter: crafter.id, recipe: DAGGER, access: "loan", selection: SEL, payout: 12 };
+  const restore = slowSettings("commissions", 20);
+  let made;
+  try {
+    made = await Promise.all([
+      commissions.createFromRequest(api, patron, { id: "act1", params }), commissions.createFromRequest(api, patron, { id: "act2", params }),
+      commissions.createFromRequest(api, patron, { id: "act1", params })
+    ]);
+  } finally { restore(); }
+  assert.deepEqual(commissions.readCommissions().map(c => c.id).sort(), ["c-act1", "c-act2"]);
+  assert.equal(made[0].id, made[2].id);
+});
+
 test("COMMISSION LOCK: a failed accept puts back ONLY its own commission; another commission accepted meanwhile stays accepted", async () => {
   const { crafter } = await world();
   const cedric = fakeActor("ced", "Cedric", { copper: 300 });
