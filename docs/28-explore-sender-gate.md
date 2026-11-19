@@ -481,13 +481,13 @@ await (async () => {
 })();
 ```
 
-**Why that refusal is not reachable from a Player call, and what is not faked.** `senderOf` (`scripts/queue/common.js`) answers "This request did not say who is asking, so it was not done." only when the handler has **no** socketlib sender (`this.socketdata.userId`) **and** the call is not one made directly on the GM's own client with the GM's own id. A message that a Player sends through the real socket always arrives with Foundry's own sender, so the handler never sees that situation; the Player cannot remove the sender or make a call "on the GM's own client". The gate therefore does not pretend to reach it: steps 8 and 10 prove the sender is used (the refusals name Test), and this step proves that no real Player call came back with that refusal. The refusal itself is covered by the fake-Foundry tests only (`tests/relayed-sender.test.js`).
+**Why that refusal is not reachable from a Player call, and what is not faked.** `senderOf` (`scripts/queue/common.js`) answers "This request did not say who is asking, so it was not done." only when the handler has **no** socketlib sender (`this.socketdata.userId`) **and** the call is not one made directly on the GM's own client with the GM's own id. A message that a Player sends through the real socket always arrives with Foundry's own sender, so the handler never sees that situation; the Player cannot remove the sender or make a call "on the GM's own client". The gate therefore does not pretend to reach it: steps 8 and 10 prove the sender is used (the refusals name Test), and this step proves that no real Player call came back with that refusal. The refusal itself is covered by the fake-Foundry tests only (`tests/relayed-sender.test.js`). (Read in socketlib 1.1.3's source: a call from another client carries the sender Foundry's socket event names, and a call made on the GM's own client carries the GM's own id, so even step 13's call has a sender.)
 
 ## Step 13 [GM]: e) a note, not a pass or fail: what the GM's own call to its own handler does
 
 **What to do and see:**
 - Run the block below in the GM window. It calls the module's `search` handler from the GM window with a made-up user id and a character that does not exist, so nothing can change.
-- You should see: a `REPORT` line with what came back (the answer is recorded, not judged: a refusal, the plain search line or an error are all written down), and `ALL PASS` when nothing changed.
+- You should see: a `REPORT` line with what came back (recorded, not judged), and `ALL PASS` when nothing changed. The expected answer is the plain search line: socketlib 1.1.3 runs a GM's own call locally with `this.socketdata = { userId: <the GM's own id> }` (read in its source), so the handler knows the sender, finds no such character and answers generically.
 
 ```js
 // [GM] e) recorded, not judged: a GM calling the handler from its own window with a user id that is not its own. A character that does not exist is named, so nothing can change either way.

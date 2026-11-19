@@ -101,7 +101,7 @@ function tagsTab(m) {
     <label>What it stands for <input type="text" data-field="new-tag-theme" value="${esc(nt.theme)}" placeholder="(defaults to the name)"></label>
     <button type="button" data-action="create-tag">Create tag</button></fieldset>
     ${m.ui.fx ? fxPanel(m) : ""}${capsPanel(m)}
-    <p class="pfp-hint">Priority breaks ties between equal-tier tags when tags are passed up in a nested craft (highest tier, then priority, then alphabetical). It only does that in a later slice; for now it is stored.</p>`;
+    <p class="pfp-hint">Priority breaks ties between equal-tier tags: when a cap keeps the highest-tier abilities or conditions first, and when tags are passed up in a nested craft (highest tier, then priority, then alphabetical).</p>`;
 }
 
 const sel = (name, value, options, data = "") => `<select data-field="${name}" ${data}>${options.map(([v, l]) => opt(v, l, String(value ?? "") === String(v))).join("")}</select>`;

@@ -56,11 +56,13 @@ This is the agreed design for everything the player and GM see. It supersedes ol
 - Station upgrades and own-workshop design are projects here too.
 
 ### Commissions
+- **Status today (v0.22.0): a placeholder tab.** The Hub shows it as "Commissions (coming later)" (`HUB.tabs` in `scripts/config.js`, working: false). What follows is the design; none of it is drawn yet. Commissions run today through the API (`api.commissions`), the queue and the GM's review window.
 - Left: Ask a crafter / Take a job, list with status pills (Needs your answer, Ready to craft, Waiting on crafter, Delivered).
 - Right: payout, handover (loan returned / copy / delivered record only for NPC patrons), time needed, materials list "supplied by the patron" with Escrowed at craft / Missing tags, station fee, "what the crafter may learn" with the optional once-per-loan learn roll, primary and secondary buttons, a reason line for every disabled button.
 - Rules as built in Stage 8 (patron supplies everything at craft-time escrow, loans, learn roll, NPC patrons, movement log).
 
 ### Explore
+- **Status today (v0.22.0): a placeholder tab.** The Hub shows it as "Explore (coming later)" (`HUB.tabs` in `scripts/config.js`, working: false). What follows is the design; none of it is drawn yet. Exploring runs today through `api.queue.submit(actor, "explore", ...)` and the player's `api.searchArea`.
 - Left: Regions you can reach (danger pill Low/Moderate/High).
 - Right: days stepper, **Force combat** checkbox, nodes found on the map, last expedition log, Queue N days of exploring.
 - **Flow:** (1) player queues days and optionally ticks Force combat. (2) GM client rolls in secret; the player is NOT shown odds or results. (3) GM opens the region's tagged scene; there may or may not be an encounter. (4) Players use Perception on the map to spot nodes and materials; nodes are hidden tokens with a Perception DC. (5) Only when spotted does a node appear on the sheet (and in the Compendium).
@@ -69,6 +71,7 @@ This is the agreed design for everything the player and GM see. It supersedes ol
 - Gather button per revealed node on the scene the character is in. **Gathering uses charges, not days:** queueing claims one charge on the node (so two players cannot queue the last one), it needs no downtime, and it never blocks End downtime. When the last charge is spent the node's token is deleted (only a small depleted record stays until Clear map); the anchor stays occupied.
 
 ### Workshop
+- **Status today (v0.22.0): a placeholder tab.** The Hub shows it as "Workshop (coming later)" (`HUB.tabs` in `scripts/config.js`, working: false). What follows is the design; none of it is drawn yet. Workshops run today through `api.workshop` and `api.stationsFor`.
 - Left: stations with status (Here now / Travels with you / Away), Build your own workshop.
 - Right: tier ladder (1 to 4) and plain line of what tier allows, station fee, who can use it, where it is, Upgrades list, Craft here (jumps to Formulae with station chosen; disabled with reason if party is not there).
 - Upgrades are research projects on a station: raise its tier (1 to 4 in a town), cut craft days (never below 1 day in total), or add a hearth. **A hearth is a counter with no effect yet** (show it as "no effect yet"). They cost research days plus materials of the target tier and **no gold**; the materials are taken when the project starts, returned if the project is put aside, and spent when it finishes (`api.workshop.startUpgrade` / `putAside`; no downtime needed, never blocks End downtime).

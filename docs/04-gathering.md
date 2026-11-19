@@ -30,8 +30,9 @@ Higher-tier nodes also list higher-tier materials on their ladder (e.g. T2 base,
 Hidden rolls run on the GM client (via socket relay). No guaranteed floor beyond the base material.
 
 ## Corpse nodes
+- **Status today:** a corpse node is made BY HAND with `api.makeCorpseNode(token, { tier, ladder, charges, decayTimer, creature })`; nothing makes one when a creature dies. The record stores `decayTimer` (and requires it for a corpse) but nothing counts it down yet, so a corpse does not spoil on its own. The rest of this section is the design.
 - Source tokens are creatures that died. Few charges; decay timer so they spoil.
-- **Yield is auto-derived** from creature level (quality tier) and traits (material type, e.g. dragon -> scales) via a mapping table.
+- **Yield is auto-derived** from creature level (quality tier) and traits (material type, e.g. dragon -> scales) via a mapping table. (Not built: the layered resolver `resolveCorpseYield` in `scripts/data/resolver.js` exists and is tested, but nothing calls it; today a corpse's ladder is authored by hand.)
 - **Per-creature override** (`yieldOverride`) wins when present. Use the shared layered resolver.
 - Read creature level/traits only through the PF2e adapter.
 - The trait-to-material mapping table must be authored (not yet designed).

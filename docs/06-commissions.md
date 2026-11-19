@@ -6,7 +6,7 @@ A **commission** lets one party (the *patron*) ask a *crafter* to produce an ite
 ## Formula handoff (owner's choice)
 - **Copy (shared)**: crafter learns the formula permanently.
 - **Loan (commissioned)**: crafter may use it only for that commission; formula stays with the owner. Declining a copy means a loan, never a refusal.
-- Owner may **revoke** a loan if the commission is not completed.
+- A loan ends when its commission ends: **cancelled** (by the patron or the GM, before delivery) or **delivered**. There is no separate "revoke" action in the code (nothing named revoke exists); the patron's way to take a loan back is to cancel the commission before it is delivered. (The first design said the owner may revoke; this is what was built.)
 - The craft check is always rolled by the crafter.
 
 ## Flows
@@ -16,7 +16,7 @@ A **commission** lets one party (the *patron*) ask a *crafter* to produce an ite
 - An NPC may supply a formula as a loan, so a player can craft a recipe they never researched for that job.
 
 ## Commission record settings (set by GM for GM-issued jobs)
-- `materialsFrom`: `npc` (materials appear in crafter's inventory on accept) or `crafter` (crafter spends own stock). **Default: crafter.**
+- `materialsFrom`: `crafter` (the crafter spends their own stock), `patron` (a character patron's stock; the default for a character patron) or `npc` (the NPC supplies the materials at craft time: nothing ever appears in the crafter's inventory, the crafter needs none and keeps none; it needs a `selection`). **Default: crafter** for an NPC or lightweight patron, `patron` for a character patron. A patron without a character cannot supply from stock.
 - `payout`: GM-set; module suggests a default from material cost + station fee + margin. When the crafter supplies materials, the payout rewards that cost, so players can earn more.
 - `teaches`: `none` (default) | `progress` (with an amount; adds research progress on that formula, the "discovery" source) | `fullCopy` (permanent formula on completion).
   - The loan always works regardless of `teaches`.

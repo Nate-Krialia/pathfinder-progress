@@ -1,6 +1,6 @@
 /**
- * The tag ledger, Foundry side (Slice 1, GM only). The ledger is a world setting (`tagLedger`) read ONLY by the GM client into memory here; a player client never reads it and
- * never receives it (docs/22). Every write is checked first (ledger.js entryProblems), written, the adapter's idea of "tagged items" refreshed and the players told the
+ * The tag ledger, Foundry side (Slice 1, GM only). The ledger is a world setting (`tagLedger`) read ONLY by the GM client into memory here; the module never reads it on a player client and
+ * never sends it to one (docs/22; Foundry itself delivers world settings to every client, so this is an honor system, not secrecy). Every write is checked first (ledger.js entryProblems), written, the adapter's idea of "tagged items" refreshed and the players told the
  * definitions changed (so the slot lists they were sent are worked out again).
  */
 import { MODULE_ID, TAGS } from "../config.js";
