@@ -539,3 +539,18 @@ test("DAMAGED SHARED: a book whose shape is unknown is not salvaged unless the G
   assert.equal(reset.repaired, true);
   assert.deepEqual(env.values.sharedCompendium, { v: 1, materials: {}, creatures: {}, regions: {} });
 });
+
+// Round 4 / 1b #4: the share whisper escapes the name ----------------------------------------------------------------------------------
+test("SHARE WHISPER: the entry's name is escaped (a name like <b>x</b> reads as text)", async () => {
+  const w = await world({ downtime: 0 });
+  const stored = clone(w.ann.getFlag(M, "compendium"));
+  stored.materials.iron.name = "Iron<b>x</b>";
+  await w.ann.update({ [`flags.${M}.compendium`]: stored });
+  const queued = await share(w, w.annUser, w.ann, { kind: "material", key: "iron" });
+  env.chat.length = 0;
+  await as(w.gm, () => api().queue.resolve(w.ann, queued.id, { chat: true }));
+  const content = env.chat.map(m => m.content).join(" ");
+  assert.match(content, /shared/, "the whisper was sent");
+  assert.doesNotMatch(content, /<b>/);
+  assert.match(content, /Iron&lt;b&gt;x&lt;\/b&gt;/);
+});

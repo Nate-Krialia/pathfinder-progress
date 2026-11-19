@@ -9,6 +9,7 @@ import { commit } from "../audit/store.js";
 import { actorKey, withLocks } from "../queue/lock.js";
 import { appendAction, flagKey, gmIds, note, ownerIds, pendingOf, whisper } from "../queue/common.js";
 import { refusal } from "../queue/relay.js";
+import { esc } from "../queue/review.js";
 import { mergeShared, pickEntry } from "./entries.js";
 import { experimentFactsText } from "./experiments.js";
 import { mergeIntoSharedWithUndo, readBook, readShared } from "./store.js";
@@ -72,6 +73,6 @@ export async function resolveShare(api, actor, action, pending, { chat }) {
     throw error;
   }
   await note(`share approved: ${labelOf(kind, entry)} from ${actor.name}${changed ? "" : " (nothing new to add)"}`);
-  if (chat) await whisper([...new Set([...ownerIds(actor), ...gmIds()])], `<p>The GM shared <strong>${name}</strong> (${kind}) with the party.</p>`);
+  if (chat) await whisper([...new Set([...ownerIds(actor), ...gmIds()])], `<p>The GM shared <strong>${esc(name)}</strong> (${esc(kind)}) with the party.</p>`);
   return { status: "resolved", daysSpent: 0, message: `approved: ${labelOf(kind, entry)} is now shared with the party${changed ? "" : " (nothing new)"}.` };
 }

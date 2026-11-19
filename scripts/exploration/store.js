@@ -18,6 +18,7 @@ import { anchorTokenData, nodeTokenData, occupyUpdate, randomPositions, revealUp
 import { formatGmSummary } from "./summary.js";
 import { unwrap } from "../queue/relay.js";
 import { undoAll } from "../queue/common.js";
+import { esc } from "../queue/review.js";
 import { withLock } from "../queue/lock.js";
 import { noteNodesFound } from "../compendium/store.js";
 import { SEARCHED_ALREADY_TEXT, SEARCH_TEXT, searchMessage, spottedIds } from "./search.js";
@@ -512,7 +513,7 @@ export async function runSearch({ actorId, sceneId, userId }) {
   const message = searchMessage(names);
   try {
     const owners = ownerUserIds(actor);
-    if (owners.length) await ChatMessage.create({ whisper: owners, speaker: ChatMessage.getSpeaker({ actor }), content: `<p>${message}</p>` });
+    if (owners.length) await ChatMessage.create({ whisper: owners, speaker: ChatMessage.getSpeaker({ actor }), content: `<p>${esc(message)}</p>` });
     gmLog.record({
       kind: "search", actorId: actor.id, actorName: actor.name,
       text: `${actor.name} searched ${scene.name}: Perception total ${total}${natural === null ? "" : ` (natural ${natural})`}. Found ${names.length} of ${hiddenNodes.length} hidden node(s)${spottedNodes.length ? `: ${spottedNodes.map(n => `${n.token.name} (DC ${n.dc})`).join(", ")}` : ""}.`,

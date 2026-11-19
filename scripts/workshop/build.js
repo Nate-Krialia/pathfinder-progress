@@ -18,6 +18,7 @@ import { appendAction, flagKey, gmIds, note, ownerIds, undoThenThrow, takeEscrow
 import { refusal } from "../queue/relay.js";
 import { planSubmit } from "../queue/reservation.js";
 import { addPartyStation, partyTown } from "../stations/store.js";
+import { esc } from "../queue/review.js";
 import { planBuild } from "./rules.js";
 import { holdsDesign } from "./targets.js";
 
@@ -106,6 +107,6 @@ export async function resolveBuild(api, actor, action, pending, { chat }, drop) 
     throw error;
   }
   await note(`resolved build: ${blueprint.name} built in ${townName ?? town} for the party by ${actor.name}; ${describeEscrow(escrow)} and ${action.daysReserved} day(s) spent; station ${record.id}`);
-  if (chat) await whisper([...new Set([...ownerIds(actor), ...gmIds()])], `<p><strong>${actor.name}</strong> built <em>${blueprint.name}</em> in ${townName ?? town}: a workshop the whole party can use, with no station fee.</p>`);
+  if (chat) await whisper([...new Set([...ownerIds(actor), ...gmIds()])], `<p><strong>${esc(actor.name)}</strong> built <em>${esc(blueprint.name)}</em> in ${esc(townName ?? town)}: a workshop the whole party can use, with no station fee.</p>`);
   return { status: "resolved", daysSpent: action.daysReserved, message: `built "${blueprint.name}" in ${townName ?? town} for the party (station ${record.id}); ${describeEscrow(escrow)} and ${action.daysReserved} day(s) spent.` };
 }

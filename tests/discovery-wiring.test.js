@@ -322,3 +322,18 @@ test("THE FAKE behaves like Foundry here: an update MERGES an object into the st
   await w.ann.setFlag(M, "probe", { extra: true });
   assert.deepEqual(w.ann.getFlag(M, "probe"), { keep: 5, list: [9], extra: true }, "setFlag is an update too");
 });
+
+// Round 4 / 1b #4: the study whisper escapes the names ---------------------------------------------------------------------------
+test("STUDY WHISPER: the character's and the material's names are escaped (a name like <b>x</b> reads as text)", async () => {
+  const w = await discoveryWorld();
+  await give(w, "g7-b");
+  w.ann.name = "Ann<b>x</b>";
+  await as(w.annUser, () => api().research.follow(w.ann, "item:material:g7-b"));
+  const action = await as(w.annUser, () => api().queue.submit(w.ann, "research", { projectId: "study:material:g7-b", skill: "crafting" }, 2));
+  w.ann.rolls.push(roll(3), roll(2));
+  env.chat.length = 0;
+  await api().queue.resolve(w.ann, action.id, { chat: true });
+  const content = env.chat.map(m => m.content).join(" ");
+  assert.doesNotMatch(content, /<b>/);
+  assert.match(content, /Ann&lt;b&gt;x&lt;\/b&gt; studies/);
+});

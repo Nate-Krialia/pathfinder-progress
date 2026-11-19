@@ -20,6 +20,7 @@ import { addFormula, findFormula } from "../research/formulas.js";
 import { ResearchRefused, rawList, readDays } from "../research/store.js";
 import { pickSkill } from "../gathering/resolve.js";
 import { W } from "./words.js";
+import { esc } from "../queue/review.js";
 import { finalSteps, itemKey, newlyReached, parseKey, propertiesKnown, stageOf, trackOf, versionCandidates } from "./track.js";
 
 const requireGM = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
@@ -206,13 +207,14 @@ export async function afterStudy(api, actor, plan) {
 /** The whisper to the owners and the GM (degree words and what was learned; never a number), and the GM log line with the totals and the DC. */
 export async function postStudyChat(api, actor, plan) {
   const degreeWord = { criticalSuccess: "critical success", success: "success", failure: "failure", criticalFailure: "critical failure" };
-  const lines = [W.summary(actor.name, plan.entry.name, plan.result.results.map(r => degreeWord[r.degree] ?? r.degree))];
+  // The words are plain text (the Hub shows them as text too), so each name is escaped HERE, where they become chat HTML.
+  const lines = [W.summary(esc(actor.name), esc(plan.entry.name), plan.result.results.map(r => degreeWord[r.degree] ?? r.degree))];
   const def = definitionOf(api, plan.entry.kind, plan.entry.id);
   for (const g of plan.granted) {
     if (g.type === "properties") {
       const tag = def?.tag ? definitionOf(api, "tag", def.tag) : null;
-      lines.push(W.learnedProperties(plan.entry.name, tag?.name, tag?.theme));
-    } else lines.push(W.learnedFormula(definitionOf(api, "recipe", g.recipeId)?.name ?? g.recipeId));
+      lines.push(W.learnedProperties(esc(plan.entry.name), tag?.name ? esc(tag.name) : undefined, esc(tag?.theme)));
+    } else lines.push(W.learnedFormula(esc(definitionOf(api, "recipe", g.recipeId)?.name ?? g.recipeId)));
   }
   await whisper(resultRecipients(actor), `<p>${lines.join("<br>")}</p>`);
   if (plan.result.results.some(r => r.total !== null)) {

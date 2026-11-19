@@ -1212,3 +1212,15 @@ test("NODE ACTOR LOCK: two callers at once (the actor not made yet, creation tak
   assert.equal(actorList.filter(a => a.name === "Resource Node").length, 1);
   assert.deepEqual(new Set(made.map(a => a.id)).size, 1, "every caller got the same actor");
 });
+
+// Round 4 / 1b #4: the player's search line escapes the node names ---------------------------------------------------------------------
+test("SEARCH WHISPER: a spotted node's name is escaped in the chat line, and the text the API returns stays plain", async () => {
+  const { bb, scene, env } = await world({ anchors: 0 });
+  await standOn(scene, bb);
+  const herb = await hiddenNode(scene, { nodeType: "herb", dc: 10 });
+  herb.name = "Herb<b>x</b>";
+  bb.perceptionRolls.push(roll(3, 30, 20));
+  const result = await search(bb, scene);
+  assert.deepEqual(result.spotted, ["Herb<b>x</b>"], "the API result is plain text");
+  assert.equal(env.chat.at(-1).content, "<p>You search the area. You spot: Herb&lt;b&gt;x&lt;/b&gt;.</p>");
+});

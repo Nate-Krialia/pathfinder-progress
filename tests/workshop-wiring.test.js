@@ -594,3 +594,16 @@ test("STATION UNDO: undoing an owned workshop's upgrade leaves the same characte
   assert.equal(records["kit-one"].upgrades?.craftDays ?? 0, 0);
   assert.equal(records["kit-two"].upgrades?.craftDays, 1);
 });
+
+// Round 4 / 1b #4: the build whisper escapes the names -------------------------------------------------------------------------------
+test("BUILD WHISPER: the builder's name is escaped (a name like <b>x</b> reads as text)", async () => {
+  const w = await builderWorld();
+  w.ann.name = "Ann<b>x</b>";
+  const queued = await build(w.annUser, w.ann);
+  env.chat.length = 0;
+  await api().queue.resolve(w.ann, queued.id, { chat: true });
+  const content = env.chat.map(m => m.content).join(" ");
+  assert.match(content, /built/, "the build whisper was sent");
+  assert.doesNotMatch(content, /<b>/);
+  assert.match(content, /Ann&lt;b&gt;x&lt;\/b&gt;/);
+});
