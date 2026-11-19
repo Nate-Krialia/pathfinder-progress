@@ -546,3 +546,51 @@ test("LOCKS: an upgrade and a new party workshop landing at once do not drop eac
   assert.equal(env.values.partyStations.length, 2);
   assert.equal(env.values.partyStations.find(s => s.id === first).upgrades.craftDays, 1);
 });
+
+// Round 4 / 1b #5: a station undo puts back only its own entry, under the list's lock ------------------------------------------
+import { addPartyStation } from "../scripts/stations/store.js";
+
+test("STATION UNDO: undoing one public workshop's upgrade leaves another workshop's upgrade (the whole list used to be put back)", async () => {
+  await world({ downtime: 0 });
+  const undoForge = await applyStationUpgrade(api(), FORGE, { kind: "craftDays", from: 0, to: 1 });
+  await applyStationUpgrade(api(), "redhollow-forge", { kind: "craftDays", from: 0, to: 1 });
+  await undoForge();
+  const list = env.values.stationState;
+  assert.deepEqual(list.map(e => [e.stationId, e.upgrades?.craftDays]), [["redhollow-forge", 1]], "the forge's entry is gone, the other workshop's upgrade stays");
+});
+
+test("STATION UNDO: undoing a party workshop's upgrade leaves the other party workshop's upgrade", async () => {
+  const w = await builderWorld();
+  await api().queue.resolve(w.ann, (await build(w.annUser, w.ann)).id, { chat: false });
+  const first = clone(env.values.partyStations[0]);
+  const second = { ...first, id: "party-second", name: "Second Forge" };
+  await addPartyStation(second);
+  const undoFirst = await applyStationUpgrade(api(), first.id, { kind: "craftDays", from: 0, to: 1 });
+  await applyStationUpgrade(api(), second.id, { kind: "craftDays", from: 0, to: 1 });
+  await undoFirst();
+  const byId = Object.fromEntries(env.values.partyStations.map(r => [r.id, r]));
+  assert.equal(byId[first.id].upgrades?.craftDays ?? 0, 0, "the first workshop is back to what it was");
+  assert.equal(byId[second.id].upgrades?.craftDays, 1, "the second workshop keeps its upgrade");
+});
+
+test("STATION UNDO: undoing a new party workshop removes only that workshop", async () => {
+  const w = await builderWorld();
+  await api().queue.resolve(w.ann, (await build(w.annUser, w.ann)).id, { chat: false });
+  const first = clone(env.values.partyStations[0]);
+  const undoSecond = await addPartyStation({ ...first, id: "party-second", name: "Second Forge" });
+  await addPartyStation({ ...first, id: "party-third", name: "Third Forge" });
+  await undoSecond();
+  assert.deepEqual(env.values.partyStations.map(r => r.id).sort(), [first.id, "party-third"].sort());
+});
+
+test("STATION UNDO: undoing an owned workshop's upgrade leaves the same character's other workshop", async () => {
+  const w = await world({ downtime: 0 });
+  await as(w.gm, () => api().giveStation(w.ann, { name: "Kit One", category: "smithing", tier: 1, id: "kit-one" }));
+  await as(w.gm, () => api().giveStation(w.ann, { name: "Kit Two", category: "smithing", tier: 1, id: "kit-two" }));
+  const undoOne = await applyStationUpgrade(api(), "kit-one", { kind: "craftDays", from: 0, to: 1 });
+  await applyStationUpgrade(api(), "kit-two", { kind: "craftDays", from: 0, to: 1 });
+  await undoOne();
+  const records = Object.fromEntries((w.ann.getFlag(M, "stations") ?? []).map(r => [r.id, r]));
+  assert.equal(records["kit-one"].upgrades?.craftDays ?? 0, 0);
+  assert.equal(records["kit-two"].upgrades?.craftDays, 1);
+});

@@ -204,7 +204,11 @@ function locate(api, stationId) {
  */
 export function applyStationUpgrade(api, stationId, { kind, from, to }) {
   requireGM("applyStationUpgrade");
-  return withLock(stationKey(stationId), () => withLock(listKeyFor(api, stationId), async () => {
+  const listKey = listKeyFor(api, stationId);
+  // The undo runs under the SAME list lock and puts back only THIS station's entry (what it was, or nothing), never the whole list as it was: another station's upgrade or a new party
+  // workshop may have landed in the same setting since.
+  const undoUnderLock = fn => () => withLock(listKey, fn);
+  return withLock(stationKey(stationId), () => withLock(listKey, async () => {
     const found = locate(api, stationId);
     if (!found) throw new Error(`the workshop "${stationId}" no longer exists`);
     const { station } = found;
@@ -215,12 +219,18 @@ export function applyStationUpgrade(api, stationId, { kind, from, to }) {
 
     if (station.source === "public") {
       const before = structuredClone(game.settings.get(MODULE_ID, K.stationStateSetting) ?? []);
-      const existing = before.find(e => e.stationId === stationId) ?? { stationId, access: [] };
+      const prior = before.find(e => e.stationId === stationId);                        // undefined: the entry is new
+      const existing = prior ?? { stationId, access: [] };
       const entry = { ...existing, ...(patch.tier ? { tier: patch.tier } : { upgrades: mergeUpgrades(existing.upgrades) }) };
       const errors = check(LIVE_SCHEMAS.stationState, entry);
       if (errors.length) throw new Error(`built an invalid station state: ${errors.map(e => `${e.field} ${e.message}`).join("; ")}`);
       await game.settings.set(MODULE_ID, K.stationStateSetting, [...before.filter(e => e.stationId !== stationId), entry]);
-      return async () => { await game.settings.set(MODULE_ID, K.stationStateSetting, before); };
+      return undoUnderLock(async () => {
+        const current = structuredClone(game.settings.get(MODULE_ID, K.stationStateSetting) ?? []);
+        const next = !prior ? current.filter(e => e.stationId !== stationId)
+          : current.some(e => e.stationId === stationId) ? current.map(e => (e.stationId === stationId ? prior : e)) : [...current, prior];
+        await game.settings.set(MODULE_ID, K.stationStateSetting, next);
+      });
     }
     if (station.source === "owned") {
       const holder = [...game.actors].find(a => ownedOf(a).some(r => r.id === stationId));
@@ -230,7 +240,11 @@ export function applyStationUpgrade(api, stationId, { kind, from, to }) {
       const problems = validateOwnedRecord(next, holder.id, { towns: api.definitions?.town, config: STATIONS });
       if (problems.length) throw new Error(`the upgraded workshop would be invalid: ${problems.map(e => `${e.field} ${e.message}`).join("; ")}`);
       await holder.update({ [`flags.${MODULE_ID}.${K.actorStationsFlag}`]: before.map(r => (r.id === stationId ? next : r)) });
-      return async () => { await holder.update({ [`flags.${MODULE_ID}.${K.actorStationsFlag}`]: before }); };
+      return undoUnderLock(async () => {
+        const current = structuredClone(ownedOf(holder));
+        if (!current.some(r => r.id === stationId)) return;                            // removed or moved since: nothing of ours to put back
+        await holder.update({ [`flags.${MODULE_ID}.${K.actorStationsFlag}`]: current.map(r => (r.id === stationId ? record : r)) });
+      });
     }
     // a party workshop
     const before = readPartyList();
@@ -239,7 +253,11 @@ export function applyStationUpgrade(api, stationId, { kind, from, to }) {
     const errors = check(LIVE_SCHEMAS.partyStation, next);
     if (errors.length) throw new Error(`built an invalid party workshop: ${errors.map(e => `${e.field} ${e.message}`).join("; ")}`);
     await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, before.map(r => (r.id === stationId ? next : r)));
-    return async () => { await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, before); };
+    return undoUnderLock(async () => {
+      const current = readPartyList();
+      if (!current.some(r => r.id === stationId)) return;
+      await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, current.map(r => (r.id === stationId ? record : r)));
+    });
   }));
 }
 
@@ -258,7 +276,8 @@ export function addPartyStation(record) {
     const before = readPartyList();
     if (before.some(r => r.id === record.id)) throw new Error(`a party workshop "${record.id}" already exists`);
     await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, [...before, record]);
-    return async () => { await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, before); };
+    // the undo removes only THIS workshop, under the same lock (another workshop may have been added since)
+    return () => withLock(partyListKey, async () => { await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, readPartyList().filter(r => r.id !== record.id)); });
   });
 }
 
