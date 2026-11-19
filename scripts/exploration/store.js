@@ -18,6 +18,7 @@ import { anchorTokenData, nodeTokenData, occupyUpdate, randomPositions, revealUp
 import { formatGmSummary } from "./summary.js";
 import { unwrap } from "../queue/relay.js";
 import { undoAll } from "../queue/common.js";
+import { withLock } from "../queue/lock.js";
 import { noteNodesFound } from "../compendium/store.js";
 import { SEARCHED_ALREADY_TEXT, SEARCH_TEXT, searchMessage, spottedIds } from "./search.js";
 
@@ -65,11 +66,23 @@ const readAllState = () => {
   return raw && typeof raw === "object" && !Array.isArray(raw) ? structuredClone(raw) : {};
 };
 export const sceneState = sceneId => ({ ...emptySceneState(), ...(readAllState()[sceneId] ?? {}) });
-async function writeSceneState(sceneId, state) {
-  const all = readAllState();
-  if (state === null) delete all[sceneId];
-  else all[sceneId] = state;
-  await game.settings.set(MODULE_ID, EXPLORATION.stateSetting, all);
+const isEmptyState = s => s.encounter === null && !s.prepared.length && !Object.keys(s.searches).length && !s.revealed.length && !s.depleted.length;
+
+/**
+ * Every change to the scene state is one read-modify-write under ONE lock (the setting holds every scene's state, so two scenes' changes share it too): read INSIDE the lock, change a copy,
+ * await the write. `fn(state, existed)` returns the scene's new state, null to remove it, or undefined to change nothing. A LEAF lock: only this one setting is read and written inside it,
+ * so it sits innermost (after node and actor). A failure path undoes only its OWN part of the state (see the callers), never a whole earlier snapshot.
+ */
+export const EXPLORATION_STATE_LOCK = "explorationState";
+function changeSceneState(sceneId, fn) {
+  return withLock(EXPLORATION_STATE_LOCK, async () => {
+    const all = readAllState();
+    const next = fn({ ...emptySceneState(), ...(all[sceneId] ?? {}) }, sceneId in all);
+    if (next === undefined) return;
+    if (next === null) delete all[sceneId];
+    else all[sceneId] = next;
+    await game.settings.set(MODULE_ID, EXPLORATION.stateSetting, all);
+  });
 }
 
 /** Did the module put this node token here? (An explored node, or any token made from the shared Resource Node actor.) */
@@ -88,13 +101,16 @@ export async function retireNode(scene, token, { by = null } = {}) {
   requireGM("retireNode");
   const record = readRecord(token) ?? {};
   const entry = { tokenId: token.id, name: token.name, nodeType: record.nodeType ?? null, tier: record.tier ?? null, anchorId: record.anchorId ?? null, by, at: Date.now() };
-  const before = sceneState(scene.id);
-  const hadState = scene.id in readAllState();
-  await writeSceneState(scene.id, { ...before, depleted: [...before.depleted, entry] });
+  let existed = true;
+  await changeSceneState(scene.id, (state, had) => { existed = had; return { ...state, depleted: [...state.depleted, entry] }; });
   try {
     await scene.deleteEmbeddedDocuments("Token", [token.id]);
   } catch (error) {
-    await writeSceneState(scene.id, hadState ? before : null).catch(() => {});
+    // take back only this node's own record; whatever else the state holds stays
+    await changeSceneState(scene.id, state => {
+      const next = { ...state, depleted: state.depleted.filter(d => !(d.tokenId === entry.tokenId && d.at === entry.at)) };
+      return !existed && isEmptyState(next) ? null : next;
+    }).catch(() => {});
     console.error(`${MODULE_ID} | ${token.name} ran out of charges but its token could not be deleted; it stays as a depleted node`, error);
     return false;
   }
@@ -226,9 +242,8 @@ export async function clearAnchors(scene, { confirm } = {}) {
 export async function resetSearches(scene) {
   requireGM("resetSearches");
   const doc = sceneOf(scene);
-  const state = sceneState(doc.id);
-  const count = Object.keys(state.searches).length;
-  if (count) await writeSceneState(doc.id, { ...state, searches: {} });
+  let count = 0;
+  await changeSceneState(doc.id, state => { count = Object.keys(state.searches).length; return count ? { ...state, searches: {} } : undefined; });
   return count;
 }
 
@@ -270,7 +285,7 @@ export async function clearMap(scene) {
       await actor.update({ [`flags.${MODULE_ID}.knownNodes`]: kept });
     }
   }
-  await writeSceneState(doc.id, null);
+  await changeSceneState(doc.id, () => null);
   return { removed: mine.length, found, hidden, skipped: tokens.length - mine.length, knownNodesCleared, depletedCleared, orphanedGathers };
 }
 
@@ -393,8 +408,8 @@ export async function applyPlan(api, actor, run) {
       encounter: { active: run.encounter.encounter, forced: run.encounter.forced, at: entry.at, by: actor.name },
       prepared: [...previousState.prepared, entry].slice(-EXPLORATION.preparedLogMax)
     };
-    await writeSceneState(scene.id, next);
-    undos.push({ what: "the scene's expedition state", run: () => writeSceneState(scene.id, hadState ? previousState : null) });
+    await changeSceneState(scene.id, () => next);
+    undos.push({ what: "the scene's expedition state", run: () => changeSceneState(scene.id, () => (hadState ? previousState : null)) });
   } catch (error) {
     await undoAll(undos, "Check the scene by hand (api.clearMap clears what an expedition placed).").catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
     throw error;
@@ -439,9 +454,13 @@ export async function runSearch({ actorId, sceneId, userId }) {
   if (!user.isGM && !actor.testUserPermission(user, "OWNER")) return { message: "You can only search with a character you own.", spotted: [] };
   if (![...scene.tokens].some(t => t.actorId === actor.id)) return generic; // not on this scene: nothing happens, nothing is used up
 
-  const state = sceneState(scene.id);
-  if (state.searches[actor.id]) return { message: SEARCHED_ALREADY_TEXT, spotted: [] };
-  await writeSceneState(scene.id, { ...state, searches: { ...state.searches, [actor.id]: Date.now() } }); // used up first: a crash cannot give a free retry
+  // The attempt is claimed first (a crash cannot give a free retry), and the check and the claim are ONE step under the lock: two searches by one character at once make one attempt.
+  let alreadySearched = false;
+  await changeSceneState(scene.id, state => {
+    if (state.searches[actor.id]) { alreadySearched = true; return undefined; }
+    return { ...state, searches: { ...state.searches, [actor.id]: Date.now() } };
+  });
+  if (alreadySearched) return { message: SEARCHED_ALREADY_TEXT, spotted: [] };
 
   const { total, natural } = await adapter.rollPerception(actor, { createMessage: false });
   const hiddenNodes = [...scene.tokens].map(t => ({ t, record: readRecord(t) }))
@@ -452,15 +471,16 @@ export async function runSearch({ actorId, sceneId, userId }) {
   if (spottedNodes.length) {
     const now = Date.now();
     const known = listOf(actor.getFlag(MODULE_ID, "knownNodes"));
-    const afterState = sceneState(scene.id);
     const entries = spottedNodes.map(n => ({ sceneId: scene.id, tokenId: n.id, name: n.token.name, nodeType: n.record.nodeType, tier: n.record.tier, at: now }));
-    await writeSceneState(scene.id, { ...afterState, revealed: [...afterState.revealed, ...entries.map(e => ({ tokenId: e.tokenId, name: e.name, nodeType: e.nodeType, by: actor.name, at: now }))] });
+    const revealedRows = entries.map(e => ({ tokenId: e.tokenId, name: e.name, nodeType: e.nodeType, by: actor.name, at: now }));
+    await changeSceneState(scene.id, state => ({ ...state, revealed: [...state.revealed, ...revealedRows] }));
     try {
       await actor.update({ [`flags.${MODULE_ID}.knownNodes`]: [...known, ...entries] });
       await scene.updateEmbeddedDocuments("Token", spottedNodes.map(n => revealUpdate(n.id, actor.name)));
     } catch (error) {
       await actor.update({ [`flags.${MODULE_ID}.knownNodes`]: known }).catch(() => {});
-      await writeSceneState(scene.id, afterState).catch(() => {});
+      // take back only the rows this search added (the search's own claim stays: the attempt was used)
+      await changeSceneState(scene.id, state => ({ ...state, revealed: state.revealed.filter(r => !(r.at === now && revealedRows.some(own => own.tokenId === r.tokenId))) })).catch(() => {});
       throw error;
     }
     await noteNodesFound(globalThis.game?.modules?.get?.(MODULE_ID)?.api?.definitions, actor, spottedNodes.map(n => ({ nodeType: n.record.nodeType, region: n.record.region })));   // best-effort

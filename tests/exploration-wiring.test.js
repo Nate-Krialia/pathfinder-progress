@@ -1109,3 +1109,53 @@ test("RELAYED SEARCH: with no socket sender only a call made on this GM client i
   const own = await searchRelayed(payloadFor(bb, scene, "gm1"), undefined);
   assert.equal(own.message, "You search the area. You spot: Herb Patch.");
 });
+
+// Round 4 / stage 1 #18: the scene state is changed under one lock ------------------------------------------------------------
+const waitMs = ms => new Promise(r => setTimeout(r, ms));
+/** A settings write that takes a moment, for one key, as a real round trip does. */
+const slowSettings = (key, ms) => {
+  const real = globalThis.game.settings.set;
+  globalThis.game.settings.set = async (scope, k, v) => { if (k === key) await waitMs(ms); return real(scope, k, v); };
+  return () => { globalThis.game.settings.set = real; };
+};
+const another = async (scene, id, name) => {
+  const actor = fakeActor(id, name);
+  globalThis.game.actors.push(actor);
+  await standOn(scene, actor);
+  return actor;
+};
+
+test("STATE LOCK: two characters searching at once BOTH use up their attempt (the second write used to erase the first)", async () => {
+  const { bb, scene } = await world({ anchors: 0 });
+  await standOn(scene, bb);
+  const second = await another(scene, "a2", "Cormorant");
+  bb.perceptionRolls.push(roll(2, 3, 1)); second.perceptionRolls.push(roll(2, 3, 1));
+  const restore = slowSettings("explorationState", 20);
+  try { await Promise.all([search(bb, scene), search(second, scene)]); } finally { restore(); }
+  assert.deepEqual(Object.keys(state(scene).searches).sort(), ["a1", "a2"]);
+});
+
+test("STATE LOCK: one character searching twice at once makes ONE attempt (check and claim are one step)", async () => {
+  const { bb, scene } = await world({ anchors: 0 });
+  await standOn(scene, bb);
+  bb.perceptionRolls.push(roll(2, 3, 1), roll(2, 30, 20));
+  const restore = slowSettings("explorationState", 20);
+  let results;
+  try { results = await Promise.all([search(bb, scene), search(bb, scene)]); } finally { restore(); }
+  assert.equal(bb.perceptionRolls.length, 1, "only one Perception roll was made");
+  assert.ok(results.some(r => /already searched|already/i.test(r.message)), JSON.stringify(results));
+});
+
+test("STATE LOCK: a node that could not be deleted takes back only its own depleted record (a search recorded meanwhile stays)", async () => {
+  const { bb, scene } = await world({ anchors: 0 });
+  await standOn(scene, bb);
+  const herb = await hiddenNode(scene, { nodeType: "herb", dc: 40 });
+  bb.perceptionRolls.push(roll(2, 3, 1));
+  scene.deleteEmbeddedDocuments = async () => { await waitMs(40); throw new Error("the token could not be deleted"); };
+  const retiring = exploration.retireNode(scene, herb);
+  await waitMs(5);
+  await search(bb, scene);
+  assert.equal(await retiring, false);
+  assert.deepEqual(Object.keys(state(scene).searches), ["a1"], "the search recorded meanwhile is kept");
+  assert.deepEqual(state(scene).depleted, [], "and the node's own record is gone");
+});
