@@ -102,9 +102,8 @@ export const damaged = () => readEditorStore().problems;
  */
 async function repairIn(api, { reset = false } = {}) {
   requireGM("editor.repair");
-  const { problems, raw } = readEditorStore();
+  const { problems, raw } = readEditorStore();                     // read again inside the lock: the raw copy was already kept, before the lock, by repair() below
   if (!problems.length) return { repaired: false, dropped: [] };
-  await backUpOnce("editor", raw, "editor definitions");
   const fixed = repairStore(raw);
   if (!fixed.usable && !reset) throw new EditorError("The editor's saved definitions have an unknown shape, so there is nothing to salvage record by record. A copy is kept in the \"tagBackup\" setting. api.editor.repair({ reset: true }) starts the editor's definitions empty.", { problems, damaged: true });
   const memoryOnly = memoryOnlyOf(api, buildRegistry(base(api), emptyStore()).registry);       // the registry was loaded with the damaged store read as empty
@@ -413,6 +412,12 @@ export const setTrack = (api, key, track) => locked("setTrack", () => setTrackIn
 export const foldOverlay = api => locked("editor.foldOverlay", () => foldOverlayIn(api));
 export const clearLeftover = (api, key) => locked("editor.clearLeftover", () => clearLeftoverIn(api, key));
 export const importRecords = (api, bundle, options) => locked("editor.importRecords", () => importRecordsIn(api, bundle, options));
-export const repair = (api, options) => locked("editor.repair", () => repairIn(api, options));
+export async function repair(api, options) {
+  requireGM("editor.repair");
+  // The raw copy is kept BEFORE the editor lock is taken: the backup lock is a leaf and is never nested inside another one (the copy is once-only, so taking it first loses nothing).
+  const first = readEditorStore();
+  if (first.problems.length) await backUpOnce("editor", first.raw, "editor definitions");
+  return locked("editor.repair", () => repairIn(api, options));
+}
 
 export { emptyStore, EDITOR_SETTING };

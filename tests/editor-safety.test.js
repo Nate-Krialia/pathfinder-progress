@@ -268,3 +268,25 @@ test("SAVED AND PUBLISHED: nothing to warn about when both steps work", async ()
     assert.deepEqual([spy.console, spy.notes], [[], []]);
   } finally { spy.restore(); }
 });
+
+// Round 5: the raw copy is kept OUTSIDE the editorStore lock -------------------------------------------------------------------------
+test("EDITOR REPAIR LOCK: while the raw copy is being kept (slowly) the editor lock is free, so another editor change is not held up behind the repair", async () => {
+  const w = await editorWorld();
+  await quietly(async () => {
+    env.values.editorDefinitions = damagedStore();
+    await as(w.gm, async () => { await loadEditorStore().backedUp; });
+    delete env.values.tagBackup;                                                      // so the repair has a copy to keep
+    const real = game.settings.set;
+    game.settings.set = async (scope, key, value) => { if (key === "tagBackup") await new Promise(r => setTimeout(r, 150)); return real(scope, key, value); };
+    try {
+      const started = Date.now();
+      const repair = as(w.gm, () => api().editor.repair());
+      await new Promise(r => setTimeout(r, 20));
+      let waited;
+      const other = as(w.gm, () => api().editor.create("tag", { name: "Another One", theme: "other things" }, { makeItem: false })).catch(() => {}).then(() => { waited = Date.now() - started; });
+      await Promise.all([repair, other]);
+      assert.ok(waited < 120, `another editor change finished while the copy was being kept (it took ${waited} ms; a nested lock made it wait for the whole repair)`);
+    } finally { game.settings.set = real; }
+    assert.equal(typeof env.values.tagBackup.editor, "string", "the copy was kept");
+  });
+});

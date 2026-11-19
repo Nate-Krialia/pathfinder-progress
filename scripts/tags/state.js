@@ -223,10 +223,14 @@ export function loadFrozen() {
  */
 export async function repairFrozen({ reset = false } = {}) {
   requireGM("tags.repairFrozen");
+  const damagedNow = value => !(value === undefined || value === null || (typeof value === "object" && Object.keys(value).length === 0) || !frozenProblems(value).length);
+  // The raw copy is kept BEFORE the lock is taken: the backup lock is a leaf and is never nested inside another one (the copy is once-only, so taking it first loses nothing).
+  const first = game.settings.get(MODULE_ID, TAGS.frozenSetting);
+  if (!damagedNow(first)) return { repaired: false, dropped: [] };
+  await backUpOnce("frozen", first, BACKUP_WHAT.frozen);
   return withLock(FROZEN_LOCK, async () => {
-    const raw = game.settings.get(MODULE_ID, TAGS.frozenSetting);
-    if (raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0) || !frozenProblems(raw).length) return { repaired: false, dropped: [] };
-    await backUpOnce("frozen", raw, BACKUP_WHAT.frozen);
+    const raw = game.settings.get(MODULE_ID, TAGS.frozenSetting);                 // read again inside the lock: it may have been put right meanwhile
+    if (!damagedNow(raw)) return { repaired: false, dropped: [] };
     const fixed = salvageFrozen(raw);
     if (!fixed.usable && !reset) throw new TagError("The saved frozen craft results have an unknown shape, so there is nothing to salvage record by record. A copy is kept in the \"tagBackup\" setting. api.tags.repairFrozen({ reset: true }) starts the store empty.");
     await writeFrozen(fixed.store);

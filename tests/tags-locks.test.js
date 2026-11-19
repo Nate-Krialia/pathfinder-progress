@@ -299,7 +299,7 @@ test("REPAIR FROZEN: a held record that is sound stays held; a repair that overl
     env.values.tagCrafted = { v: 1, items: { keep: held, broken: 5 } };
     await as(w.gm, () => loadFrozen());
     const [repaired, frozen] = await as(w.gm, () => Promise.all([api().tags.repairFrozen(), tagState.freezeCraft({ frozen: { recipeId: "r-x", name: "X", tier: 1, native: [], inherited: [], uses: [], roles: {}, contributions: [] } })]));
-    assert.equal(repaired.repaired, true);
+    assert.ok([true, false].includes(repaired.repaired), "the repair either wrote the sound records back or found the freeze had already done it (the copy is kept first, outside the lock, so either order is fine)");
     assert.deepEqual(Object.keys(env.values.tagCrafted.items).sort(), ["keep", frozen.id].sort());
     assert.equal(env.values.tagCrafted.items.keep.held, true, "the hold survived the repair");
   });
@@ -320,4 +320,25 @@ test("DAMAGED FROZEN STORE: a second GM's damaged write read in through the sett
       assert.deepEqual(Object.keys(env.values.tagBackup).sort(), ["frozen", "ledger"]);
     });
   } finally { spy.restore(); }
+});
+
+// Round 5: the raw copy is kept OUTSIDE the tagCrafted lock --------------------------------------------------------------------------
+test("REPAIR FROZEN LOCK: while the raw copy is being kept (slowly) the tagCrafted lock is free, so another change to the store is not held up behind the repair", async () => {
+  const w = await tagWorld();
+  await quietly(async () => {
+    env.values.tagCrafted = { v: 1, items: { keep: { recipeId: "dagger", roles: {} }, broken: 5 } };
+    await as(w.gm, async () => { await loadFrozen().backedUp; });
+    delete env.values.tagBackup;                                                      // so the repair has a copy to keep (the load had already kept one)
+    const restore = slowWrites({ tagBackup: 150 });
+    try {
+      const started = Date.now();
+      const repair = as(w.gm, () => api().tags.repairFrozen());
+      await new Promise(r => setTimeout(r, 20));                                     // the repair is now keeping its copy
+      let waited;
+      const removal = as(w.gm, () => tagState.removeFrozen("keep")).then(() => { waited = Date.now() - started; });
+      await Promise.all([repair, removal]);
+      assert.ok(waited < 120, `another change to the store finished while the copy was being kept (it took ${waited} ms; a nested lock made it wait for the whole repair)`);
+    } finally { restore(); }
+    assert.equal(typeof env.values.tagBackup.frozen, "string", "the copy was kept");
+  });
 });
