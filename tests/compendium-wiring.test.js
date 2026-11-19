@@ -419,3 +419,40 @@ test("SHARE: a character no player owns (outside the party) never sees the share
   assert.deepEqual(as(w.gm, () => api().compendium.view(stranger)).entries.materials, []);
   assert.equal(api().compendium.hasMaterial(stranger, "iron"), false);
 });
+
+// Round 4 / 1b #6: a failed approval takes back only its own merge ---------------------------------------------------------------
+import { changedPaths, revertPaths } from "../scripts/compendium/undo.js";
+const waitMs = ms => new Promise(r => setTimeout(r, ms));
+
+test("SHARE UNDO: an approval whose commit fails takes back only its own entry; another approval that landed meanwhile stays in the shared Compendium", async () => {
+  const w = await world({ downtime: 0 });
+  await api().giveMaterial(w.bob, "silver", 1);
+  const annShare = await share(w, w.annUser, w.ann, { kind: "material", key: "iron" });
+  const bobShare = await share(w, w.bobUser, w.bob, { kind: "material", key: "silver" });
+  const realUpdate = w.ann.update;
+  w.ann.update = async data => { await waitMs(40); throw new Error("the actor update failed"); };
+  const failing = as(w.gm, () => api().queue.resolve(w.ann, annShare.id, { chat: false })).catch(error => error);
+  await waitMs(5);
+  const approved = await as(w.gm, () => api().queue.resolve(w.bob, bobShare.id, { chat: false }));
+  assert.equal(approved.status, "resolved");
+  assert.match((await failing).message, /the actor update failed/);
+  w.ann.update = realUpdate;
+  assert.deepEqual(Object.keys(shared().materials), ["silver"], "Bob's approval stays, Ann's merge is gone");
+  assert.equal(pendingOf(w.ann).length, 1, "Ann's share is still waiting");
+});
+
+test("SHARE UNDO (pure): only the places a merge changed go back, and only where the book still holds what the merge wrote", () => {
+  const before = { v: 1, materials: { iron: { id: "iron", places: [1] } }, creatures: {}, experiments: { a: { classes: { weapon: { iron: { x: 1 } } } } } };
+  const after = { v: 1, materials: { iron: { id: "iron", places: [1, 2] }, silver: { id: "silver", places: [] } }, creatures: {}, experiments: { a: { classes: { weapon: { iron: { x: 1 }, silver: { x: 2 } } } } } };
+  const changes = changedPaths(before, after);
+  assert.deepEqual(changes.map(c => c.path.join(".")).sort(), ["experiments.a.classes.weapon.silver", "materials.iron.places", "materials.silver"]);
+  assert.deepEqual(revertPaths(after, changes, before), before, "with nothing else added, the book is exactly as before");
+  const later = structuredClone(after);
+  later.materials.gold = { id: "gold", places: [] };               // another approval's entry
+  later.experiments.a.classes.weapon.gold = { x: 3 };
+  later.materials.iron.places = [1, 2, 9];                          // changed under the same path since: not ours to put back
+  const reverted = revertPaths(later, changes, before);
+  assert.ok(reverted.materials.gold && reverted.experiments.a.classes.weapon.gold, "the other approval's entries stay");
+  assert.equal(reverted.materials.silver, undefined, "ours is gone");
+  assert.deepEqual(reverted.materials.iron.places, [1, 2, 9], "a path someone else changed is left alone");
+});

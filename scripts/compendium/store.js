@@ -17,6 +17,7 @@ import { isPartyCharacter } from "../party.js";
 import { readFormulaList } from "../research/store.js";
 import { withLock } from "../queue/lock.js";
 import { resolveSlotEffects } from "../crafting/plan.js";
+import { changedPaths, revertPaths } from "./undo.js";
 import { computeBaseline, describeExperiments, effectKnown, isOverridden, migrateToClasses, recordBaseline, recordClassFact, recordExperiment, touchExperiment } from "./experiments.js";
 import {
   countBook, describeBook, emptyBook, hasMaterial as bookHasMaterial, mergeShared, recordCreature, recordCreatureYield,
@@ -278,13 +279,33 @@ export function hasMaterial(actor, materialId) {
   return isPartyCharacter(actor) && bookHasMaterial(readShared(), materialId);
 }
 
-/** Merge one shared entry into the world's shared Compendium (the GM approved a share). Idempotent. */
-export function mergeIntoShared(kind, entry) {
-  return withLock("compendium:shared", async () => {
+/** The lock for the shared Compendium setting (every change to it: a share's merge, its undo, a repair). A LEAF lock. */
+export const SHARED_LOCK = "compendium:shared";
+
+/**
+ * Merge one shared entry into the world's shared Compendium (the GM approved a share). Idempotent. Returns { changed, undo }: `undo()` takes back ONLY what this merge changed (under
+ * the same lock), so another approval's merge that landed since stays.
+ */
+export function mergeIntoSharedWithUndo(kind, entry) {
+  return withLock(SHARED_LOCK, async () => {
     const before = readShared();
+    const stored = structuredClone(game.settings.get(MODULE_ID, COMPENDIUM.sharedSetting));     // the exact stored value (an unset setting is not an empty book)
     const after = mergeShared(before, kind, entry);
-    if (JSON.stringify(after) === JSON.stringify(before)) return false;
+    if (JSON.stringify(after) === JSON.stringify(before)) return { changed: false, undo: async () => {} };
     await game.settings.set(MODULE_ID, COMPENDIUM.sharedSetting, after);
-    return true;
+    const changes = changedPaths(before, after);
+    return {
+      changed: true,
+      undo: () => withLock(SHARED_LOCK, async () => {
+        const reverted = revertPaths(game.settings.get(MODULE_ID, COMPENDIUM.sharedSetting), changes, before);
+        // nothing else was added meanwhile: put back exactly what was stored before this merge
+        await game.settings.set(MODULE_ID, COMPENDIUM.sharedSetting, JSON.stringify(reverted) === JSON.stringify(before) ? stored : reverted);
+      })
+    };
   });
+}
+
+/** The same merge, for callers that only need to know whether anything changed. */
+export async function mergeIntoShared(kind, entry) {
+  return (await mergeIntoSharedWithUndo(kind, entry)).changed;
 }

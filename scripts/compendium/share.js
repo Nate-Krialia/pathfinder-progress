@@ -4,14 +4,14 @@
  * (Resolve all handles shares) and the facts are merged into the world's shared Compendium, or rejects it and the entry
  * stays private. The owner can cancel while it waits. What is shared is a snapshot taken when it was queued.
  */
-import { COMPENDIUM, MODULE_ID, QUEUE_KEYS } from "../config.js";
+import { MODULE_ID, QUEUE_KEYS } from "../config.js";
 import { commit } from "../audit/store.js";
 import { actorKey, withLocks } from "../queue/lock.js";
 import { appendAction, flagKey, gmIds, note, ownerIds, pendingOf, whisper } from "../queue/common.js";
 import { refusal } from "../queue/relay.js";
 import { mergeShared, pickEntry } from "./entries.js";
 import { experimentFactsText } from "./experiments.js";
-import { mergeIntoShared, readBook, readShared } from "./store.js";
+import { mergeIntoSharedWithUndo, readBook, readShared } from "./store.js";
 
 const KINDS = ["material", "creature", "region", "experiment"];
 const labelOf = (kind, entry) => `${entry.name} (${kind})`;
@@ -61,12 +61,13 @@ export function describeShare(action) {
 /** The GM approves (resolves) a share: merge the facts into the shared Compendium, then drop the item. Caller holds the actor lock. */
 export async function resolveShare(api, actor, action, pending, { chat }) {
   const { kind, entry, name } = action.params;
-  const before = structuredClone(game.settings.get(MODULE_ID, COMPENDIUM.sharedSetting));   // the exact stored value, so a failed approve puts back exactly that
-  const changed = await mergeIntoShared(kind, entry);
+  const merge = await mergeIntoSharedWithUndo(kind, entry);
+  const changed = merge.changed;
   try {
     await commit(actor, { [flagKey(QUEUE_KEYS.pendingFlag)]: pending.filter(a => a.id !== action.id) });
   } catch (error) {
-    if (changed) await game.settings.set(MODULE_ID, COMPENDIUM.sharedSetting, before).catch(restoreError => console.error(`${MODULE_ID} | the share failed AND the shared Compendium could not be put back`, restoreError));
+    // take back only what THIS approval merged (under the shared Compendium's lock); another approval's merge that landed meanwhile stays
+    if (changed) await merge.undo().catch(restoreError => console.error(`${MODULE_ID} | the share failed AND the shared Compendium could not be put back`, restoreError));
     throw error;
   }
   await note(`share approved: ${labelOf(kind, entry)} from ${actor.name}${changed ? "" : " (nothing new to add)"}`);
