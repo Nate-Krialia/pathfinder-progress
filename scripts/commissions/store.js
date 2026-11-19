@@ -29,7 +29,8 @@ import { buildCommission, checkStep, commissionWarnings, gpText, isOpen, suggest
 import { ledgerChanges } from "./changes.js";
 import { affordabilityErrors, buildSteps } from "./escrow.js";
 import { addLoan, dropLoan } from "./loans.js";
-import { readCommissions, writeCommissions } from "./list.js";
+import { changeCommissions, readCommissions, writeCommissions } from "./list.js";
+import { withLock } from "../queue/lock.js";
 import * as tagState from "../tags/state.js";
 
 /** A request that can never succeed as stated (wrong status, missing record). The queue removes these. */
@@ -75,22 +76,38 @@ function logEntry(c, entry, now = Date.now()) {
   return [...c.log, { at: now, ...entry }].slice(-COMMISSIONS.logMax);
 }
 
-/** Write the list with `next` in it, run `after`, and put the list back if `after` fails. */
+/**
+ * Write `next` into the list (under the list lock, only its own record), run `after`, and if `after` fails put back ONLY this record (what it was, or nothing): another commission's
+ * change that landed meanwhile stays. `after` runs outside the list lock.
+ */
 async function withRecord(next, after) {
-  const before = readCommissions();
-  const exists = before.some(c => c.id === next.id);
-  await writeCommissions(exists ? before.map(c => (c.id === next.id ? next : c)) : [...before, next]);
+  let previous;
+  await changeCommissions(list => {
+    const at = list.findIndex(c => c.id === next.id);
+    previous = at < 0 ? undefined : structuredClone(list[at]);
+    if (at < 0) list.push(next); else list[at] = next;
+  });
   try {
     await after();
   } catch (error) {
     try {
-      await writeCommissions(before);
+      await changeCommissions(list => {
+        const at = list.findIndex(c => c.id === next.id);
+        if (previous === undefined) { if (at >= 0) list.splice(at, 1); } else if (at >= 0) list[at] = previous; else list.push(previous);
+      });
     } catch (restoreError) {
       console.error(`${MODULE_ID} | a commission step failed AND the commission list could not be restored`, restoreError);
     }
     throw error;
   }
 }
+
+/**
+ * One commission, one step at a time: accept, decline, cancel and craft of the SAME commission run one after another, each reading the commission fresh once it holds the lock. A craft
+ * used to read the commission, roll, move gold and items, and then write its own copy over a cancel that had landed meanwhile (delivered, with the gold and the item gone).
+ * Lock order: node, then actor, then THIS (commission:<id>), then the leaf locks (commissionList, tagCrafted, auditLedger).
+ */
+const commissionKey = id => `commission:${id}`;
 
 /** Update an actor's formula and project lists (plus any extra flat update) through the audit commit. */
 async function commitCrafter(actor, { formulas, projects, extra = {}, note }) {
@@ -162,6 +179,7 @@ export async function createFromRequest(api, patronActor, action) {
   }, { id, now: Date.now(), slotNames: recipe.slots.map(s => s.name) });
   if (!built.ok) refuse(built.errors.join("; "));
   const commission = { ...built.commission, log: [{ at: Date.now(), text: `requested by ${patronActor.name}` }] };
+  // Idempotent by action id, decided INSIDE the lock: two resolves of one request make one commission.
   await writeCommissions([...readCommissions(), commission]);
   return commission;
 }
@@ -179,8 +197,11 @@ function openOrRefuse(id, step, actorId, isGM) {
  * The crafter accepts. A copy is learned for good now; a loan appears on the crafter for this commission.
  * options.as = "loan" turns a copy offer into a loan. options.extraUpdate is merged into the crafter's update.
  */
-export async function acceptStep(api, id, { as, actorId, extraUpdate = {} } = {}) {
+export async function acceptStep(api, id, options = {}) {
   requireGM("accept");
+  return withLock(commissionKey(id), () => acceptLocked(api, id, options));
+}
+async function acceptLocked(api, id, { as, actorId, extraUpdate = {} } = {}) {
   const c = openOrRefuse(id, "accept", actorId ?? readCommissions().find(x => x.id === id)?.crafter, true);
   if (as !== undefined && as !== "loan") throw new Error('accept: "as" can only be "loan"');
   if (as === "loan" && c.access !== "copy") throw new Error("accept: only a copy offer can be taken as a loan instead");
@@ -208,8 +229,11 @@ export async function acceptStep(api, id, { as, actorId, extraUpdate = {} } = {}
   return next;
 }
 
-export async function declineStep(id, { actorId } = {}) {
+export async function declineStep(id, options = {}) {
   requireGM("decline");
+  return withLock(commissionKey(id), () => declineLocked(id, options));
+}
+async function declineLocked(id, { actorId } = {}) {
   const c = openOrRefuse(id, "decline", actorId ?? readCommissions().find(x => x.id === id)?.crafter, true);
   const next = { ...c, status: "declined", log: logEntry(c, { text: "declined" }) };
   await withRecord(next, async () => {});
@@ -217,8 +241,11 @@ export async function declineStep(id, { actorId } = {}) {
 }
 
 /** Cancel before delivery. Nothing was held, so nothing is refunded; a loan disappears, a copy stays. */
-export async function cancelStep(id, { actorId, reason } = {}) {
+export async function cancelStep(id, options = {}) {
   requireGM("cancel");
+  return withLock(commissionKey(id), () => cancelLocked(id, options));
+}
+async function cancelLocked(id, { actorId, reason } = {}) {
   const c = openOrRefuse(id, "cancel", actorId ?? "", true);
   const next = { ...c, status: "cancelled", log: logEntry(c, { text: `cancelled${reason ? `: ${reason}` : ""}` }) };
   const crafter = game.actors.get(c.crafter);
@@ -346,7 +373,7 @@ export async function craftForCommission(api, id, options = {}) {
   if (inFlight.has(id)) throw new Error(`craft: commission "${id}" is already being crafted`);
   inFlight.add(id);
   try {
-    return await craftLocked(api, id, options);
+    return await withLock(commissionKey(id), () => craftLocked(api, id, options));
   } finally {
     inFlight.delete(id);
   }

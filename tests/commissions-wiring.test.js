@@ -666,3 +666,66 @@ test("commission steps cannot be 'edited' for days, and show no day box in the r
   assert.match(html, /no days/);
   assert.doesNotMatch(html, /data-action="edit-days"/);
 });
+
+// Round 4 / stage 1 #9 and 1b #7: one lock per commission, one lock for the list -------------------------------------------------
+const waitMs = ms => new Promise(r => setTimeout(r, ms));
+/** A settings write that takes a moment, for one key, as a real round trip does. */
+const slowSettings = (key, ms) => {
+  const real = globalThis.game.settings.set;
+  globalThis.game.settings.set = async (scope, k, v) => { if (k === key) await waitMs(ms); return real(scope, k, v); };
+  return () => { globalThis.game.settings.set = real; };
+};
+
+test("COMMISSION LOCK: a cancel that lands while a craft is rolling cannot be overwritten (the craft used to deliver, and move gold and the item, over it)", async () => {
+  const { patron, crafter } = await world();
+  const id = await acceptedPlayerJob(patron, crafter);
+  let release;
+  crafter.rolls.push(new Promise(r => { release = () => r(roll(2, 30, 15)); }));      // the craft check waits here
+  const craft = commissions.craftForCommission(api, id, { chat: false }).then(() => "crafted", error => error);
+  await waitMs(10);
+  const cancel = commissions.cancelStep(id).then(() => "cancelled", error => error);
+  await waitMs(30);
+  release();
+  const [craftResult, cancelResult] = [await craft, await cancel];
+  const c = commissions.getCommission(id);
+  if (cancelResult === "cancelled") {
+    assert.equal(c.status, "cancelled", "a cancel that succeeded stays");
+    assert.deepEqual([gp(patron), gp(crafter)], [20, 3], "and then no gold moved");
+    assert.equal(patron.items.filter(i => i.type === "weapon").length, 0);
+  } else {
+    assert.match(cancelResult.message, /delivered/, "or the cancel is refused because the craft got there first");
+    assert.equal(craftResult, "crafted");
+    assert.equal(c.status, "delivered");
+    assert.deepEqual([gp(patron), gp(crafter)], [3, 15], "and the gold moved exactly once");
+  }
+  assert.deepEqual(audit.scan(), []);
+});
+
+test("COMMISSION LOCK: a cancel that comes first stops a craft that has not started (the craft re-reads the commission under the lock)", async () => {
+  const { patron, crafter } = await world();
+  const id = await acceptedPlayerJob(patron, crafter);
+  const restore = slowSettings("commissions", 15);
+  try {
+    const cancel = commissions.cancelStep(id);
+    const craft = commissions.craftForCommission(api, id, { degree: "success", chat: false }).catch(error => error);
+    await cancel;
+    const refused = await craft;
+    assert.match(refused.message, /is cancelled/);
+  } finally { restore(); }
+  assert.deepEqual([gp(patron), gp(crafter), commissions.getCommission(id).status], [20, 3, "cancelled"]);
+});
+
+test("COMMISSION LOCK: a failed accept puts back ONLY its own commission; another commission accepted meanwhile stays accepted", async () => {
+  const { crafter } = await world();
+  const cedric = fakeActor("ced", "Cedric", { copper: 300 });
+  globalThis.game.actors.push(cedric);
+  const a = (await commissions.issue(api, { patron: "Patron A", crafter, recipe: DAGGER, selection: SEL })).commission;
+  const b = (await commissions.issue(api, { patron: "Patron B", crafter: cedric, recipe: DAGGER, selection: SEL })).commission;
+  crafter.update = async () => { await waitMs(40); throw new Error("the crafter update failed"); };
+  const failing = commissions.acceptStep(api, a.id).catch(error => error);
+  await waitMs(5);
+  await commissions.acceptStep(api, b.id);
+  assert.match((await failing).message, /the crafter update failed/);
+  assert.equal(status(a.id), "requested", "the failed one is back to what it was");
+  assert.equal(status(b.id), "accepted", "the other one that landed meanwhile stays");
+});
