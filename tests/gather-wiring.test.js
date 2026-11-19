@@ -358,3 +358,24 @@ test("GM-only: a non-GM cannot gather or edit nodes", async () => {
   await assert.rejects(store.gather({ actor, node: token, skill: "athletics", degree: "success" }, api), /GM only/);
   await assert.rejects(store.createNode(api, fakeToken(), orePlaced()), /GM only/);
 });
+
+// Round 4 / stage 1 #26: the direct gather() API takes the node lock ---------------------------------------------------------
+test("DIRECT GATHER LOCK: two gathers at once on a node with ONE charge: one gathers, the other finds it depleted (the last charge used to be spent twice)", async () => {
+  install(Array(30).fill(0));
+  const first = fakeActor();
+  const second = fakeActor({ name: "Cormorant" });
+  second.id = "actor2";
+  const token = await oreNode(1);
+  for (const method of ["setFlag", "update"]) {
+    const real = token[method];
+    token[method] = async (...args) => { await new Promise(r => setTimeout(r, 20)); return real(...args); };   // a write takes a moment, as a real one does
+  }
+  const results = await Promise.allSettled([
+    store.gather({ actor: first, node: token, skill: "athletics", degree: "success", chat: false }, api),
+    store.gather({ actor: second, node: token, skill: "athletics", degree: "success", chat: false }, api)
+  ]);
+  assert.deepEqual(results.map(r => r.status).sort(), ["fulfilled", "rejected"]);
+  assert.match(results.find(r => r.status === "rejected").reason.message, /depleted|no charge/);
+  assert.equal([first, second].filter(a => a.items.length > 0).length, 1, "only one of them was given anything");
+  assert.deepEqual([record(token).charges, record(token).state], [0, "depleted"]);
+});

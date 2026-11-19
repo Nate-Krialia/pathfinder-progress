@@ -13,6 +13,7 @@ import { checkGatherable, hiddenSuccessChance, neededD20, pickSkill, resolveGath
 import { formatGatherSummary } from "./summary.js";
 import { noteGather, whileHandled } from "../compendium/store.js";
 import { giveWithUndo, undoAll } from "../queue/common.js";
+import { actorKey, nodeKey, withLocks } from "../queue/lock.js";
 
 const rollDie = sides => Math.floor(CONFIG.Dice.randomUniform() * sides) + 1;
 const PASS = ["success", "criticalSuccess"];
@@ -185,9 +186,15 @@ export function previewGather(api, actor, token, skill) {
  * @param {string} [options.degree]   TEST OVERRIDE: skip the roll and force a visible result
  * @param {boolean} [options.chat=true]  false skips the chat summary (for test loops)
  */
-export async function gather({ actor, node: nodeRef, skill, degree: forced, chat = true, rollCard = false }, api) {
+export async function gather(options, api) {
   requireGM("gather");
-  const doc = resolveToken(nodeRef);
+  const doc = resolveToken(options.node);
+  // The same locks the queue's gather takes, in the same order (node, then actor): the node's last charge cannot be spent twice, and the character's items are not changed under a
+  // queued resolve of the same character. The node is read again once the locks are held.
+  return withLocks([nodeKey({ sceneId: doc.parent?.id, tokenId: doc.id }), actorKey(options.actor)], () => gatherLocked(doc, options, api));
+}
+
+async function gatherLocked(doc, { actor, skill, degree: forced, chat = true, rollCard = false }, api) {
   const node = viewOrThrow(doc, api, "gather");
 
   const problem = checkGatherable(node);
