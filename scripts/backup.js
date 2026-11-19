@@ -2,7 +2,7 @@
  * The one-time backup of a damaged GM setting (a leaf module: it imports nothing from the rest of the module but config and the keyed lock).
  *
  * A damaged ledger, caps table, frozen store or editor store is never allowed to be silently replaced by the next write. Before that can happen the raw value is kept ONCE in the
- * `tagBackup` world setting, as a JSON string under a fixed key ("ledger", "caps", "frozen" or "editor"): a string, so a uuid or a name inside it never becomes an object key (Foundry
+ * `tagBackup` world setting, as a JSON string under a fixed key ("ledger", "caps", "frozen", "editor" or "shared"): a string, so a uuid or a name inside it never becomes an object key (Foundry
  * reads a dot in a key as a path). An existing backup for a key is never replaced. The setting is GM data like the ones it backs up (honor system: a world setting can be read from
  * a Player's console).
  *

@@ -36,7 +36,8 @@ export function submitShare(actor, params, days) {
     if (pendingOf(actor).some(a => a?.type === "share" && a.params?.kind === kind && a.params?.key === key)) {
       throw refusal(`${entry.name} is already waiting for the GM to approve sharing it.`);
     }
-    const shared = readShared();
+    let shared;
+    try { shared = readShared(); } catch { throw refusal("The party's shared Compendium is damaged and waiting for the GM to repair it, so nothing can be shared right now."); }
     if (JSON.stringify(mergeShared(shared, kind, entry)) === JSON.stringify(shared)) throw refusal(`Everything ${actor.name} knows about ${entry.name} is already shared with the party.`);
     const action = {
       id: foundry.utils.randomID(), type: "share", daysReserved: 0, submittedAt: Date.now(),

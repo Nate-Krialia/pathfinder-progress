@@ -249,6 +249,8 @@ Hooks.once("ready", async () => {
       knownEffect: (actor, recipe, slot, materialId) => compendium.knownEffect(actor, typeof recipe === "string" ? (api.definitions?.recipe.get(recipe) ?? recipe) : recipe, slot, materialId),
       /** GM: fold the old per-recipe facts into item classes (idempotent; the module runs it once at startup). */
       migrateClasses: () => compendium.migrateClasses(api.definitions),
+      /** GM: put a damaged shared Compendium right: only its damaged records are dropped, after the raw value was kept once in the tagBackup setting. { reset: true } starts it empty when its shape is unknown. */
+      repairShared: options => compendium.repairShared(options),
       /** GM: reveal the baseline of every OWNED formula an actor already holds (formulas gained before Stage 10d). Pass no actor for every character. */
       revealBaselines: actor => compendium.revealBaselines(api.definitions, actor),
       /** GM testing tool: record what a successful craft of `recipeId` with `uses` ([{ slot, materialId }]) teaches `actor` (the call a craft makes). */
@@ -524,6 +526,7 @@ Hooks.once("ready", async () => {
   }
 
   try { tagState.loadLedger(); tagState.loadCaps(); tagState.loadFrozen(); } catch (err) { console.error(`${MODULE_ID} | could not read the tag ledger`, err); }
+  try { compendium.checkShared(); } catch (err) { console.error(`${MODULE_ID} | could not check the shared Compendium`, err); }
   try {
     await api.reload();
   } catch (err) {

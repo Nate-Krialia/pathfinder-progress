@@ -456,3 +456,86 @@ test("SHARE UNDO (pure): only the places a merge changed go back, and only where
   assert.equal(reverted.materials.silver, undefined, "ours is gone");
   assert.deepEqual(reverted.materials.iron.places, [1, 2, 9], "a path someone else changed is left alone");
 });
+
+// Round 4 / 1b #18: a damaged shared Compendium is refused, kept once, reported once, and repaired record by record -----------------------
+import { checkShared } from "../scripts/compendium/store.js";
+const DAMAGED_RECORD = { id: "silver", name: 5, tier: "high" };          // fails validation
+
+async function damagedSharedWorld({ queueBobFirst = false } = {}) {
+  const w = await world({ downtime: 0 });
+  await api().giveMaterial(w.bob, "silver", 1);
+  const first = await share(w, w.annUser, w.ann, { kind: "material", key: "iron" });
+  await as(w.gm, () => api().queue.resolve(w.ann, first.id, { chat: false }));       // a sound record in the shared book
+  w.bobShare = queueBobFirst ? await share(w, w.bobUser, w.bob, { kind: "material", key: "silver" }) : null;
+  env.values.sharedCompendium = { ...clone(env.values.sharedCompendium), materials: { ...env.values.sharedCompendium.materials, silver: DAMAGED_RECORD } };
+  return w;
+}
+const clone = v => structuredClone(v);
+const backups = () => env.values.tagBackup ?? {};
+
+test("DAMAGED SHARED: an approval is refused with the way out named, the damaged setting is not replaced, and a copy is kept once as a JSON string", async () => {
+  const w = await damagedSharedWorld({ queueBobFirst: true });
+  const damaged = clone(env.values.sharedCompendium);
+  const failure = await as(w.gm, () => api().queue.resolve(w.bob, w.bobShare.id, { chat: false })).catch(error => error);
+  assert.match(String(failure.message), /damaged/, "refused");
+  assert.match(String(failure.message), /repairShared/, "and it names the repair");
+  assert.deepEqual(env.values.sharedCompendium, damaged, "the damaged setting is untouched");
+  assert.equal(typeof backups().shared, "string", "one raw copy, as a string");
+  assert.deepEqual(JSON.parse(backups().shared), damaged);
+  env.values.sharedCompendium.materials.silver = { id: "silver", name: 6 };           // damaged differently
+  await as(w.gm, () => api().queue.resolve(w.bob, w.bobShare.id, { chat: false })).catch(() => {});
+  assert.deepEqual(JSON.parse(backups().shared), damaged, "the first copy is never replaced");
+});
+
+test("DAMAGED SHARED: a player cannot queue a share while the book is damaged, and is told so in plain words (no internals)", async () => {
+  const w = await damagedSharedWorld();
+  const refused = await share(w, w.bobUser, w.bob, { kind: "material", key: "silver" }).catch(error => error);
+  assert.match(refused.message, /waiting for the GM to repair/);
+  assert.doesNotMatch(refused.message, /repairShared|tagBackup|materials\./);
+});
+
+test("DAMAGED SHARED: the GM is told once per damaged load, and a healthy or unset book says nothing", async () => {
+  const w = await damagedSharedWorld();
+  const warnings = [];
+  const real = globalThis.ui.notifications.warn;
+  globalThis.ui.notifications.warn = text => warnings.push(text);
+  try {
+    const report = await as(w.gm, () => quietly(() => checkShared()));
+    await report.backedUp;                                              // the copy is kept in the background: wait for it
+    assert.ok(report.problems.length > 0);
+    assert.deepEqual(report.dropped, ["materials.silver"], "it can say which record is damaged");
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /repairShared/);
+    delete env.values.sharedCompendium;
+    assert.deepEqual((await as(w.gm, () => checkShared())).problems, []);
+    assert.equal(warnings.length, 1, "an unset book is healthy");
+  } finally { globalThis.ui.notifications.warn = real; }
+});
+
+test("DAMAGED SHARED: api.compendium.repairShared drops only the damaged records, keeps the sound ones, backs up first, and sharing works again", async () => {
+  const w = await damagedSharedWorld();
+  const raw = clone(env.values.sharedCompendium);
+  await assert.rejects(as(w.annUser, () => api().compendium.repairShared()), /GM only/, "GM only");
+  const result = await as(w.gm, () => quietly(() => api().compendium.repairShared()));
+  assert.deepEqual([result.repaired, result.dropped], [true, ["materials.silver"]]);
+  assert.deepEqual(Object.keys(env.values.sharedCompendium.materials), ["iron"], "the sound record stays");
+  assert.deepEqual(JSON.parse(backups().shared), raw, "the damaged value was kept first");
+  assert.ok(events().some(t => /repaired the shared Compendium \(dropped 1/.test(t)));
+  const again = await as(w.gm, () => api().compendium.repairShared());
+  assert.deepEqual([again.repaired, again.dropped], [false, []], "a healthy book is left alone");
+  const bobShare = await share(w, w.bobUser, w.bob, { kind: "material", key: "silver" });
+  const approved = await as(w.gm, () => api().queue.resolve(w.bob, bobShare.id, { chat: false }));
+  assert.equal(approved.status, "resolved");
+  assert.deepEqual(Object.keys(env.values.sharedCompendium.materials).sort(), ["iron", "silver"]);
+});
+
+test("DAMAGED SHARED: a book whose shape is unknown is not salvaged unless the GM says reset", async () => {
+  const w = await world({ downtime: 0 });
+  env.values.sharedCompendium = { v: 1, materials: "nonsense", creatures: {}, regions: {} };
+  await assert.rejects(as(w.gm, () => quietly(() => api().compendium.repairShared())), /unknown shape/);
+  assert.equal(env.values.sharedCompendium.materials, "nonsense", "refused: nothing was changed");
+  assert.equal(typeof backups().shared, "string", "but the copy is kept");
+  const reset = await as(w.gm, () => quietly(() => api().compendium.repairShared({ reset: true })));
+  assert.equal(reset.repaired, true);
+  assert.deepEqual(env.values.sharedCompendium, { v: 1, materials: {}, creatures: {}, regions: {} });
+});

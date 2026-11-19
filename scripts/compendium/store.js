@@ -18,6 +18,10 @@ import { readFormulaList } from "../research/store.js";
 import { withLock } from "../queue/lock.js";
 import { resolveSlotEffects } from "../crafting/plan.js";
 import { changedPaths, revertPaths } from "./undo.js";
+import { salvageShared, sharedProblems } from "./repair.js";
+import { backUpOnce, reportDamaged } from "../backup.js";
+import { afterSave } from "../after-save.js";
+import { logWorldEvent } from "../audit/store.js";
 import { computeBaseline, describeExperiments, effectKnown, isOverridden, migrateToClasses, recordBaseline, recordClassFact, recordExperiment, touchExperiment } from "./experiments.js";
 import {
   countBook, describeBook, emptyBook, hasMaterial as bookHasMaterial, mergeShared, recordCreature, recordCreatureYield,
@@ -37,11 +41,13 @@ export function readBook(actor) {
   return raw;
 }
 
+const REPAIR_ADVICE = "A GM can put it right with api.compendium.repairShared() (a copy of the damaged value is kept in the tagBackup setting first, and only the damaged records are dropped).";
+
 export function readShared() {
   const raw = game.settings.get(MODULE_ID, COMPENDIUM.sharedSetting);
   if (raw === undefined || raw === null || (typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length === 0)) return emptyBook();
   const problems = check(LIVE_SCHEMAS.compendium, raw);
-  if (problems.length) throw new Error(`the shared Compendium is invalid: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
+  if (problems.length) throw new Error(`the shared Compendium is invalid: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}. ${REPAIR_ADVICE}`);
   return structuredClone(raw);
 }
 
@@ -286,7 +292,8 @@ export const SHARED_LOCK = "compendium:shared";
  * Merge one shared entry into the world's shared Compendium (the GM approved a share). Idempotent. Returns { changed, undo }: `undo()` takes back ONLY what this merge changed (under
  * the same lock), so another approval's merge that landed since stays.
  */
-export function mergeIntoSharedWithUndo(kind, entry) {
+export async function mergeIntoSharedWithUndo(kind, entry) {
+  await refuseWhileDamaged();
   return withLock(SHARED_LOCK, async () => {
     const before = readShared();
     const stored = structuredClone(game.settings.get(MODULE_ID, COMPENDIUM.sharedSetting));     // the exact stored value (an unset setting is not an empty book)
@@ -308,4 +315,56 @@ export function mergeIntoSharedWithUndo(kind, entry) {
 /** The same merge, for callers that only need to know whether anything changed. */
 export async function mergeIntoShared(kind, entry) {
   return (await mergeIntoSharedWithUndo(kind, entry)).changed;
+}
+
+// A damaged shared Compendium: refuse writes, keep one copy, tell the GM once, repair on request -----------------------------------------
+/** The stored shared Compendium, raw (no validation). */
+const rawShared = () => game.settings.get(MODULE_ID, COMPENDIUM.sharedSetting);
+
+/**
+ * A write to a damaged shared Compendium is refused (the damaged value is never silently replaced), after a copy of it was kept ONCE in the backup (scripts/backup.js, key "shared").
+ * The backup runs BEFORE the shared lock is taken: the backup lock is a leaf and is never nested inside another.
+ */
+async function refuseWhileDamaged() {
+  const raw = rawShared();
+  const problems = sharedProblems(raw);
+  if (!problems.length) return;
+  await backUpOnce("shared", raw, "shared Compendium");
+  throw new Error(`the shared Compendium is damaged, so nothing was shared: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}. ${REPAIR_ADVICE}`);
+}
+
+/** GM, at ready: if the saved shared Compendium is damaged, keep one raw copy and tell the GM ONCE (the setting itself is not touched). Returns { problems }. */
+export function checkShared() {
+  if (!game.user?.isGM) return { problems: [] };
+  const raw = rawShared();
+  const problems = sharedProblems(raw);
+  if (!problems.length) return { problems };
+  const fixed = salvageShared(raw);
+  const backedUp = reportDamaged({
+    kind: "shared", what: "shared Compendium", raw, problems,
+    consoleText: "the saved shared Compendium is damaged: no share can be approved until it is repaired",
+    note: `The shared Compendium is damaged, so no share can be approved. A copy was kept. ${fixed.usable ? `api.compendium.repairShared() drops the ${fixed.dropped.length} damaged record(s) and keeps the rest.` : "Its shape is unknown: api.compendium.repairShared({ reset: true }) starts it empty (the copy stays in the backup)."}`
+  });
+  return { problems, dropped: fixed.dropped, backedUp };
+}
+
+/**
+ * GM: put a damaged shared Compendium right by writing back only its sound records. The raw value is kept in the backup first (once; outside the lock). A healthy or unset setting is left
+ * alone. An unknown outer shape cannot be salvaged record by record: that is refused unless { reset: true } (it then starts empty; the raw copy stays in the backup).
+ */
+export async function repairShared({ reset = false } = {}) {
+  requireGM("compendium.repairShared");
+  const first = rawShared();
+  if (!sharedProblems(first).length) return { repaired: false, dropped: [] };
+  await backUpOnce("shared", first, "shared Compendium");
+  const result = await withLock(SHARED_LOCK, async () => {
+    const raw = rawShared();
+    if (!sharedProblems(raw).length) return { repaired: false, dropped: [] };
+    const fixed = salvageShared(raw);
+    if (!fixed.usable && !reset) throw new Error("The saved shared Compendium has an unknown shape, so there is nothing to salvage record by record. A copy is kept in the \"tagBackup\" setting. api.compendium.repairShared({ reset: true }) starts it empty.");
+    await game.settings.set(MODULE_ID, COMPENDIUM.sharedSetting, fixed.book);
+    return { repaired: true, dropped: fixed.dropped };
+  });
+  if (result.repaired) await afterSave("the shared Compendium repair", [["writing the audit log line", () => logWorldEvent(`compendium: repaired the shared Compendium (dropped ${result.dropped.length} damaged record(s))`)]]);
+  return result;
 }
