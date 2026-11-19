@@ -753,3 +753,17 @@ test("COMMISSION LOCK: a failed accept puts back ONLY its own commission; anothe
   assert.equal(status(a.id), "requested", "the failed one is back to what it was");
   assert.equal(status(b.id), "accepted", "the other one that landed meanwhile stays");
 });
+
+// Round 4 / 1b #4: the commission card escapes each name once -----------------------------------------------------------------------
+test("COMMISSION CARD: names are escaped ONCE in the chat (the crafter used to be escaped by the caller and would be escaped again by the summary)", async () => {
+  const { patron, crafter } = await world();
+  crafter.name = "Bor<i>&</i>in";
+  patron.name = "Ael<b>wyn</b>";
+  const id = await acceptedPlayerJob(patron, crafter);
+  await commissions.craftForCommission(api, id, { degree: "success" });
+  const card = env.chat.at(-1).content;
+  assert.doesNotMatch(card, /<i>|<b>/, "no markup from a name");
+  assert.match(card, /Bor&lt;i&gt;&amp;&lt;\/i&gt;in/);
+  assert.match(card, /Fee paid by Ael&lt;b&gt;wyn&lt;\/b&gt;/);
+  assert.doesNotMatch(card, /&amp;amp;|&amp;lt;/, "never twice");
+});

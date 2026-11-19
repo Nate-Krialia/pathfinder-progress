@@ -270,7 +270,7 @@ test("addProgress needs a reason, records it, and shares the completion path", a
   const result = await store.addProgress(api, actor, LONGSWORD, 3, "Studied Master Orrin's notes");
   assert.deepEqual([result.applied, result.project.progress, result.completed], [3, 3, false]);
   assert.deepEqual(projectOf(actor, LONGSWORD).log.at(-1), { source: "addProgress", delta: 3, note: "Studied Master Orrin's notes" });
-  assert.match(env.chat.at(-1).content, /advances by 3 \(Studied Master Orrin's notes\)/);
+  assert.match(env.chat.at(-1).content, /advances by 3 \(Studied Master Orrin&#39;s notes\)/);
 
   const done = await store.addProgress(api, actor, LONGSWORD, 20, "A master's gift", { chat: false });
   assert.equal(done.completed, true);

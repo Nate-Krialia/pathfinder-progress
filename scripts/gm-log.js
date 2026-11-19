@@ -13,9 +13,9 @@ import { GM_LOG } from "./config.js";
 const entries = [];
 let nextId = 1;
 
-/** Plain text of a small HTML snippet: breaks become "; ", tags go. */
+/** Plain text of a small HTML snippet: breaks become "; ", tags go, the entities `esc` makes are read back (&amp; last, so "&amp;lt;" stays "&lt;"). */
 export function plainText(html) {
-  return String(html ?? "").replace(/<(br|\/p|\/li|\/h3)\s*\/?>/gi, "; ").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+  return String(html ?? "").replace(/<(br|\/p|\/li|\/h3)\s*\/?>/gi, "; ").replace(/<[^>]*>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&")
     .replace(/\s*;\s*(;\s*)+/g, "; ").replace(/\s+/g, " ").replace(/[;\s]+$/, "").trim();
 }
 
