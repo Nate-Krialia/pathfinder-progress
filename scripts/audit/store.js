@@ -15,6 +15,7 @@ import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
 import { reservedOf } from "../gathering/reserve.js";
 import { escrowProblems } from "../queue/escrow.js";
+import { withLock } from "../queue/lock.js";
 
 const requireGM = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
 
@@ -37,6 +38,19 @@ export function readLedger() {
 const writeLedger = ledger => game.settings.set(MODULE_ID, AUDIT.ledgerSetting, ledger);
 
 /**
+ * The ledger is ONE setting that every actor's entry lives in, so every change is a read-modify-write under ONE lock: read INSIDE the lock, change a clone, await the write.
+ * Two commits for two actors used to read the same ledger and the second write erased the first's entry. The lock is a LEAF: whatever runs inside it only reads and writes this
+ * one setting (never an actor update, never another lock), so it sits innermost, after node and actor.
+ */
+export const AUDIT_LOCK = "auditLedger";
+const changeLedger = mutate => withLock(AUDIT_LOCK, async () => {
+  const ledger = readLedger();
+  const result = mutate(ledger);
+  await writeLedger(ledger);
+  return result;
+});
+
+/**
  * Apply `update` (flat actor-update paths) to the actor and record `changes` in the ledger.
  * GM only. With no changes (a reject or edit that only moves days) the ledger is left alone.
  */
@@ -46,15 +60,20 @@ export async function commit(actor, update, changes = [], now = Date.now()) {
     await actor.update(update);
     return;
   }
-  const before = readLedger();
-  let entry = before[actor.id] ?? emptyEntry(actor.name);
-  for (const change of changes) entry = applyChange(entry, change, now, actor.name);
-  await writeLedger({ ...before, [actor.id]: entry });
+  // The ledger is written FIRST (under the lock, only this actor's key), the actor next, outside the lock: an actor update can fire hooks that log, and the lock is not re-entrant.
+  let previous;
+  await changeLedger(ledger => {
+    previous = ledger[actor.id] === undefined ? undefined : structuredClone(ledger[actor.id]);
+    let entry = ledger[actor.id] ?? emptyEntry(actor.name);
+    for (const change of changes) entry = applyChange(entry, change, now, actor.name);
+    ledger[actor.id] = entry;
+  });
   try {
     await actor.update(update);
   } catch (error) {
     try {
-      await writeLedger(before);
+      // Put back ONLY this actor's own entry (what it was, or nothing): another actor's commit may have landed meanwhile and must stay.
+      await changeLedger(ledger => { if (previous === undefined) delete ledger[actor.id]; else ledger[actor.id] = previous; });
     } catch (restoreError) {
       console.error(`${MODULE_ID} | the actor update failed AND the audit ledger could not be restored`, restoreError);
     }
@@ -121,32 +140,37 @@ export function scan(actors = [...game.actors]) {
 /** First run: actors that already hold module data but have no ledger entry get one that matches today. Returns their names. */
 export async function bootstrap(actors = [...game.actors], now = Date.now()) {
   requireGM("audit bootstrap");
-  const ledger = readLedger();
   const added = [];
-  for (const actor of actors) {
-    const state = readState(actor);
-    if (ledger[actor.id] || !hasModuleData(state)) continue;
-    ledger[actor.id] = baselineEntry(state, actor.name, "baseline when auditing began", now);
-    added.push(actor.name);
-  }
-  if (added.length) await writeLedger(ledger);
+  await withLock(AUDIT_LOCK, async () => {
+    const ledger = readLedger();
+    for (const actor of actors) {
+      const state = readState(actor);
+      if (ledger[actor.id] || !hasModuleData(state)) continue;
+      ledger[actor.id] = baselineEntry(state, actor.name, "baseline when auditing began", now);
+      added.push(actor.name);
+    }
+    if (added.length) await writeLedger(ledger);
+  });
   return added;
 }
 
 /** A note about something that is not one actor's data (a downtime start, a GM override). Kept under the ledger key "_events". */
 export async function logWorldEvent(text, now = Date.now()) {
   requireGM("audit event");
-  const ledger = readLedger();
-  const history = [...(ledger._events?.history ?? []), { at: now, text }].slice(-100);
-  await writeLedger({ ...ledger, _events: { name: "World events", history } });
+  await changeLedger(ledger => {
+    const history = [...(ledger._events?.history ?? []), { at: now, text }].slice(-100);
+    ledger._events = { name: "World events", history };
+  });
 }
 
 /** The GM accepts what an actor holds now: the ledger is reset to match it (history is kept). */
 export async function accept(actor, now = Date.now()) {
   requireGM("audit accept");
-  const ledger = readLedger();
-  const fresh = baselineEntry(readState(actor), actor.name, "accepted by the GM", now);
-  fresh.history = [...(ledger[actor.id]?.history ?? []), ...fresh.history].slice(-AUDIT.historyMax);
-  await writeLedger({ ...ledger, [actor.id]: fresh });
+  let fresh;
+  await changeLedger(ledger => {
+    fresh = baselineEntry(readState(actor), actor.name, "accepted by the GM", now);
+    fresh.history = [...(ledger[actor.id]?.history ?? []), ...fresh.history].slice(-AUDIT.historyMax);
+    ledger[actor.id] = fresh;
+  });
   return fresh;
 }
