@@ -22,8 +22,21 @@ import { runApply } from "./apply.js";
 export function createEffects(deps) {
   const { adapter, chat, notify } = deps;
   const now = deps.now ?? (() => Date.now());
-  const seenMessages = new Set(), seenOrigins = new Map(), inFlight = new Set();
+  const seenMessages = new Map(), seenOrigins = new Map(), inFlight = new Set();     // id -> when it was seen; both are pruned and bounded by remember()
   const applyDeps = { itemByUuid: adapter.itemByUuid, craftedFlag: adapter.craftedFlag, tokenInfo: adapter.tokenInfo, rollSave: adapter.rollSave, applyCondition: adapter.applyCondition, levelDC: deps.levelDC, log: deps.log };
+
+  /**
+   * Remember `key` (as the newest entry of `map`) and forget what is too old or beyond EFFECTS.seenMax. A Map keeps its insertion order and a re-recorded key is moved to the end, so the
+   * oldest entries are always at the front and pruning stops at the first one that stays.
+   */
+  const remember = (map, key, keepMs) => {
+    const at = now();
+    map.delete(key);
+    map.set(key, at);
+    for (const [k, seenAt] of map) {
+      if (map.size > EFFECTS.seenMax || at - seenAt > keepMs) map.delete(k); else break;
+    }
+  };
 
   const names = async uuids => Promise.all(uuids.map(async uuid => (await adapter.tokenInfo(uuid))?.name ?? "a target"));
 
@@ -31,11 +44,17 @@ export function createEffects(deps) {
   async function handle(message) {
     const event = adapter.readMessage(message);
     if (event.kind === "none" || event.kind === "damage") return null;       // not an item message / a damage roll is never a trigger
-    if (event.messageId && seenMessages.has(event.messageId)) return null;
-    if (event.kind === "consumable" && event.originUuid) {
-      const at = seenOrigins.get(event.originUuid);
-      if (at !== undefined && now() - at < EFFECTS.dedupeMs) return null;      // the second card (Use pressed on the first) is the same use
-      seenOrigins.set(event.originUuid, now());      // recorded HERE, before the first await below: two cards that arrive together cannot both pass the check above
+    // Check, then record, THEN await: both records are made before the first await below, so two events that arrive together cannot both pass the checks.
+    if (event.messageId) {
+      if (seenMessages.has(event.messageId)) return null;
+      remember(seenMessages, event.messageId, EFFECTS.seenMessageMs);
+    }
+    // A consumable's second card (Use pressed on the first) is the same use. Keyed by the item's origin UUID, else by the token and item ids the message names.
+    const originKey = event.kind === "consumable" ? (event.originUuid ?? (event.tokenUuid && event.itemId ? `${event.tokenUuid}#${event.itemId}` : null)) : null;
+    if (originKey) {
+      const at = seenOrigins.get(originKey);
+      if (at !== undefined && now() - at < EFFECTS.dedupeMs) return null;
+      remember(seenOrigins, originKey, EFFECTS.dedupeMs);
     }
     const item = await adapter.resolveItem(event, message);
     const flag = adapter.craftedFlag(item);
@@ -45,7 +64,6 @@ export function createEffects(deps) {
     const own = event.kind === "attack" && event.targetTokenUuid ? [event.targetTokenUuid] : adapter.authorTargets(message);   // context.target holds only the first target
     const decision = decide(event, itemClass, own.length);
     if (decision === "skip") return null;
-    if (event.messageId) seenMessages.add(event.messageId);
     const targets = decision === "fallback" ? [] : own;
     const text = headline({ itemName: item.name, kind: event.kind === "attack" || event.kind === "consumable" ? event.kind : "other", outcome: event.outcome, itemClass, targetNames: await names(targets), mode: decision, lines: linesFor(effects) });
     return chat.create(cardMessage({ whisper: chat.gmIds(), flag: cardFlag({ itemUuid: item.uuid, targets, effects: effects.map(e => e.index), fallback: decision === "fallback", text }) }));
@@ -118,7 +136,7 @@ export function createEffects(deps) {
     }
   }
 
-  return { handle, onMessage, applyCard, skipCard, onRender };
+  return { handle, onMessage, applyCard, skipCard, onRender, seenSizes: () => ({ messages: seenMessages.size, origins: seenOrigins.size }) };
 }
 
 /** The one place main.js calls: the two Foundry hooks. Only the active GM reacts to a message; every GM client draws the buttons. */

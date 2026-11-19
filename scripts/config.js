@@ -354,6 +354,8 @@ export const EFFECT_SAVES = { will: "Will", fortitude: "Fortitude", reflex: "Ref
 export const EFFECTS = {
   maxValue: 4,                       // a valued condition never goes above this (a critical failure on a save adds 1, up to the cap)
   dedupeMs: 10000,                   // a consumable's second card (Use on the card) within this long of the first is the same use
+  seenMessageMs: 3600000,            // the hook remembers a message it has handled for this long (a chat message never fires twice; the memory only stops two cards for one)
+  seenMax: 500,                      // and never more than this many messages, or consumable uses (the oldest go first): the memory stays small in a long session
   cardFlag: "fx",                    // the flag on the GM's card message
   craftedFlag: "crafted"             // the flag on a crafted item (written by buildCraftedItemData)
 };

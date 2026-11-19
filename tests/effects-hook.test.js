@@ -305,3 +305,55 @@ test("the card's buttons: drawn and wired for a GM while pending, disabled when 
   t.effects.onRender(busy, player, { isGM: false });
   assert.equal(player.querySelectorAll("button").length, 0);
 });
+
+// Round 4 / stage 1 #17 (work-log issue 24): the "seen" memory ---------------------------------------------------------------------
+test("SEEN: the same message arriving twice together (no await between) makes ONE card (the message was recorded only after the awaits)", async () => {
+  const t = setup();
+  const hero = actorOf("Hero"), gob = token("Goblin A", actorOf("Goblin A"));
+  addItem(hero, "I1", "Mitflit Fang", flagFor("g21-sword"));
+  const hit = attackMessage({ actor: hero, tokenUuid: "Scene.S.Token.Hero", itemId: "I1", outcome: "success", target: gob });
+  const [one, two] = await Promise.all([t.effects.onMessage(hit), t.effects.onMessage(hit)]);
+  assert.equal([one, two].filter(Boolean).length, 1);
+  assert.equal(t.all().length, 1);
+});
+
+test("SEEN: both memories are bounded: more than EFFECTS.seenMax messages or uses never leave more than seenMax entries", async () => {
+  const t = setup();
+  const hero = actorOf("Hero");
+  addItem(hero, "I1", "Mitflit Fang", flagFor("g21-sword"));
+  for (let n = 0; n < EFFECTS.seenMax + 50; n++) {
+    await t.effects.onMessage({ ...plainMessage(`x${n}`), id: `bulk${n}`, flags: { pf2e: { context: { type: "attack-roll", outcome: "failure", origin: { actor: `Actor.${hero.id}`, token: "Scene.S.Token.Hero" } }, origin: { uuid: `Actor.${hero.id}.Item.I1`, type: "weapon" } } } });
+    await t.effects.onMessage(consumableMessage(hero, `U${n}`));
+  }
+  const sizes = t.effects.seenSizes();
+  assert.ok(sizes.messages <= EFFECTS.seenMax && sizes.origins <= EFFECTS.seenMax, JSON.stringify(sizes));
+  assert.ok(sizes.messages > 0 && sizes.origins > 0, "and it still remembers the recent ones");
+});
+
+test("SEEN: entries older than the window are forgotten (messages after EFFECTS.seenMessageMs, a consumable use after EFFECTS.dedupeMs)", async () => {
+  const t = setup();
+  const hero = actorOf("Hero"), gob = token("Goblin A", actorOf("Goblin A"));
+  addItem(hero, "I1", "Mitflit Fang", flagFor("g21-sword"));
+  for (let n = 0; n < 5; n++) await t.effects.onMessage(attackMessage({ actor: hero, tokenUuid: "Scene.S.Token.Hero", itemId: "I1", outcome: "success", target: gob }));
+  assert.equal(t.effects.seenSizes().messages, 5);
+  t.tick(EFFECTS.seenMessageMs + 1);
+  await t.effects.onMessage(attackMessage({ actor: hero, tokenUuid: "Scene.S.Token.Hero", itemId: "I1", outcome: "success", target: gob }));
+  assert.equal(t.effects.seenSizes().messages, 1, "the five old ones are pruned when the next one is recorded");
+});
+
+test("SEEN: a consumable card without an origin UUID is still the same use when the token and the item ids are the same", async () => {
+  const t = setup();
+  const hero = actorOf("Hero"), a = token("Goblin A", actorOf("Goblin A"));
+  addItem(hero, "C1", "Mitflit Draught", flagFor("g21-potion"));
+  const noOrigin = () => ({ id: `P${++seq}`, flags: { pf2e: { origin: { actor: `Actor.${hero.id}`, type: "consumable" } } }, author: { targets: new Set([{ document: a }]) } });
+  const read = adapter.readMessage(noOrigin());
+  // what the real adapter reads: no origin UUID means no consumable event at all, so the memory is exercised through a fake adapter that does name the token and item
+  const fake = { ...adapter, readMessage: m => (m.fake ? { kind: "consumable", messageId: m.id, originUuid: null, itemId: "C1", tokenUuid: "Scene.S.Token.Hero", outcome: null } : adapter.readMessage(m)) };
+  const w = chatWorld();
+  const effects = createEffects({ adapter: fake, registry, chat: w.chat, log() {}, levelDC, notify: { warn() {}, info() {} }, now: () => 1000 });
+  const msg = () => ({ ...noOrigin(), fake: true, item: hero.items.get("C1") });
+  assert.equal(read.kind, "none", "the real adapter gives nothing without an origin UUID");
+  const first = await effects.onMessage(msg());
+  assert.ok(first, "the first use makes a card");
+  assert.equal(await effects.onMessage(msg()), null, "the second within the window is the same use");
+});
