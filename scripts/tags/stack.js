@@ -109,7 +109,9 @@ function stackResistance(items, cap, notes) {
 
 function stackAbilities(items, cap, notes) {
   const seen = new Set(), out = [];
-  for (const { value } of ranked(items)) { const key = `${value.title}|${value.on ?? "hit"}`; if (seen.has(key)) continue; seen.add(key); out.push({ ...value }); }
+  let untitled = 0;
+  // Two abilities with the same TITLE and the same trigger are one (the best contributor's wins). An ability with no title has nothing to be the same as: each gets its own key, so none collapse into one.
+  for (const { value } of ranked(items)) { const key = typeof value.title === "string" && value.title !== "" ? `${value.title}|${value.on ?? "hit"}` : `(untitled #${++untitled})`; if (seen.has(key)) continue; seen.add(key); out.push({ ...value }); }
   if (cap?.maxCount !== undefined && out.length > cap.maxCount) { notes.push(`capped specialAbility: ${out.length} abilities became ${cap.maxCount}`); return out.slice(0, cap.maxCount); }
   return out;
 }

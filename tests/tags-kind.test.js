@@ -128,3 +128,15 @@ test("CLAMP ORDER: no cap, no reordering of what is kept is needed; and the DICE
   const r = stackContributions([{ role: "bonusDamage", value: { dice: "3d4", type: "fire" }, from: from("A", 5) }, { role: "bonusDamage", value: { dice: "3d10", type: "fire" }, from: from("B", 1) }], { bonusDamage: { maxDicePerType: 3 } });
   assert.deepEqual(r.roles.bonusDamage.map(e => e.dice), ["3d10"], "a d10 beats a d4 whatever the tier of its contributor");
 });
+
+// Round 5 / stage 1 #20: untitled abilities each keep their own key ------------------------------------------------------------------
+test("ABILITIES: untitled abilities never collapse into one (they used to share the key undefined|hit); a title with the same trigger still does", () => {
+  const abilities = list => stackContributions(list, {}).roles.specialAbility;
+  const U = (text, f, on) => ({ role: "specialAbility", value: { text, ...(on ? { on } : {}) }, from: f });
+  assert.deepEqual(abilities([U("burns", from("A", 1)), U("freezes", from("B", 2)), U("shocks", from("C", 3), "crit")]).map(a => a.text).sort(), ["burns", "freezes", "shocks"], "three untitled abilities, three kept");
+  assert.equal(abilities([U("burns", from("A", 1)), U("burns", from("B", 1))]).length, 2, "even with the same words: nothing to say they are the same one");
+  assert.deepEqual(abilities([A("Bite", from("A", 1)), A("Bite", from("B", 3))]).map(a => a.title), ["Bite"], "the same title and trigger is still one (the best contributor's)");
+  assert.equal(abilities([A("Bite", from("A", 1)), { ...A("Bite", from("B", 1)), value: { title: "Bite", text: "t", on: "crit" } }]).length, 2, "the same title on another trigger is two");
+  assert.equal(abilities([U("burns", from("A", 1)), A("Bite", from("B", 1))]).length, 2, "an untitled ability and a titled one are two");
+  assert.deepEqual(stackContributions([U("a", from("A", 1)), U("b", from("B", 1)), U("c", from("C", 1))], { specialAbility: { maxCount: 2 } }).notes, ["capped specialAbility: 3 abilities became 2"], "a count cap sees all three");
+});
