@@ -144,6 +144,16 @@ export function scenesFor(api, regionId) {
 /** The shared neutral actor all node tokens are made from. Created (or recreated) on demand. GM only. */
 export async function ensureNodeActor() {
   requireGM("ensureNodeActor");
+  return withLock(NODE_ACTOR_LOCK, ensureNodeActorLocked);
+}
+
+/**
+ * Creating the actor is the slow part (a round trip, then a repair update), and two callers at once (two expeditions, an anchor drop beside a node drop) each used to find no actor, create
+ * one, and leave two "Resource Node" actors. Creation is serialised under this lock and the actor is looked for again once it is held, so two callers get ONE actor. A LEAF lock: nothing
+ * inside it takes another lock of ours (node and actor locks are held, if at all, by the callers, outside it).
+ */
+export const NODE_ACTOR_LOCK = "nodeActor";
+async function ensureNodeActorLocked() {
   const remembered = game.settings.get(MODULE_ID, NODE_ACTOR.setting) || "";
   let actor = remembered ? game.actors.get(remembered) : null;
   if (actor && adapter.isNodeActor(actor, MODULE_ID, NODE_ACTOR.flag)) return actor;

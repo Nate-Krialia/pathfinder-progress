@@ -1201,3 +1201,14 @@ test("EXPEDITION UNDO: the row an append pushed out of the capped list comes bac
   assert.ok(rows.some(r => r.at === 1000), "the row the first expedition pushed out is back");
   assert.ok(!rows.some(r => r.at === firstAt), "the first expedition's own row is gone");
 });
+
+// Round 4 / 1b #12: two callers get one Resource Node actor ---------------------------------------------------------------------
+test("NODE ACTOR LOCK: two callers at once (the actor not made yet, creation takes a moment) get ONE Resource Node actor", async () => {
+  const { actorList } = install();
+  const real = globalThis.Actor.create;
+  globalThis.Actor.create = async data => { await waitMs(20); return real(data); };
+  let made;
+  try { made = await Promise.all([exploration.ensureNodeActor(), exploration.ensureNodeActor(), exploration.ensureNodeActor()]); } finally { globalThis.Actor.create = real; }
+  assert.equal(actorList.filter(a => a.name === "Resource Node").length, 1);
+  assert.deepEqual(new Set(made.map(a => a.id)).size, 1, "every caller got the same actor");
+});
