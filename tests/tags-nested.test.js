@@ -112,3 +112,23 @@ test("3a: the leak scan fails when an inherited list, a passCap, outputTags or a
   const { findTagLeaks } = await import("./helpers.js");
   for (const key of ["inherited", "passCap", "outputTags", "native"]) assert.ok(findTagLeaks({ slots: [], [key]: [] }).length, key);
 });
+
+// Round 5 / stage 1 #21: a crafted item always has a tier --------------------------------------------------------------------------
+test("TIER: a craft with no tier from its recipe, a power role or an ingredient counts as tier 1, the GM log note says so, and it can fill a tier-1 slot", () => {
+  const OPTIONAL_MOUNT = { ...MOUNT, drives: "basePower", needs: { all: ["metal"], optional: true } };      // the power slot itself is tagged and optional, and is left empty
+  const registry = reg([ironbar], [OPTIONAL_MOUNT]);
+  const none = plan(registry, {}, ledgerWith({}, { "mount-blade": { tags: ["metal"], name: "Mount Blade" } }));        // every slot optional and left empty: no ingredient to take a tier from
+  assert.ok(none.ok, none.errors?.join(" | "));
+  assert.equal(none.plan.frozen.tier, 1, "tier 1, not null");
+  assert.match(none.plan.capNotes.join(" "), /Mount Blade has no tier of its own .* so it counts as tier 1/, "the GM is told");
+  // the GM's own tier is never overridden, and a craft that HAS a tier says nothing
+  const set = plan(registry, {}, ledgerWith({}, { "mount-blade": { tags: ["metal"], tier: 3 } }));
+  assert.deepEqual([set.plan.frozen.tier, set.plan.capNotes], [3, []]);
+  const powered = plan(reg([ironbar], [EDGE, MOUNT]), { edge: "ironbar", mount: "crafted:x1" }, ledgerWith({ x1: REC() }));
+  assert.deepEqual([powered.plan.frozen.tier, powered.plan.capNotes.filter(n => /no tier/.test(n))], [1, []], "an ordinary craft keeps the tier it always had");
+  // a record that has none (saved before this rule) reads as tier 1, so such an item fills a tier-1 slot instead of being refused for 'no tier'
+  const legacy = ledgerWith({ x1: REC({ tier: null }) });
+  assert.equal(effectiveTier("crafted:x1", registry, legacy), 1);
+  assert.equal(slotFit({ ...MOUNT, tierFloor: 1 }, "crafted:x1", registry, legacy).ok, true);
+  assert.match(slotFit({ ...MOUNT, tierFloor: 2 }, "crafted:x1", registry, legacy).reason, /is tier 1 but the slot needs tier 2/);
+});

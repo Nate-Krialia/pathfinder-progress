@@ -106,10 +106,10 @@ export function tagTiers(ref, registry, ledger) {
 /** The tags an item carries: its material's single `tag` first (the migration on read), then the ledger's, without repeats. A crafted item: native, then inherited. */
 export const effectiveTags = (ref, registry, ledger) => tagTiers(ref, registry, ledger).map(t => t.tag);
 
-/** The tier an item counts as: the ledger's (the GM's word), else the material's own, else null. A crafted item: the tier it was given when it was made. */
+/** The tier an item counts as: the ledger's (the GM's word), else the material's own, else null. A crafted item: the tier it was given when it was made (never null). */
 export function effectiveTier(ref, registry, ledger) {
   const rec = craftedRecord(ref, ledger);
-  if (rec) return Number.isInteger(rec.tier) ? rec.tier : null;
+  if (rec) return Number.isInteger(rec.tier) ? rec.tier : 1;          // a crafted item always has a tier (a record saved before that rule, with none, counts as tier 1)
   const own = ledger?.items?.[ref]?.tier;
   return Number.isInteger(own) ? own : (registry?.material?.get(ref)?.tier ?? null);
 }

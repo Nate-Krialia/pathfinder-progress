@@ -166,11 +166,14 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
     const passing = new Set(recipe.slots.filter(s => slotPassCap(s)).map(s => s.name));
     if (stacked.taggedSlots.size || native.length || ledger?.items?.[recipe.id] || passing.size) {
       const inputTiers = uses.map(u => effectiveTier(u.materialId, registry, ledger)).filter(Number.isInteger);
+      const ownTier = ledger?.items?.[recipe.id]?.tier ?? description.baseTier ?? (inputTiers.length ? Math.max(...inputTiers) : null);
+      if (ownTier === null) capNotes.push(`${recipe.resultName ?? recipe.name} has no tier of its own (its recipe has no tier set, no power role and no ingredient with a tier), so it counts as tier 1`);
       frozen = {
         recipeId: recipe.id,
         name: recipe.resultName ?? recipe.name,
-        // the item's own tier: the GM's tier for its recipe, else the craft's power tier, else the highest input tier (recipes with no power role)
-        tier: ledger?.items?.[recipe.id]?.tier ?? description.baseTier ?? (inputTiers.length ? Math.max(...inputTiers) : null),
+        // the item's own tier: the GM's tier for its recipe, else the craft's power tier, else the highest input tier (recipes with no power role), else TIER 1: a crafted item always has a tier, so it can
+        // always be an ingredient (with none it could never fill a slot that needs a tier: "has no tier"). When the last fallback is used the GM is told, in the GM log note the craft already writes.
+        tier: ownTier ?? 1,
         depth,
         native: [...native],
         inherited: inheritedTags({ recipe, uses, registry, ledger }),
@@ -218,7 +221,7 @@ export function planCraft({ recipe, registry, selection, stacks, outputs, statio
       uses,
       description,
       frozen,             // GM-only: the tagged part of the craft, to be frozen when it resolves (tags/frozen.js)
-      capNotes,           // GM-only text about what a cap cut (never shown to a player; the craft logs it to the GM log)
+      capNotes,           // GM-only text about what a cap cut, or a tier the craft had to default (never shown to a player; the craft logs it to the GM log)
       station: station ? { id: station.id, name: station.name, category: station.category, tier: station.tier } : null,
       // A workshop the party built charges no station fee; every other station charges its tier's fee.
       fee: station ? feeForStation(station) : null,
