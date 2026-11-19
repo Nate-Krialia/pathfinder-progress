@@ -46,10 +46,6 @@ export function isMaterialItem(item) {
   return getMaterialFlags(item) !== null;
 }
 
-export function setMaterialFlags(item, { materialId, tier }) {
-  return item.setFlag(MODULE_ID, "material", { materialId, tier });
-}
-
 // Notes are real Items carrying a module flag: { noteId } (Stage 11c). A note points at a formula; with a research track it offers a lead.
 /** The note flags on an item, or null if it is not a note. */
 export function getNoteFlags(item) {

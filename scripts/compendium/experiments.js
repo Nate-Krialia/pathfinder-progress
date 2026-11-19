@@ -25,7 +25,6 @@ const clone = value => structuredClone(value);
 const safe = key => { if (typeof key !== "string" || !key.trim() || FORBIDDEN.has(key)) throw new RangeError(`experiments: "${key}" cannot be used as a key`); return key; };
 
 export const experimentsOf = book => book?.experiments ?? {};
-export const countExperiments = book => Object.keys(experimentsOf(book)).length;
 
 const entryFor = (next, recipeId, name, at, category) => {
   next.experiments ??= {};

@@ -328,8 +328,6 @@ const nodeType = obj({
 
 export const DEFINITION_SCHEMAS = { material, recipe, region, creatureYield, customRole, town, station: stationDef, nodeType, blueprint, tag: tagDef, note: noteDef };
 export const TRACK_SCHEMA = track;
-export const EFFECT_BLOCK_SCHEMA = effectBlock;
-export const EFFECT_BLOCKS_SCHEMA = effectBlocks;
 
 // What a PLAYER client holds (Stage 16, docs/10): the same kinds, but a region without its spawn table, and a node type
 // without its ladders and charges. These are strict like the others, so a stripped copy that still carried a hidden field

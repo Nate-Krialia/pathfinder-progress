@@ -41,9 +41,6 @@ const wanted = (ledger, key) => ledger?.items?.[key];
 /** Has this character reached the properties milestone of this item? */
 export const propertiesReached = (ledger, key) => Boolean(wanted(ledger, key)?.reached?.some(r => r.type === "properties"));
 
-/** Which formulas has the ledger granted? */
-export const formulasGranted = ledger => Object.values(ledger?.items ?? {}).flatMap(e => e.reached.filter(r => r.type === "formula").map(r => r.recipeId)).filter(Boolean);
-
 /**
  * Has the character learned what `materialId` does by crafting with it? Any class fact or recipe fact in their book (or the shared one).
  * This is the "retroactive properties" rule: a track added to a material later does not lock out someone who already crafted with it.

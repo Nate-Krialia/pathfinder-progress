@@ -9,5 +9,3 @@ export async function emit(name, payload) {
     try { await fn(payload); } catch (error) { console.error(`pathfinder-progress | a "${name}" handler failed (the action itself is saved)`, error); }
   }
 }
-/** For tests only. */
-export const _clearHandlersForTests = () => handlers.clear();
