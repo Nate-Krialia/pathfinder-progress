@@ -1159,3 +1159,45 @@ test("STATE LOCK: a node that could not be deleted takes back only its own deple
   assert.deepEqual(Object.keys(state(scene).searches), ["a1"], "the search recorded meanwhile is kept");
   assert.deepEqual(state(scene).depleted, [], "and the node's own record is gone");
 });
+
+// Round 4 / 1b #9: the expedition's state undo takes back only what the expedition changed -----------------------------------------
+async function preparedRun(bb, scene) {
+  await submitExplore(bb, 2, { forceCombat: true });
+  const run = await exploration.planRun(api, bb, pending(bb)[0], { degree: "success" });
+  const undo = await exploration.applyPlan(api, bb, run);
+  return { run, undo };
+}
+
+test("EXPEDITION UNDO: a search and its reveals recorded while the expedition ran are still there after the undo; the encounter and the expedition's own row are gone", async () => {
+  const { bb, scene } = await world({ anchors: 12 });
+  await standOn(scene, bb);
+  const { undo } = await preparedRun(bb, scene);
+  assert.equal(state(scene).prepared.length, 1);
+  bb.perceptionRolls.push(roll(3, 60, 20));                 // beats every hidden node the expedition placed
+  const found = await search(bb, scene);
+  assert.ok(found.spotted.length > 0, "the search found something");
+  await undo();
+  assert.deepEqual(Object.keys(state(scene).searches), ["a1"], "the attempt is still used");
+  assert.equal(state(scene).revealed.length, found.spotted.length, "the reveals are still recorded");
+  assert.equal(state(scene).prepared.length, 0, "the expedition's own row is gone");
+  assert.equal(state(scene).encounter, null, "and its encounter");
+});
+
+test("EXPEDITION UNDO: the row an append pushed out of the capped list comes back, and a later expedition's row stays", async () => {
+  const { bb, scene } = await world({ anchors: 40, days: 10 });
+  const old = Array.from({ length: 10 }, (_, n) => ({ at: 1000 + n, actorName: "Old", region: "oak-wood", days: 1, placed: 0, encounter: false }));
+  await globalThis.game.settings.set(M, "explorationState", { [scene.id]: { encounter: null, prepared: old, searches: {}, revealed: [], depleted: [] } });
+  const first = await preparedRun(bb, scene);
+  assert.equal(state(scene).prepared.length, 10);
+  assert.equal(state(scene).prepared[0].at, 1001, "the oldest row was pushed out");
+  const firstAt = state(scene).prepared.at(-1).at;
+  await new Promise(r => setTimeout(r, 3));
+  await preparedRun(bb, scene);                             // a later expedition on the same scene
+  const secondAt = state(scene).prepared.at(-1).at;
+  assert.notEqual(secondAt, firstAt);
+  await first.undo();
+  const rows = state(scene).prepared;
+  assert.ok(rows.some(r => r.at === secondAt), "the later expedition's row stays");
+  assert.ok(rows.some(r => r.at === 1000), "the row the first expedition pushed out is back");
+  assert.ok(!rows.some(r => r.at === firstAt), "the first expedition's own row is gone");
+});

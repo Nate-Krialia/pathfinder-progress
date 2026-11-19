@@ -389,8 +389,6 @@ export async function applyPlan(api, actor, run) {
   }
   const nodeActor = await ensureNodeActor();
   const undos = [];
-  const previousState = sceneState(scene.id);
-  const hadState = scene.id in readAllState();
   try {
     let created = [];
     if (run.plan.activations.length) {
@@ -403,13 +401,27 @@ export async function applyPlan(api, actor, run) {
       undos.push({ what: "the occupied anchors", run: () => scene.updateEmbeddedDocuments("Token", run.plan.activations.map(act => vacateUpdate(act.anchorId))) });
     }
     const entry = { at: Date.now(), actorName: actor.name, region: run.region.id, days: run.days, placed: run.plan.activations.length, encounter: run.encounter.encounter };
-    const next = {
-      ...previousState,
-      encounter: { active: run.encounter.encounter, forced: run.encounter.forced, at: entry.at, by: actor.name },
-      prepared: [...previousState.prepared, entry].slice(-EXPLORATION.preparedLogMax)
-    };
-    await changeSceneState(scene.id, () => next);
-    undos.push({ what: "the scene's expedition state", run: () => changeSceneState(scene.id, () => (hadState ? previousState : null)) });
+    // Only the keys this expedition changes are written, and only those are put back: `encounter`, and its own row in `prepared` (plus the oldest row its append pushed out of the
+    // capped list). `searches`, `revealed` and `depleted` are never touched, so a search or a reveal that lands while the expedition runs survives its undo.
+    let before = null;
+    await changeSceneState(scene.id, (state, had) => {
+      const combined = [...state.prepared, entry];
+      const prepared = combined.slice(-EXPLORATION.preparedLogMax);
+      before = { existed: had, encounter: state.encounter, pushedOut: combined.slice(0, combined.length - prepared.length) };
+      return { ...state, encounter: { active: run.encounter.encounter, forced: run.encounter.forced, at: entry.at, by: actor.name }, prepared };
+    });
+    undos.push({
+      what: "the scene's expedition state",
+      run: () => changeSceneState(scene.id, state => {
+        const ours = row => row.at === entry.at && row.actorName === entry.actorName && row.region === entry.region;
+        const next = {
+          ...state,
+          encounter: state.encounter?.at === entry.at ? before.encounter : state.encounter,       // a later expedition's encounter is not ours to take back
+          prepared: [...before.pushedOut, ...state.prepared.filter(row => !ours(row))]
+        };
+        return !before.existed && isEmptyState(next) ? null : next;
+      })
+    });
   } catch (error) {
     await undoAll(undos, "Check the scene by hand (api.clearMap clears what an expedition placed).").catch(rollbackError => { throw new Error(`${error.message}. ${rollbackError.message}`); });
     throw error;
