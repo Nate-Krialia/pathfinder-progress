@@ -127,3 +127,12 @@ test("expectedItemType maps recipe categories to PF2e item types", () => {
   assert.equal(expectedItemType("robes"), "armor");
   assert.equal(expectedItemType("focus"), null);
 });
+
+// Round 5: the ability text is escaped like its title -----------------------------------------------------------------------------
+test("the description escapes an ability's TEXT as well as its title, and an untitled ability is its text alone", () => {
+  const html = buildDescriptionHtml({ ...FANG_DESCRIPTION, abilities: [{ title: "Bite", text: "Deals <b>x</b> & more when HP < 10", on: "hit" }, { text: "Hums <i>softly</i>", on: "hit" }] });
+  assert.match(html, /<strong>Bite:<\/strong> Deals &lt;b&gt;x&lt;\/b&gt; &amp; more when HP &lt; 10/);
+  assert.match(html, /<li>Hums &lt;i&gt;softly&lt;\/i&gt;<\/li>/, "no title: no 'undefined:' and no strong tag");
+  assert.doesNotMatch(html, /<b>|<i>|undefined/);
+  assert.match(buildDescriptionHtml({ ...FANG_DESCRIPTION, abilities: [{ title: "Plain", text: "On a hit, the target must succeed at a DC 18 Fortitude save.", on: "hit" }] }), /<strong>Plain:<\/strong> On a hit, the target must succeed at a DC 18 Fortitude save\./, "ordinary text is unchanged");
+});

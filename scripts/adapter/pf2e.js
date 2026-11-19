@@ -225,7 +225,8 @@ export function buildDescriptionHtml(description) {
     const extra = [b.persistent ? "persistent" : null, b.versus ? `vs ${b.versus}` : null].filter(Boolean).join(", ");
     items.push(`+${escapeHtml(b.dice)} ${escapeHtml(b.type)}${extra ? ` (${escapeHtml(extra)})` : ""}`);
   }
-  for (const a of description.abilities ?? []) items.push(`<strong>${escapeHtml(a.title)}:</strong> ${a.text}`);
+  // The title AND the text are definition text (GM-authored, plain): both are escaped. An ability with no title (a definition may have none) is its text alone, not "undefined: ...".
+  for (const a of description.abilities ?? []) items.push(`${a.title ? `<strong>${escapeHtml(a.title)}:</strong> ` : ""}${escapeHtml(a.text ?? "")}`);
   for (const r of description.resistances ?? []) items.push(`Resistance ${escapeHtml(r.type)} ${r.value}`);
   for (const c of description.conditions ?? []) items.push(escapeHtml(`${c.plain.charAt(0).toUpperCase()}${c.plain.slice(1)}`));   // plain words only: never a condition value, a save or a DC
   if (description.spellSlots) items.push(`Spell slots: +${description.spellSlots}`);
