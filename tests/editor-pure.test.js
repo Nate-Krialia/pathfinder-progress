@@ -189,3 +189,18 @@ test("a focus's power tier is SPELL power (not base power); it compiles, round-t
   assert.deepEqual(errors, []);
   assert.equal(registry.material.get("gate-focus").classEffects.focus.spellPower, "T3");
 });
+
+test("IDENTITY (stage 1c #12): a field called kind or id can never change what a record is or what it is called", () => {
+  const defs = sources => sources.map(s => { try { return JSON.parse(s.text.replace(/^```json\n|\n```$/g, "")); } catch { return null; } }).filter(Boolean);
+  const keys = sources => defs(sources).map(d => `${d.kind}:${d.id}`).sort();
+  const before = keys(layerSources(base(), emptyStore()).sources);
+  // a patch of the pack's iron with kind and id fields: it stays material:iron
+  const patched = layerSources(base(), { v: 1, records: { "material:iron": { kind: "material", id: "iron", mode: "patch", fields: { name: "Cold Iron", id: "other", kind: "recipe" } } } });
+  const iron = defs(patched.sources).find(d => d.name === "Cold Iron");
+  assert.deepEqual([iron.kind, iron.id], ["material", "iron"]);
+  assert.deepEqual(keys(patched.sources), before, "no definition appeared or vanished");
+  // a made record: kind and id come from the key, not from fields
+  const made = layerSources(base(), { v: 1, records: { "tag:fresh": { kind: "tag", id: "fresh", mode: "new", fields: { name: "Fresh", theme: "t", id: "sneaky", kind: "material" } } } });
+  const tag = defs(made.sources).find(d => d.name === "Fresh");
+  assert.deepEqual([tag.kind, tag.id], ["tag", "fresh"]);
+});

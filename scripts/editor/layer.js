@@ -14,6 +14,9 @@ import { parseDefinition } from "../data/validate.js";
 export const STORE_VERSION = 1;
 export const emptyStore = () => ({ v: STORE_VERSION, records: {} });
 export const keyOf = (kind, id) => `${kind}:${id}`;
+/** Fields that name a record's identity: they are its key, never an editable field. */
+export const IDENTITY_FIELDS = ["kind", "id"];
+export const identityFieldsIn = fields => IDENTITY_FIELDS.filter(name => fields && typeof fields === "object" && Object.hasOwn(fields, name));
 const ROLE_OF = { damage: "bonusDamage", resistance: "resistance", ability: "specialAbility", condition: "applyCondition" };
 
 const recordProblem = (key, rec) => (!rec || key !== keyOf(rec.kind, rec.id) || !["new", "patch"].includes(rec.mode) || typeof rec.fields !== "object" || Array.isArray(rec.fields) ? `the saved definition "${key}" is damaged` : null);
@@ -62,12 +65,12 @@ export function layerSources(sources, store) {
     const base = byKey.get(key);
     if (rec.mode === "patch") {
       if (!base) { leftovers.push({ key, message: "edits a definition that is not in the packs any more" }); continue; }
-      base.data = { ...base.data, ...rec.fields };
+      base.data = { ...base.data, ...rec.fields, kind: base.data.kind, id: base.data.id };       // a record's identity is its key: a field called kind or id can never change it
       base.edited = true;
     } else if (base) {
       leftovers.push({ key, message: "uses an id the packs already define; the pack's definition is kept" });
     } else {
-      const entry = { source: { pack: "world editor", entry: rec.fields.name ?? rec.id }, data: { kind: rec.kind, id: rec.id, ...rec.fields } };
+      const entry = { source: { pack: "world editor", entry: rec.fields.name ?? rec.id }, data: { ...rec.fields, kind: rec.kind, id: rec.id } };
       added.push(entry);
       byKey.set(key, entry);
     }

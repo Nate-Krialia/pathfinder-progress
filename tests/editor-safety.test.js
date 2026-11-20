@@ -290,3 +290,21 @@ test("EDITOR REPAIR LOCK: while the raw copy is being kept (slowly) the editor l
     assert.equal(typeof env.values.tagBackup.editor, "string", "the copy was kept");
   });
 });
+
+// Stage 1c #12: kind and id are never fields ----------------------------------------------------------------------------------------------
+test("IDENTITY FIELDS: import, update and create refuse a field called kind or id, and nothing is written", async () => {
+  const sneaky = { kind: "material", id: "iron", mode: "patch", fields: { name: "Cold Iron", id: "other" } };
+  assert.match(planImport(bundleOf([newTag("fine"), { kind: "tag", id: "t2", mode: "new", fields: { name: "T", kind: "material" } }]), emptyStore(), {}).problems.join(" "), /Record 2 \(tag:t2\) has a field called kind/);
+  assert.match(planImport(bundleOf([sneaky]), emptyStore(), { definedIds: new Set(["material:iron"]) }).problems.join(" "), /field called id/);
+  const w = await editorWorld();
+  await quietly(async () => {
+    await assert.rejects(as(w.gm, () => api().editor.importRecords(bundleOf([sneaky]))), /field called id/);
+    await assert.rejects(as(w.gm, () => api().editor.update("material:iron", { id: "other" })), error => error.name === "EditorError" && /cannot be edited as a field/.test(error.message));
+    await assert.rejects(as(w.gm, () => api().editor.update("material:iron", { name: "Cold Iron", kind: "recipe" })), /cannot be edited as a field/);
+    await assert.rejects(as(w.gm, () => api().editor.create("tag", { name: "Odd", theme: "x", kind: "material" }, { makeItem: false })), /cannot be a field/);
+    assert.equal(env.values.editorDefinitions, undefined, "nothing was written");
+    const made = await as(w.gm, () => api().editor.create("tag", { name: "Wanted", theme: "x", id: "wanted-id" }, { makeItem: false }));
+    assert.equal(made.key, "tag:wanted-id", "id is still the id the caller WANTS (it is never stored as a field)");
+    assert.equal("id" in env.values.editorDefinitions.records["tag:wanted-id"].fields, false);
+  });
+});

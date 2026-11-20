@@ -16,7 +16,7 @@ import * as playerDefs from "../data/playerDefs.js";
 import * as stations from "../stations/store.js";
 import { buildRegistry } from "./build.js";
 import { exportBundle, planImport } from "./exchange.js";
-import { emptyStore, keyOf, repairStore } from "./layer.js";
+import { emptyStore, identityFieldsIn, keyOf, repairStore } from "./layer.js";
 import { backUpOnce } from "../backup.js";
 import { afterSave } from "../after-save.js";
 import { withLock } from "../queue/lock.js";
@@ -195,6 +195,8 @@ async function createIn(api, kind, fields, { makeItem = true } = {}) {
   if (!["material", "note", "tag"].includes(kind)) throw new EditorError(`the editor makes materials, notes and tags (not "${kind}")`);
   if (!String(fields?.name ?? "").trim()) throw new EditorError("Give it a name first.");
   const store = current();
+  // `id` is the id the caller WANTS (made unique and stored as the record's id, never as a field); a field called `kind` would try to change what the record is.
+  if (Object.hasOwn(fields ?? {}, "kind")) throw new EditorError('"kind" names the record and cannot be a field; the kind is the first argument.');
   const { id: wanted, ...rest } = fields;
   const id = uniqueId(api, store, wanted ? slugify(wanted) : slugify(fields.name));
   let data = defaultsFor(kind, rest);
@@ -230,6 +232,8 @@ export function impactOf(api, key, fields) {
  */
 async function updateIn(api, key, fields, { confirmed = false } = {}) {
   requireGM("editor.update");
+  const identity = identityFieldsIn(fields);
+  if (identity.length) throw new EditorError(`"${identity.join('" and "')}" name the record and cannot be edited as a field.`);
   const store = current();
   const record = api.definitions[kindOf(key)]?.get(idOf(key));
   if (!record) throw new EditorError(`There is no ${key} to edit.`);

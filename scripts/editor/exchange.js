@@ -1,6 +1,6 @@
 /** Export and import of the editor's records (Stage 11d). Pure; no Foundry globals. A bundle is plain JSON the GM can keep or hand to another world. */
 import { ID_PATTERN } from "../config.js";
-import { keyOf, storeProblems } from "./layer.js";
+import { identityFieldsIn, keyOf, storeProblems } from "./layer.js";
 
 export const BUNDLE_FORMAT = "pathfinder-progress-editor";
 export const BUNDLE_VERSION = 1;
@@ -28,6 +28,8 @@ export function planImport(bundle, store, { definedIds = new Set(), replace = fa
     if (rec && KINDS.includes(rec.kind) && (typeof rec.id !== "string" || !ID_PATTERN.test(rec.id))) { problems.push(`Record ${i + 1} has an id that cannot be used (${JSON.stringify(rec.id)}): an id is lowercase letters, digits, - or _, with no dots.`); return; }
     const key = rec && KINDS.includes(rec.kind) ? keyOf(rec.kind, rec.id) : null;
     if (!key || !["new", "patch"].includes(rec.mode) || !rec.fields || typeof rec.fields !== "object" || Array.isArray(rec.fields)) { problems.push(`Record ${i + 1} is damaged.`); return; }
+    const identity = identityFieldsIn(rec.fields);
+    if (identity.length) { problems.push(`Record ${i + 1} (${key}) has a field called ${identity.join(" and ")}: those name the record and cannot be edited, so the file is not imported.`); return; }
     if (seen.has(key)) { skip.push({ key, reason: "appears twice in the file" }); return; }
     seen.add(key);
     if (store.records[key]) { (replace ? replaceList : skip).push(replace ? rec : { key, reason: "already exists here" }); return; }
