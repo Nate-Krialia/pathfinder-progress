@@ -24,4 +24,8 @@ export function withoutDifficulty(value) {
 }
 
 /** A research project as a player may see it: what it is, how far along, what it needs; never the DC. (Progress stays: it is progress, not difficulty.) */
-export const playerProject = project => withoutDifficulty(project);
+export const playerProject = project => {
+  const clean = withoutDifficulty(project);
+  // A project's log carries the GM's free-text `note` (addProgress's reason, an abandon reason): it can say anything, so a player's copy never holds one (each entry keeps source, delta, skill, degree).
+  return Array.isArray(clean?.log) ? { ...clean, log: clean.log.map(({ note, ...entry }) => entry) } : clean;
+};

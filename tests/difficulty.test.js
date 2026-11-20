@@ -207,3 +207,30 @@ test("MUTATION: if a DC were put back into a player's row, or a hidden field int
   assert.equal(findings({ ...preview, plan: { ...preview.plan, uses: [{ ...preview.plan.uses[0], slotLossChance: 50 }] } }).length, 1);
   void makeActor; void loudly;
 });
+
+// Stage 1c #7: the GM's free-text note in a project's log never reaches a player ---------------------------------------------------------------------
+test("PROJECT LOG NOTE: playerProject drops every log note and keeps the rest of each entry; the GM's copy keeps it", () => {
+  const stored = { id: "p", dc: 21, threshold: 8, progress: 3, status: "active", log: [
+    { source: "research", delta: 1, skill: "crafting", degree: "success" },
+    { source: "addProgress", delta: 2, note: "DC was 25, so the GM gave a boost" },
+    { source: "gm", delta: 0, note: "abandoned by the GM" }
+  ] };
+  const seen = playerProject(stored);
+  assert.deepEqual(seen.log, [{ source: "research", delta: 1, skill: "crafting", degree: "success" }, { source: "addProgress", delta: 2 }, { source: "gm", delta: 0 }]);
+  assert.equal("dc" in seen, false, "the DC is still stripped");
+  assert.equal(stored.log[1].note, "DC was 25, so the GM gave a boost", "the stored project is not changed");
+  assert.deepEqual(playerProject({ id: "q" }), { id: "q" }, "a project with no log is fine");
+});
+
+test("PROJECT LOG NOTE: through the API, a player's projectInfo carries no note; the GM's does", async () => {
+  const w = await playerWorld();
+  await as(w.gm, () => api().removeFormula(w.ann, DAGGER));
+  const project = await as(w.gm, () => api().startProject({ actor: w.ann, recipe: DAGGER }));
+  await as(w.gm, () => api().addProgress(w.ann, project.id, 1, "DC was 25 and the party was lucky", { chat: false }));
+  const forPlayer = as(w.annUser, () => api().projectInfo(w.ann, project.id)).project;
+  assert.equal(forPlayer.log.length, 1);
+  assert.equal("note" in forPlayer.log[0], false, "no note for the player");
+  assert.doesNotMatch(JSON.stringify(forPlayer), /DC was 25/);
+  const forGM = as(w.gm, () => api().projectInfo(w.ann, project.id)).project;
+  assert.match(forGM.log[0].note, /DC was 25/, "the GM still sees it");
+});
