@@ -236,3 +236,42 @@ test("WINDOW: the stage buttons switch what the preview shows; effects only appe
   await click("preview-stage", '[data-stage="crafted"]');
   assert.match(preview(), /poison damage/);
 });
+
+// Stage 1c #11: leaving unsaved edits asks first ------------------------------------------------------------------------------------------------
+test("UNSAVED EDITS: picking another item, starting a new one, or aiming the window at another item (the header button) asks 'Discard your unsaved changes?'; No keeps the draft, Yes drops it", async () => {
+  const { w, app, el, text, click, set, live } = await windowFor("material:iron");
+  const nameInput = () => el().querySelector('[data-field="basic"][data-name="name"]');
+  const pick = async key => click("pick-item", `[data-key="${key}"]`);
+  // clean: moving costs nothing and asks nothing
+  await pick("material:silver");
+  assert.doesNotMatch(text(), /Discard your unsaved changes/);
+  assert.equal(app.selectedKey, "material:silver");
+  await pick("material:iron");
+  await set('[data-field="basic"][data-name="name"]', "Cold Iron");
+  // 1. a click in the list
+  await pick("material:silver");
+  assert.match(text(), /Discard your unsaved changes\?/);
+  assert.equal(app.selectedKey, "material:iron", "nothing moved yet");
+  assert.equal(nameInput().value, "Cold Iron", "the draft is still on screen");
+  await click("confirm-no");
+  assert.doesNotMatch(text(), /Discard your unsaved changes/);
+  assert.equal(nameInput().value, "Cold Iron", "No keeps the draft");
+  // 2. a new material
+  await click("new-material");
+  assert.match(text(), /Discard your unsaved changes\?/);
+  assert.equal(app.creating, null, "the creator did not open");
+  await click("confirm-no");
+  // 3. the header button on another item's sheet (the window is already open: openEditor re-aims it)
+  const { openEditor } = await import("../scripts/editor/app.js");
+  await as(w.gm, async () => { openEditor(api(), "material:silver"); await wait(25); });
+  assert.match(text(), /Discard your unsaved changes\?/);
+  assert.equal(app.selectedKey, "material:iron");
+  assert.equal(nameInput().value, "Cold Iron");
+  // Yes drops the draft and goes where the GM was going
+  await click("confirm-yes");
+  assert.equal(app.selectedKey, "material:silver");
+  assert.equal(app.draft, null);
+  await pick("material:iron");
+  assert.notEqual(nameInput().value, "Cold Iron", "the dropped edit is gone");
+  assert.equal(live("save"), undefined, "and nothing is left to save");
+});

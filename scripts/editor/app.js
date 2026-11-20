@@ -27,7 +27,7 @@ export function build() {
       window: { title: E.title, resizable: true },
       position: { width: 1180, height: 640 },
       actions: {
-        "pick-item"(event, target) { return this.#pick(target.dataset.key); },
+        "pick-item"(event, target) { return this.aim(target.dataset.key); },
         "toggle-chip"(event, target) { return this.#chip(target.dataset.chip); },
         "toggle-group"(event, target) { return this.#group(target.dataset.kind); },
         "preview-stage"(event, target) { this.previewStage = target.dataset.stage; return this.render(); },
@@ -45,8 +45,8 @@ export function build() {
         "revert"() { return this.#ask("Take back every edit made here to this item and go back to the packs' version?", "revert"); },
         "retire"() { return this.#toggleRetire(); },
         "delete"() { return this.#ask("Delete this item and its world item? This cannot be undone. If anything uses it, it will be refused and you can retire it instead.", "delete"); },
-        "new-material"() { return this.#startCreate("material"); },
-        "new-note"() { return this.#startCreate("note"); },
+        "new-material"() { return this.#guarded({ type: "create", kind: "material" }); },
+        "new-note"() { return this.#guarded({ type: "create", kind: "note" }); },
         "do-create"() { return this.#create(); },
         "cancel-create"() { this.creating = null; return this.render(); },
         "export"() { return this.#export(); },
@@ -84,6 +84,17 @@ export function build() {
     #base() { return this.selectedKey ? draftFor(this.#registry(), this.#overlay(), this.selectedKey) : null; }
     #current() { return this.draft ?? this.#base(); }
     #defaultRecipe(draft) { return draft.kind === "note" ? draft.fields.recipeId : draft.kind === "recipe" ? draft.id : undefined; }    // a material's formula is the GM's choice: no guess
+
+    /** Unsaved edits that leaving would lose. */
+    #dirty() { return Boolean(this.draft) && isDirty(this.draft, this.#base()); }
+    /** Do `move` ({ type: "pick", key } | { type: "create", kind }) now, or, when there are unsaved edits, only after the GM says yes (the safe answer, No, keeps the draft). */
+    #guarded(move) {
+      if (!this.#dirty()) return this.#go(move);
+      return this.#ask("Discard your unsaved changes?", "discard-then", { move });
+    }
+    #go(move) { return move.type === "create" ? this.#startCreate(move.kind) : this.#pick(move.key); }
+    /** Aim the window at an item (a click in the list, or the header button on an item sheet). Asks first when that would drop unsaved edits. */
+    aim(key) { return key === this.selectedKey && !this.creating ? this.render() : this.#guarded({ type: "pick", key }); }
 
     #pick(key) { this.selectedKey = key; this.draft = null; this.message = ""; this.confirm = null; this.creating = null; this.effectClass = "general"; this.previewClass = null; return this.render(); }
     #change(fn) { const d = this.#current(); if (!d) return undefined; this.draft = fn(d); this.message = ""; return this.render(); }
@@ -129,6 +140,7 @@ export function build() {
       this.confirm = null;
       if (!c) return this.render();
       if (c.action === "save") return this.#save(true);
+      if (c.action === "discard-then") { this.draft = null; return this.#go(c.move); }
       const key = this.selectedKey;
       if (c.action === "push") return this.#run(async () => { const r = await this.api.editor.pushCopies(key); return `Updated ${r.updated} cop${r.updated === 1 ? "y" : "ies"}.${r.skippedTokens ? ` ${r.skippedTokens} copy${r.skippedTokens === 1 ? "" : "ies"} on unlinked tokens ${r.skippedTokens === 1 ? "was" : "were"} skipped; change those by hand.` : ""}`; });
       if (c.action === "revert") return this.#run(async () => { await this.api.editor.revert(key); this.draft = null; return "Back to the packs' version."; });
@@ -293,7 +305,7 @@ export function openEditor(api, key = null) {
   if (!game.user.isGM) throw new Error("the item editor is GM only");
   EditorApp ??= build();
   const existing = foundry.applications.instances.get(EDITOR_ID);
-  if (existing) { if (key) { existing.selectedKey = key; existing.draft = null; existing.creating = null; } existing.render({ force: true }); return existing; }
+  if (existing) { if (key) existing.aim(key); else existing.render({ force: true }); return existing; }
   const app = new EditorApp(api, key);
   app.render({ force: true });
   return app;
