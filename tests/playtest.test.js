@@ -135,6 +135,9 @@ test("SETUP plants every area, with the right owners, tokens, tags, workshops an
   const reachable = api().stationsFor(alice).map(s => `${s.id}:${s.source}`).sort();
   assert.deepEqual(reachable.filter(s => /playtest|oakhaven-forge/.test(s)), ["oakhaven-forge:public", "party-playtest-camp:party", "playtest-anvil:owned"]);
   assert.equal(alice.items.filter(i => i.getFlag(M, "material")?.materialId === "iron").reduce((n, i) => n + i.system.quantity, 0), 8, "iron for the upgrade and the crafts");
+  // the patron (GM only) can back a commission: it holds the formula, the materials and the gold
+  assert.ok(patron.getFlag(M, "formulas").some(f => f.recipeId === "dagger-spider-fang"));
+  assert.deepEqual(patron.items.filter(i => i.getFlag(M, "material")).map(i => `${i.getFlag(M, "material").materialId}x${i.system.quantity}`).sort(), ["ironx2", "spider-fangx1"]);
   // research: a study (the ore with a track), a formula project, a lead
   assert.ok(api().research.leadsFor(alice).some(l => /Study Ore/.test(l.name)), JSON.stringify(api().research.leadsFor(alice).map(l => l.name)));
   assert.ok(api().research.leadsFor(alice).some(l => l.recipeId === "longsword-basic"), "the GM's lead");

@@ -153,13 +153,14 @@ await (async () => {
   await save();
 
   // ---- materials, formulas, gold ----
-  for (const [actor, materials] of [[alice, { iron: 8, "spider-fang": 2, silver: 2, "playtest-ember": 2, "playtest-study-ore": 2 }], [bob, { iron: 4, "spider-fang": 2, silver: 2 }]]) {
+  for (const [actor, materials] of [[alice, { iron: 8, "spider-fang": 2, silver: 2, "playtest-ember": 2, "playtest-study-ore": 2 }], [bob, { iron: 4, "spider-fang": 2, silver: 2 }], [patron, { iron: 2, "spider-fang": 1 }]]) {
     for (const [id, quantity] of Object.entries(materials)) await api.giveMaterial(actor, id, quantity);
     await api.adapter.addCopper(actor, 20000);
   }
   await api.grantFormula(alice, "dagger-spider-fang");
   await api.grantFormula(alice, "playtest-blade");
   await api.grantFormula(bob, "dagger-spider-fang");
+  await api.grantFormula(patron, "dagger-spider-fang");                       // a character patron lends the formula for the commission
 
   // ---- workshops: the public bench is the shipped Oakhaven Forge; an owned workshop (Alice's, ready to upgrade); a party workshop ----
   const owned = await api.giveStation(alice, { name: "Playtest Anvil", category: "smithing", tier: 1, location: { town: TOWN }, id: "playtest-anvil" });
@@ -191,7 +192,7 @@ await (async () => {
     `editor records, kept in this world: ${man.editorKeys.join(", ")}`,
     `in-memory definitions (gone after a reload): ${man.memory.map(([kind, id]) => `${kind}:${id}`).join(", ")}`,
     `Alice's bag: real copies of ${NAMES.edge} (two stacks) and ${NAMES.charm} (two stacks), tagged in the Item tags ledger, plus Playtest Ember and Playtest Study Ore; formulas dagger-spider-fang and playtest-blade; a lead; 200 gp`,
-    "Bob: a project for the Longsword formula, a crafted Spider Fang Dagger, materials and 200 gp",
+    "Bob: a project for the Longsword formula, a crafted Spider Fang Dagger, materials and 200 gp; the Patron holds the dagger formula, iron, a spider fang and 200 gp for a commission",
     `workshops: the public Oakhaven Forge (shipped), Alice's owned ${owned.name}, the party's ${party.name}`,
     `world items: Playtest Torch Sample (for the Item tags window) and the editor's items for Playtest Ember and Playtest Study Ore (for the Item editor)`,
     `the party is in ${TOWN} (it was "${man.location || "nowhere"}")`
