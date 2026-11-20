@@ -20,6 +20,7 @@ import { addFormula, findFormula } from "../research/formulas.js";
 import { ResearchRefused, rawList, readDays } from "../research/store.js";
 import { pickSkill } from "../gathering/resolve.js";
 import { W } from "./words.js";
+import { changeOverlay, readOverlay } from "./overlay.js";
 import { esc } from "../queue/review.js";
 import { finalSteps, itemKey, newlyReached, parseKey, propertiesKnown, stageOf, trackOf, versionCandidates } from "./track.js";
 
@@ -38,7 +39,7 @@ export function readLedger(actor) {
 }
 
 /** The Discovery tracks window's edits (GM data): { "<kind>:<id>": track }. */
-export const overlay = () => game.settings.get(MODULE_ID, DISCOVERY.overlaySetting) ?? {};
+export const overlay = readOverlay;
 
 const definitionOf = (api, kind, id) => api.definitions?.[kind]?.get(id) ?? null;
 
@@ -282,26 +283,28 @@ export function propertiesOpen(api, actor, materialId) {
 export async function setTrack(api, key, track) {
   requireGM("setTrack");
   const { kind, id } = parseKey(key);
-  const next = { ...overlay() };
-  // Clearing works for any key that has an overlay entry, even when its item is gone (a pack changed, a fake definition vanished on reload): an orphaned entry must be removable.
-  if (track === null && key in next) delete next[key];
-  else if (track === null && !definitionOf(api, kind, id)) throw new Error(`setTrack: there is no track for "${key}"`);
-  else if (!["material", "note", "recipe"].includes(kind) || !definitionOf(api, kind, id)) throw new Error(`setTrack: unknown item "${key}"`);
-  else if (track === null) delete next[key];
-  else {
-    const problems = check(TRACK_SCHEMA, track);
-    if (problems.length) throw new Error(`setTrack: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
-    track.milestones.forEach((m, i) => {
-      if (m.grants.type === "properties" && kind !== "material") throw new Error(`setTrack: milestone ${i + 1}: only a material has a properties milestone`);
-      if (m.grants.type === "formula") {
-        const recipeId = m.grants.recipeId ?? (kind === "note" ? definitionOf(api, "note", id).recipeId : kind === "recipe" ? id : null);
-        if (!recipeId || !definitionOf(api, "recipe", recipeId)) throw new Error(`setTrack: milestone ${i + 1}: pick a formula that exists`);
-      }
-    });
-    next[key] = track;
-  }
-  await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, next);
-  return next;
+  const { after } = await changeOverlay(overlayNow => {
+    const next = { ...overlayNow };
+    // Clearing works for any key that has an overlay entry, even when its item is gone (a pack changed, a fake definition vanished on reload): an orphaned entry must be removable.
+    if (track === null && key in next) delete next[key];
+    else if (track === null && !definitionOf(api, kind, id)) throw new Error(`setTrack: there is no track for "${key}"`);
+    else if (!["material", "note", "recipe"].includes(kind) || !definitionOf(api, kind, id)) throw new Error(`setTrack: unknown item "${key}"`);
+    else if (track === null) delete next[key];
+    else {
+      const problems = check(TRACK_SCHEMA, track);
+      if (problems.length) throw new Error(`setTrack: ${problems.map(p => `${p.field} ${p.message}`).join("; ")}`);
+      track.milestones.forEach((m, i) => {
+        if (m.grants.type === "properties" && kind !== "material") throw new Error(`setTrack: milestone ${i + 1}: only a material has a properties milestone`);
+        if (m.grants.type === "formula") {
+          const recipeId = m.grants.recipeId ?? (kind === "note" ? definitionOf(api, "note", id).recipeId : kind === "recipe" ? id : null);
+          if (!recipeId || !definitionOf(api, "recipe", recipeId)) throw new Error(`setTrack: milestone ${i + 1}: pick a formula that exists`);
+        }
+      });
+      next[key] = track;
+    }
+    return next;
+  });
+  return after;
 }
 
 // projectInfo ------------------------------------------------------------------------------------------------------------

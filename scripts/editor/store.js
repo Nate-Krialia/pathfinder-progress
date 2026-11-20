@@ -21,6 +21,7 @@ import { backUpOnce } from "../backup.js";
 import { afterSave } from "../after-save.js";
 import { withLock } from "../queue/lock.js";
 import { EDITOR_SETTING, readEditorStore, writeEditorStore } from "./setting.js";
+import { changeOverlay, readOverlay } from "../discovery/overlay.js";
 
 const requireGM = what => { if (!game.user?.isGM) throw new Error(`${what}: GM only`); };
 
@@ -292,17 +293,18 @@ export async function makeItem(api, key) {
 }
 
 // Tracks (the Discovery tracks window folded in) -------------------------------------------------------------------------
-const overlayNow = () => game.settings.get(MODULE_ID, DISCOVERY.overlaySetting) ?? {};
+const overlayNow = readOverlay;
+/** Take ONE key out of the overlay (under the overlay lock). Returns whether it was there. */
+const dropFromOverlay = async key => (await changeOverlay(overlay => { if (!(key in overlay)) return undefined; delete overlay[key]; return overlay; })).changed;
 
 /** Set (or with null clear) one item's research track. Clearing also works for an ORPHANED overlay entry (its item is gone). */
 async function setTrackIn(api, key, track) {
   requireGM("setTrack");
   const kind = kindOf(key), exists = Boolean(api.definitions?.[kind]?.get(idOf(key)));
   if (track === null) {
-    const overlay = overlayNow();
-    if (key in overlay) { const next = { ...overlay }; delete next[key]; await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, next); }
+    const hadOverlay = await dropFromOverlay(key);
     if (exists && current().records[key]?.fields?.research) await updateIn(api, key, { research: undefined }, { confirmed: true });
-    else if (!exists && !(key in overlay) && !current().records[key]) throw new EditorError(`There is no track for ${key}.`);
+    else if (!exists && !hadOverlay && !current().records[key]) throw new EditorError(`There is no track for ${key}.`);
     return true;
   }
   if (!exists) throw new Error(`setTrack: unknown item "${key}"`);
@@ -317,30 +319,35 @@ async function setTrackIn(api, key, track) {
   });
   await updateIn(api, key, { research: track }, { confirmed: true });
   // The editor's record is now the only source: an older overlay entry for the same item would otherwise still win.
-  const overlay = overlayNow();
-  if (key in overlay) { const next = { ...overlay }; delete next[key]; await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, next); }
+  await dropFromOverlay(key);
   return true;
 }
 
 /** Fold the old tracks overlay into the editor's records (once; later calls find nothing). Overlay entries whose item is gone stay as leftovers. */
 async function foldOverlayIn(api) {
   requireGM("editor.foldOverlay");
-  const overlay = overlayNow();
-  const folded = [], left = {};
-  let store = current();
-  for (const [key, track] of Object.entries(overlay)) {
-    if (!api.definitions[kindOf(key)]?.get(idOf(key))) { left[key] = track; continue; }
-    const existing = store.records[key];
-    const rec = existing ? clone(existing) : { kind: kindOf(key), id: idOf(key), mode: "patch", fields: {} };
-    rec.fields.research = track;
-    store = withRecord(store, rec);
-    folded.push(key);
-  }
-  if (!folded.length) return { folded: [], leftovers: Object.keys(left) };
-  await commitStore(api, store);
-  await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, left);
+  const folded = [];
+  let leftovers = [];
+  // The whole fold runs under the overlay lock: it reads the overlay, saves the records, and writes back what was left, so a track set meanwhile cannot be dropped by a write made from the old read.
+  await changeOverlay(async overlay => {
+    const left = {};
+    let store = current();
+    for (const [key, track] of Object.entries(overlay)) {
+      if (!api.definitions[kindOf(key)]?.get(idOf(key))) { left[key] = track; continue; }
+      const existing = store.records[key];
+      const rec = existing ? clone(existing) : { kind: kindOf(key), id: idOf(key), mode: "patch", fields: {} };
+      rec.fields.research = track;
+      store = withRecord(store, rec);
+      folded.push(key);
+    }
+    leftovers = Object.keys(left);
+    if (!folded.length) return undefined;
+    await commitStore(api, store);
+    return left;
+  });
+  if (!folded.length) return { folded: [], leftovers };
   await saved(api);
-  return { folded, leftovers: Object.keys(left) };
+  return { folded, leftovers };
 }
 
 /** Saved edits that match nothing any more, and tracks whose item is gone: [{ key, message }]. */
@@ -353,8 +360,7 @@ export function leftovers(api) {
 /** Remove one leftover: the saved edit and/or the orphaned track. */
 async function clearLeftoverIn(api, key) {
   requireGM("editor.clearLeftover");
-  const overlay = overlayNow();
-  if (key in overlay) { const next = { ...overlay }; delete next[key]; await game.settings.set(MODULE_ID, DISCOVERY.overlaySetting, next); }
+  await dropFromOverlay(key);
   const store = current();
   if (store.records[key]) { const next = clone(store); delete next.records[key]; await commitStore(api, next); await saved(api); }
   return true;
@@ -391,7 +397,7 @@ async function importRecordsIn(api, bundle, { replace = false, makeItems = true 
 /**
  * Every change to the saved definitions is read-clone-write (and then the registry is rebuilt and installed). Two overlapping changes would each start from the SAME store and the second write
  * would erase the first (two quick creates; two slot saves on one recipe), and two creates could pick the same free id. So each change takes this one keyed lock and decides on the store
- * as it is INSIDE the lock (the `...In` functions above read it fresh). "editorStore" is a LEAF lock: nothing inside asks for another lock (the work is the store, the registry rebuild,
+ * as it is INSIDE the lock (the `...In` functions above read it fresh). "editorStore" holds ONE nested lock: "discoveryTracks" (the research-track overlay, a leaf; editorStore, then discoveryTracks, never the other way round). Otherwise nothing inside asks for another lock (the work is the store, the registry rebuild,
  * the world item, the audit line and the definitions revision), and the `...In` functions never take it, so one editor change calling another cannot wait on itself.
  * Where it sits among the others: the tag and queue code take their own locks (actor, node, tagLedger, tagCaps, tagCrafted, tagBackup) and never hold one while asking for this.
  */
