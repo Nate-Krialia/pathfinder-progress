@@ -211,7 +211,97 @@ await (async () => {
 - You should see: one `PLAYTEST CLEANUP removed:` line per thing, then notes. Pressed again, it says `nothing to remove`.
 
 ```js
-// (the CLEANUP block is written in the next commit of this round)
+// [GM] CLEANUP: removes ONLY what the "Playtest" SETUP made (the documents that carry the playtestSeed flag, and what the manifest saved on the scene names), puts back what SETUP changed, and
+// prints each thing it removed. GM only. Never runs by itself. Safe to run twice: the second run prints "nothing to remove". Open the browser console (F12) to read the lines.
+await (async () => {
+  const M = "pathfinder-progress", SEED = "playtestSeed", api = game.modules.get(M)?.api;
+  const stop = message => { ui.notifications?.error?.(`Playtest CLEANUP: ${message}`); throw new Error(message); };
+  if (!game.user.isGM) stop("run this in the GM window");
+  if (!api?.editor) stop("this world is not on a build with the Item editor");
+  const removed = [], restored = [], problems = [];
+  const done = text => { removed.push(text); console.log(`PLAYTEST CLEANUP removed: ${text}`); };
+  const putBack = text => { restored.push(text); console.log(`PLAYTEST CLEANUP put back: ${text}`); };
+  const attempt = async (what, fn) => { try { await fn(); } catch (error) { problems.push(`${what}: ${error.message}`); console.log(`PLAYTEST CLEANUP PROBLEM ${what}: ${error.message}`); } };
+  const flagged = doc => doc?.getFlag?.(M, SEED) === true;
+
+  const scene = game.scenes.filter(flagged).find(s => s.name === "Playtest Field") ?? null;
+  const man = scene?.getFlag(M, "playtestManifest") ?? null;
+  const actors = game.actors.filter(flagged);
+  const items = game.items.filter(flagged);
+
+  if (man) {
+    // the party location and the users' own characters go back first
+    await attempt("the party location", async () => { await game.settings.set(M, "partyLocation", man.location ?? ""); putBack(`the party location (it is "${man.location || "nowhere"}" again)`); });
+    for (const [userId, original] of Object.entries(man.characters ?? {})) {
+      await attempt("a user's character", async () => {
+        const user = game.users.get(userId);
+        if (!user) return;
+        await user.update({ character: original !== "none" && game.actors.get(original) && !flagged(game.actors.get(original)) ? original : null });
+        putBack(`${user.name}'s character (${original === "none" ? "none, as before" : "the one from before SETUP"})`);
+      });
+    }
+  }
+  if (scene) {
+    await attempt("clear the map", async () => { const cleared = await api.clearMap(scene); done(`the placed nodes on the scene (${cleared?.removed ?? 0} token(s) from Clear map)`); });
+    await attempt("the scene's expedition record", async () => { const all = game.settings.get(M, "explorationState") ?? {}; if (scene.id in all) { delete all[scene.id]; await game.settings.set(M, "explorationState", all); done("the scene's expedition record"); } });
+    await attempt("delete the scene", async () => { const name = scene.name; await scene.delete(); done(`the scene ${name} (and its tokens, including the corpse)`); });
+  }
+  if (man?.partyStations?.length) {
+    await attempt("the party workshop", async () => {
+      const list = game.settings.get(M, "partyStations") ?? [];
+      const kept = list.filter(record => !man.partyStations.includes(record.id));
+      if (kept.length !== list.length) { await game.settings.set(M, "partyStations", kept); done(`the party workshop ${man.partyStations.join(", ")}`); }
+    });
+  }
+  await attempt("the audit log", async () => {
+    const ledger = api.audit.ledger();
+    let touched = 0;
+    for (const actor of actors) if (ledger[actor.id]) { delete ledger[actor.id]; touched++; }
+    // only the history lines that name one of OUR characters (never a line that merely says "Playtest")
+    const ours = actors.map(a => a.name);
+    if (ledger._events && ours.length) { const before = ledger._events.history.length; ledger._events.history = ledger._events.history.filter(h => !ours.some(name => h.text.includes(name))); touched += before - ledger._events.history.length; }
+    if (touched) { await game.settings.set(M, "auditLedger", ledger); done(`${touched} audit-ledger line(s) that name Playtest characters`); }
+  });
+  for (const actor of actors) await attempt(`delete ${actor.name}`, async () => { const name = actor.name; await actor.delete(); done(`the character ${name} (with its bag, its workshops, its Compendium and its formulas)`); });
+  for (const item of items) await attempt(`delete ${item.name}`, async () => { const name = item.name; await item.delete(); done(`the world item ${name}`); });
+  if (man?.ledgerRefs?.length) {
+    for (const ref of man.ledgerRefs) await attempt("an Item tags entry", async () => { if (api.tags.ledger().items[ref]) { await api.tags.removeEntry(ref); done(`the Item tags entry for ${ref}`); } });
+  }
+  // editor records: materials first, tags LAST (a material may still name a tag, and the editor refuses to remove a tag that is in use)
+  if (man?.editorKeys?.length) {
+    const keys = [...man.editorKeys].sort((a, b) => a.startsWith("tag:") - b.startsWith("tag:"));
+    for (const key of keys) await attempt(`remove ${key}`, async () => { if (api.editor.entry(key)) { await api.editor.remove(key); done(`the editor record ${key}`); } });
+  }
+  if (man?.memory?.length) {
+    await attempt("the in-memory definitions", async () => {
+      let n = 0;
+      for (const [kind, id] of man.memory) if (api.definitions[kind]?.delete(id)) n++;
+      if (n) { await api.publishDefinitions(); done(`${n} in-memory definition(s): ${man.memory.map(([k, id]) => `${k}:${id}`).join(", ")}`); }
+    });
+  }
+  if (man?.foldersBefore) {
+    await attempt("the Items folders", async () => {
+      for (const name of ["Materials", "Notes"].filter(n => !man.foldersBefore.includes(n))) {
+        const folder = game.folders.find(f => f.type === "Item" && f.name === name);
+        if (folder && !game.items.some(i => (i.folder?.id ?? i.folder) === folder.id)) { await folder.delete(); done(`the Items folder ${name} (SETUP made it and it is empty)`); }
+      }
+    });
+  }
+  delete globalThis.__playtest;
+
+  // What it did NOT touch, so you are not surprised.
+  const notes = [];
+  if (!man) {
+    const strays = Object.entries(api.editor.records()).filter(([, rec]) => /^Playtest /.test(rec.fields?.name ?? "")).map(([key]) => key);
+    if (strays.length) notes.push(`No manifest was found (the Playtest Field scene is gone), so the editor records ${strays.join(", ")} were NOT touched. Remove them in the Item editor if they are yours to remove.`);
+  }
+  notes.push("Left alone on purpose: the 'Resource Node' actor the module made (it is shared), audit-log history lines that do not name a Playtest character, anything you shared into the party's Compendium, and the records of crafted items (api.tags.pruneFrozen() clears orphaned ones when you want).");
+  const nothing = !removed.length && !restored.length && !problems.length;
+  if (nothing) console.log("PLAYTEST CLEANUP: nothing to remove");
+  for (const note of notes) console.log(`PLAYTEST CLEANUP note: ${note}`);
+  ui.notifications?.info?.(nothing ? "Playtest CLEANUP: nothing to remove." : `Playtest CLEANUP removed ${removed.length} thing(s) and put ${restored.length} back${problems.length ? `; ${problems.length} problem(s): read the console` : ""}.`);
+  return { removed, restored, problems, nothingToRemove: nothing, notes };
+})();
 ```
 
 ## Part 4: TEST SHEET
