@@ -6,7 +6,7 @@
  */
 import { MODULE_ID, STATION_KEYS as K, STATIONS, WORKSHOP } from "../config.js";
 import { partyCharacterIds } from "../party.js";
-import { withLock } from "../queue/lock.js";
+import { withLock, withLocks } from "../queue/lock.js";
 import { levelsOf, upgradePatch } from "../workshop/rules.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
@@ -141,8 +141,11 @@ export async function clearStationState(stationId) {
  * spec: { name, category, tier, location?: "carried" | { town }, access?: [actorId], id? }
  * Refuses (and writes nothing) when the record is invalid, e.g. a kit above the portable cap.
  */
-export async function giveStation(api, actor, spec) {
+export function giveStation(api, actor, spec) {
   requireGM("giveStation");
+  return withLock(holderKey(actor.id), () => giveStationIn(api, actor, spec));
+}
+async function giveStationIn(api, actor, spec) {
   const wantsFixed = spec.location && spec.location !== "carried";
   const record = {
     id: spec.id ?? `owned-${foundry.utils.randomID(8).toLowerCase()}`,
@@ -163,8 +166,11 @@ export async function giveStation(api, actor, spec) {
 }
 
 /** Delete an owned station (workshop or kit) from an actor. */
-export async function removeStation(actor, stationId) {
+export function removeStation(actor, stationId) {
   requireGM("removeStation");
+  return withLocks([stationKey(stationId), holderKey(actor.id)], () => removeStationIn(actor, stationId));
+}
+async function removeStationIn(actor, stationId) {
   const current = ownedOf(actor);
   const next = current.filter(r => r.id !== stationId);
   if (next.length === current.length) throw new Error(`removeStation: ${actor.name} has no owned station "${stationId}"`);
@@ -174,7 +180,14 @@ export async function removeStation(actor, stationId) {
 /** Move an owned station to another actor (the new owner/holder). */
 export async function transferStation(api, stationId, toActor) {
   requireGM("transferStation");
-  const from = [...game.actors].find(a => ownedOf(a).some(r => r.id === stationId));
+  const first = holderOf(stationId);
+  if (!first) throw new Error(`transferStation: no actor owns a station "${stationId}"`);
+  // The station's lock first (the order everywhere), then BOTH holders' lists in id order, so two transfers the opposite way round cannot wait on each other.
+  const holders = [...new Set([first.id, toActor.id])].sort().map(holderKey);
+  return withLocks([stationKey(stationId), ...holders], () => transferStationIn(api, stationId, toActor));
+}
+async function transferStationIn(api, stationId, toActor) {
+  const from = holderOf(stationId);
   if (!from) throw new Error(`transferStation: no actor owns a station "${stationId}"`);
   const record = structuredClone(ownedOf(from).find(r => r.id === stationId));
   record.owner = toActor.id;
@@ -188,6 +201,10 @@ export async function transferStation(api, stationId, toActor) {
 
 // Upgrades and party workshops (Stage 10c) ---------------------------------------------------------------------------
 const stationKey = id => `station:${id}`;
+// An actor's OWN stations (their flag) are one list: giveStation, removeStation, transferStation and the owned path of applyStationUpgrade each read it, change it and write all of it back,
+// so they take this per-holder key. It is NOT the actor's queue lock ("actor:<id>"): an upgrade runs inside its researcher's actor lock, and the holder can be that same actor (not re-entrant).
+const holderKey = id => `stationHolder:${id}`;
+const holderOf = stationId => [...game.actors].find(a => ownedOf(a).some(r => r.id === stationId)) ?? null;
 const partyListKey = "world:partyStations";
 // Every public station shares ONE world setting, and every party workshop shares another: two different stations written
 // at once would each read the old list and the later write would drop the earlier one. So the write also takes its list's lock.
@@ -209,67 +226,71 @@ function locate(api, stationId) {
  */
 export function applyStationUpgrade(api, stationId, { kind, from, to }) {
   requireGM("applyStationUpgrade");
-  const listKey = listKeyFor(api, stationId);
-  // The undo runs under the SAME list lock and puts back only THIS station's entry (what it was, or nothing), never the whole list as it was: another station's upgrade or a new party
-  // workshop may have landed in the same setting since.
-  const undoUnderLock = fn => () => withLock(listKey, fn);
-  return withLock(stationKey(stationId), () => withLock(listKey, async () => {
-    const found = locate(api, stationId);
-    if (!found) throw new Error(`the workshop "${stationId}" no longer exists`);
-    const { station } = found;
-    const level = levelsOf(station)[kind];
-    if (level !== from) throw new Error(`${station.name} is at ${kind} level ${level} now, not ${from} as it was when this upgrade began`);
-    const patch = upgradePatch(kind, to);
-    const mergeUpgrades = base => ({ ...(base ?? {}), ...(patch.upgrades ?? {}) });
+  // Lock order: the station's lock, then the list it is stored in (the public list, the party list, or its holder's list). The list key is worked out INSIDE the station lock, because a
+  // transfer (which holds the station lock too) can change the holder until then.
+  return withLock(stationKey(stationId), () => {
+    const listKey = listKeyFor(api, stationId);
+    // The undo runs under the SAME list lock and puts back only THIS station's entry (what it was, or nothing), never the whole list as it was: another station's upgrade or a new party
+    // workshop may have landed in the same setting since.
+    const undoUnderLock = fn => () => withLock(listKey, fn);
+    return withLock(listKey, async () => {
+      const found = locate(api, stationId);
+      if (!found) throw new Error(`the workshop "${stationId}" no longer exists`);
+      const { station } = found;
+      const level = levelsOf(station)[kind];
+      if (level !== from) throw new Error(`${station.name} is at ${kind} level ${level} now, not ${from} as it was when this upgrade began`);
+      const patch = upgradePatch(kind, to);
+      const mergeUpgrades = base => ({ ...(base ?? {}), ...(patch.upgrades ?? {}) });
 
-    if (station.source === "public") {
-      const before = structuredClone(game.settings.get(MODULE_ID, K.stationStateSetting) ?? []);
-      const prior = before.find(e => e.stationId === stationId);                        // undefined: the entry is new
-      const existing = prior ?? { stationId, access: [] };
-      const entry = { ...existing, ...(patch.tier ? { tier: patch.tier } : { upgrades: mergeUpgrades(existing.upgrades) }) };
-      const errors = check(LIVE_SCHEMAS.stationState, entry);
-      if (errors.length) throw new Error(`built an invalid station state: ${errors.map(e => `${e.field} ${e.message}`).join("; ")}`);
-      await game.settings.set(MODULE_ID, K.stationStateSetting, [...before.filter(e => e.stationId !== stationId), entry]);
-      return undoUnderLock(async () => {
-        const current = structuredClone(game.settings.get(MODULE_ID, K.stationStateSetting) ?? []);
-        const next = !prior ? current.filter(e => e.stationId !== stationId)
-          : current.some(e => e.stationId === stationId) ? current.map(e => (e.stationId === stationId ? prior : e)) : [...current, prior];
-        await game.settings.set(MODULE_ID, K.stationStateSetting, next);
-      });
-    }
-    if (station.source === "owned") {
-      const holder = [...game.actors].find(a => ownedOf(a).some(r => r.id === stationId));
-      const before = structuredClone(ownedOf(holder));
+      if (station.source === "public") {
+        const before = structuredClone(game.settings.get(MODULE_ID, K.stationStateSetting) ?? []);
+        const prior = before.find(e => e.stationId === stationId);                        // undefined: the entry is new
+        const existing = prior ?? { stationId, access: [] };
+        const entry = { ...existing, ...(patch.tier ? { tier: patch.tier } : { upgrades: mergeUpgrades(existing.upgrades) }) };
+        const errors = check(LIVE_SCHEMAS.stationState, entry);
+        if (errors.length) throw new Error(`built an invalid station state: ${errors.map(e => `${e.field} ${e.message}`).join("; ")}`);
+        await game.settings.set(MODULE_ID, K.stationStateSetting, [...before.filter(e => e.stationId !== stationId), entry]);
+        return undoUnderLock(async () => {
+          const current = structuredClone(game.settings.get(MODULE_ID, K.stationStateSetting) ?? []);
+          const next = !prior ? current.filter(e => e.stationId !== stationId)
+            : current.some(e => e.stationId === stationId) ? current.map(e => (e.stationId === stationId ? prior : e)) : [...current, prior];
+          await game.settings.set(MODULE_ID, K.stationStateSetting, next);
+        });
+      }
+      if (station.source === "owned") {
+        const holder = holderOf(stationId);
+        const before = structuredClone(ownedOf(holder));
+        const record = before.find(r => r.id === stationId);
+        const next = { ...record, ...(patch.tier ? { tier: patch.tier } : { upgrades: mergeUpgrades(record.upgrades) }) };
+        const problems = validateOwnedRecord(next, holder.id, { towns: api.definitions?.town, config: STATIONS });
+        if (problems.length) throw new Error(`the upgraded workshop would be invalid: ${problems.map(e => `${e.field} ${e.message}`).join("; ")}`);
+        await holder.update({ [`flags.${MODULE_ID}.${K.actorStationsFlag}`]: before.map(r => (r.id === stationId ? next : r)) });
+        return undoUnderLock(async () => {
+          const current = structuredClone(ownedOf(holder));
+          if (!current.some(r => r.id === stationId)) return;                            // removed or moved since: nothing of ours to put back
+          await holder.update({ [`flags.${MODULE_ID}.${K.actorStationsFlag}`]: current.map(r => (r.id === stationId ? record : r)) });
+        });
+      }
+      // a party workshop
+      const before = readPartyList();
       const record = before.find(r => r.id === stationId);
       const next = { ...record, ...(patch.tier ? { tier: patch.tier } : { upgrades: mergeUpgrades(record.upgrades) }) };
-      const problems = validateOwnedRecord(next, holder.id, { towns: api.definitions?.town, config: STATIONS });
-      if (problems.length) throw new Error(`the upgraded workshop would be invalid: ${problems.map(e => `${e.field} ${e.message}`).join("; ")}`);
-      await holder.update({ [`flags.${MODULE_ID}.${K.actorStationsFlag}`]: before.map(r => (r.id === stationId ? next : r)) });
+      const errors = check(LIVE_SCHEMAS.partyStation, next);
+      if (errors.length) throw new Error(`built an invalid party workshop: ${errors.map(e => `${e.field} ${e.message}`).join("; ")}`);
+      await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, before.map(r => (r.id === stationId ? next : r)));
       return undoUnderLock(async () => {
-        const current = structuredClone(ownedOf(holder));
-        if (!current.some(r => r.id === stationId)) return;                            // removed or moved since: nothing of ours to put back
-        await holder.update({ [`flags.${MODULE_ID}.${K.actorStationsFlag}`]: current.map(r => (r.id === stationId ? record : r)) });
+        const current = readPartyList();
+        if (!current.some(r => r.id === stationId)) return;
+        await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, current.map(r => (r.id === stationId ? record : r)));
       });
-    }
-    // a party workshop
-    const before = readPartyList();
-    const record = before.find(r => r.id === stationId);
-    const next = { ...record, ...(patch.tier ? { tier: patch.tier } : { upgrades: mergeUpgrades(record.upgrades) }) };
-    const errors = check(LIVE_SCHEMAS.partyStation, next);
-    if (errors.length) throw new Error(`built an invalid party workshop: ${errors.map(e => `${e.field} ${e.message}`).join("; ")}`);
-    await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, before.map(r => (r.id === stationId ? next : r)));
-    return undoUnderLock(async () => {
-      const current = readPartyList();
-      if (!current.some(r => r.id === stationId)) return;
-      await game.settings.set(MODULE_ID, WORKSHOP.partyStationsSetting, current.map(r => (r.id === stationId ? record : r)));
     });
-  }));
+  });
 }
 
-/** The lock for the list a station is stored in (the actor's own flag is covered by the caller's actor lock). */
+/** The lock for the list a station is stored in: the public list, the party list, or (an owned station) its HOLDER's list. */
 function listKeyFor(api, stationId) {
   const source = locate(api, stationId)?.station.source;
-  return source === "public" ? publicListKey : source === "party" ? partyListKey : `station-record:${stationId}`;
+  return source === "public" ? publicListKey : source === "party" ? partyListKey : holderKey(holderOf(stationId)?.id ?? stationId);
 }
 
 /** Add a workshop the party built (GM client, under the list's lock). Returns an async undo(). */

@@ -631,3 +631,56 @@ test("SET STATE (stage 1c #1): giving a public station an owner keeps its earned
   await assert.rejects(as(w.gm, () => api().setStationState(FORGE, { owner: "nobody" })), /is not an actor in this world/);
   assert.deepEqual(env.values.stationState.find(e => e.stationId === FORGE), cleared, "a refusal changes nothing");
 });
+
+// Stage 1c #10: an actor's owned stations are one list in one flag; every change takes the HOLDER's list lock ---------------------------------------------
+const slowActorWrites = (actor, ms) => {
+  const real = actor.update.bind(actor), realSet = actor.setFlag.bind(actor);
+  actor.update = async (...args) => { await new Promise(r => setTimeout(r, ms)); return real(...args); };
+  actor.setFlag = async (...args) => { await new Promise(r => setTimeout(r, ms)); return realSet(...args); };
+  return () => { actor.update = real; actor.setFlag = realSet; };
+};
+const ownedOfAnn = w => Object.fromEntries((w.ann.getFlag(M, "stations") ?? []).map(r => [r.id, r]));
+
+test("HOLDER LOCK: two upgrades on two workshops of ONE owner, resolved at the same moment, both survive", async () => {
+  const w = await world({ downtime: 0 });
+  await as(w.gm, () => api().giveStation(w.ann, { name: "Kit One", category: "smithing", tier: 1, id: "kit-one" }));
+  await as(w.gm, () => api().giveStation(w.ann, { name: "Kit Two", category: "smithing", tier: 1, id: "kit-two" }));
+  const restore = slowActorWrites(w.ann, 25);
+  try {
+    await Promise.all([applyStationUpgrade(api(), "kit-one", { kind: "craftDays", from: 0, to: 1 }), applyStationUpgrade(api(), "kit-two", { kind: "craftDays", from: 0, to: 1 })]);
+  } finally { restore(); }
+  const records = ownedOfAnn(w);
+  assert.deepEqual([records["kit-one"].upgrades?.craftDays, records["kit-two"].upgrades?.craftDays], [1, 1], "each upgrade is there");
+});
+
+test("HOLDER LOCK: a GM giveStation that overlaps an upgrade of the same owner's other workshop keeps both; an undo of one still leaves the other", async () => {
+  const w = await world({ downtime: 0 });
+  await as(w.gm, () => api().giveStation(w.ann, { name: "Kit One", category: "smithing", tier: 1, id: "kit-one" }));
+  const restore = slowActorWrites(w.ann, 25);
+  let undo;
+  try {
+    [undo] = await Promise.all([applyStationUpgrade(api(), "kit-one", { kind: "craftDays", from: 0, to: 1 }), as(w.gm, () => api().giveStation(w.ann, { name: "Kit Two", category: "smithing", tier: 1, id: "kit-two" }))]);
+  } finally { restore(); }
+  assert.deepEqual(Object.keys(ownedOfAnn(w)).sort(), ["kit-one", "kit-two"]);
+  assert.equal(ownedOfAnn(w)["kit-one"].upgrades?.craftDays, 1);
+  await undo();
+  assert.equal(ownedOfAnn(w)["kit-one"].upgrades?.craftDays ?? 0, 0);
+  assert.deepEqual(Object.keys(ownedOfAnn(w)).sort(), ["kit-one", "kit-two"]);
+});
+
+test("HOLDER LOCK: transfers the opposite way round, an overlapping remove, and an upgrade on a holder who is also the resolver do not deadlock or lose a workshop", async () => {
+  const w = await world({ downtime: 0 });
+  await as(w.gm, () => api().giveStation(w.ann, { name: "Kit One", category: "smithing", tier: 1, id: "kit-one" }));
+  await as(w.gm, () => api().giveStation(w.bob, { name: "Kit Two", category: "smithing", tier: 1, id: "kit-two" }));
+  await as(w.gm, () => api().giveStation(w.ann, { name: "Kit Three", category: "smithing", tier: 1, id: "kit-three" }));
+  const restoreAnn = slowActorWrites(w.ann, 15), restoreBob = slowActorWrites(w.bob, 15);
+  try {
+    await as(w.gm, () => Promise.all([api().transferStation("kit-one", w.bob), api().transferStation("kit-two", w.ann), api().removeStation(w.ann, "kit-three")]));
+  } finally { restoreAnn(); restoreBob(); }
+  assert.deepEqual(Object.keys(ownedOfAnn(w)).sort(), ["kit-two"]);
+  assert.deepEqual((w.bob.getFlag(M, "stations") ?? []).map(r => r.id).sort(), ["kit-one"]);
+  // the queue resolves an upgrade inside the researcher's ACTOR lock; the holder is the same actor and the lock key is a different one, so this does not wait on itself
+  const { withLock, actorKey } = await import("../scripts/queue/lock.js");
+  await withLock(actorKey(w.ann), () => applyStationUpgrade(api(), "kit-two", { kind: "craftDays", from: 0, to: 1 }));
+  assert.equal(ownedOfAnn(w)["kit-two"].upgrades?.craftDays, 1);
+});
