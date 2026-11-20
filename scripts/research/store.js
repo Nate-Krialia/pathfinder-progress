@@ -26,6 +26,7 @@ import { expectedDaysToFinish, expectedProgressPerDay } from "./odds.js";
 import { addFormula, findFormula, refreshSnapshots, removeFormula as removeFromList, reportFormulas } from "./formulas.js";
 import { formatProgressSummary, formatResearchSummary } from "./summary.js";
 import { applyStationUpgrade } from "../stations/store.js";
+import { actorKey, withLocks } from "../queue/lock.js";
 import { targetProblem, withDesign, BLUEPRINTS_FLAG } from "../workshop/targets.js";
 
 const requireGM = what => { if (!game.user.isGM) throw new Error(`${what}: GM only`); };
@@ -73,14 +74,14 @@ const flagUpdate = (key, value) => ({ [flagKey(key)]: value });
 // Days -----------------------------------------------------------------------------------
 export const days = actor => readDays(actor);
 
-export async function grantDays(actor, n, note = "granted by the GM") {
+async function grantDaysIn(actor, n, note = "granted by the GM") {
   requireGM("grantDays");
   const total = afterGrant(readDays(actor), n);
   await commit(actor, flagUpdate(K.daysFlag, total), [{ type: "days", delta: n, note }]);
   return total;
 }
 
-export async function setDays(actor, n) {
+async function setDaysIn(actor, n) {
   requireGM("setDays");
   const total = validateSetDays(n);
   await commit(actor, flagUpdate(K.daysFlag, total), [{ type: "days", delta: total - readDays(actor), note: "set by the GM" }]);
@@ -89,7 +90,7 @@ export async function setDays(actor, n) {
 
 // Projects --------------------------------------------------------------------------------
 /** Start researching a recipe. Options: { actor, recipe, dc?, threshold? } (dc/threshold tune this one project). */
-export async function startProject(api, { actor, recipe: recipeId, dc, threshold }) {
+export async function startProjectIn(api, { actor, recipe: recipeId, dc, threshold }) {
   requireGM("startProject");
   const recipe = api.definitions?.recipe.get(recipeId);
   if (!recipe) throw new Error(`startProject: unknown recipe "${recipeId}"`);
@@ -109,7 +110,7 @@ export async function startProject(api, { actor, recipe: recipeId, dc, threshold
 }
 
 /** Stop a project (it keeps its progress record but can no longer be researched). */
-export async function abandonProject(actor, projectId) {
+async function abandonProjectIn(actor, projectId) {
   requireGM("abandonProject");
   const { list, index, project } = findProject(actor, projectId);
   if (project.status === "active" && project.materials?.length) {
@@ -257,7 +258,7 @@ export async function postResearchChat(actor, plan) {
  * unreserved days. Stops early when the project completes and does not spend the leftover days. GM only.
  * @param {object} options { actor, project, days, skill?, degree?, chat? }
  */
-export async function research({ actor, project: projectId, days: dayCount, skill, degree, chat = true }, api) {
+async function researchIn({ actor, project: projectId, days: dayCount, skill, degree, chat = true }, api) {
   requireGM("research");
   await noteOverride(actor, "research"); // the GM tool goes around the downtime gate; the ledger says so
   const plan = await planResearch(api, { actor, project: projectId, days: dayCount, daysAvailable: readDays(actor), skill, degree });
@@ -288,7 +289,7 @@ export async function research({ actor, project: projectId, days: dayCount, skil
  * The hook for other progress sources (Stage 8 commissions, discoveries). A reason is required
  * and goes in the project log. A negative amount is a setback (progress never goes below 0).
  */
-export async function addProgress(api, actor, projectId, amount, reason, { chat = true } = {}) {
+async function addProgressIn(api, actor, projectId, amount, reason, { chat = true } = {}) {
   requireGM("addProgress");
   if (typeof reason !== "string" || !reason.trim()) throw new Error("addProgress: a reason is required (it is recorded in the project log)");
   const { list, index, project } = findProject(actor, projectId);
@@ -325,7 +326,7 @@ function unlockedFormulas(actor, recipe, source) {
 }
 
 /** Give an actor a formula directly (GM testing, rewards). access: "owned" (default) or "loan". */
-export async function grantFormula(api, actor, recipeId, { access = "owned", source = "gm" } = {}) {
+async function grantFormulaIn(api, actor, recipeId, { access = "owned", source = "gm" } = {}) {
   requireGM("grantFormula");
   const recipe = api.definitions?.recipe.get(recipeId);
   if (!recipe) throw new Error(`grantFormula: unknown recipe "${recipeId}"`);
@@ -350,12 +351,26 @@ export async function grantFormula(api, actor, recipeId, { access = "owned", sou
   return { entry: findFormula(added.list, recipeId), change: added.change };
 }
 
-export async function removeFormula(actor, recipeId) {
+async function removeFormulaIn(actor, recipeId) {
   requireGM("removeFormula");
   const removed = removeFromList(rawList(actor, K.formulasFlag), recipeId);
   if (!removed.ok) throw new Error(`removeFormula: ${removed.error}`);
   await commit(actor, flagUpdate(K.formulasFlag, removed.list), [{ type: "formulaRemove", recipeId, note: "removed by the GM" }]);
 }
+
+// Locked entry points ----------------------------------------------------------------------------------------------
+// Every GM tool below reads an actor's flag, works something out, awaits, and writes the flag back. The queue and the leads already do that under the actor's lock ("actor:<id>"); these
+// did not, so a tool that overlapped a queued check, a lead or another tool wrote from a stale read and one of the two changes was lost. Each now takes the same actor lock around the
+// whole read-modify-write. None of them calls another locked one (the lock is not re-entrant); `startProjectIn` is the unlocked body that the lead flow, which already holds the lock, uses.
+const underActorLock = (actor, fn) => withLocks([actorKey(actor)], fn);
+export const grantDays = (actor, n, note) => underActorLock(actor, () => grantDaysIn(actor, n, note));
+export const setDays = (actor, n) => underActorLock(actor, () => setDaysIn(actor, n));
+export const startProject = (api, options) => underActorLock(options.actor, () => startProjectIn(api, options));
+export const abandonProject = (actor, projectId) => underActorLock(actor, () => abandonProjectIn(actor, projectId));
+export const research = (options, api) => underActorLock(options.actor, () => researchIn(options, api));
+export const addProgress = (api, actor, projectId, amount, reason, options) => underActorLock(actor, () => addProgressIn(api, actor, projectId, amount, reason, options));
+export const grantFormula = (api, actor, recipeId, options) => underActorLock(actor, () => grantFormulaIn(api, actor, recipeId, options));
+export const removeFormula = (actor, recipeId) => underActorLock(actor, () => removeFormulaIn(actor, recipeId));
 
 /** What an actor holds: owned/loan, and whether each copy is ok, stale, or orphaned. */
 export function formulasFor(api, actor) {
@@ -369,22 +384,27 @@ export function formulasFor(api, actor) {
   return rows;
 }
 
-/** Bring stale snapshots up to date for one actor, or every actor. Returns what changed. */
+/** One actor's stale snapshots brought up to date (the caller holds the actor's lock). Returns what changed, or null. */
+async function refreshOne(api, a) {
+  const raw = a.getFlag(MODULE_ID, K.formulasFlag);
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const valid = raw.filter(entry => check(LIVE_SCHEMAS.formula, entry).length === 0);
+  const { list, refreshed, orphaned } = refreshSnapshots(valid, api.definitions);
+  if (refreshed.length) {
+    const refreshedSet = new Map(list.map(entry => [entry.recipeId, entry]));
+    // Display snapshots only; the audit tracks ownership, which does not change.
+    await commit(a, flagUpdate(K.formulasFlag, raw.map(entry => refreshedSet.get(entry?.recipeId) ?? entry)), []);
+  }
+  return refreshed.length || orphaned.length ? { actor: a.name, refreshed, orphaned } : null;
+}
+
+/** Bring stale snapshots up to date for one actor, or every actor (one actor's lock at a time, never several). Returns what changed. */
 export async function refreshFormulas(api, actor) {
   requireGM("refreshFormulas");
-  const actors = actor ? [actor] : [...game.actors];
   const changes = [];
-  for (const a of actors) {
-    const raw = a.getFlag(MODULE_ID, K.formulasFlag);
-    if (!Array.isArray(raw) || !raw.length) continue;
-    const valid = raw.filter(entry => check(LIVE_SCHEMAS.formula, entry).length === 0);
-    const { list, refreshed, orphaned } = refreshSnapshots(valid, api.definitions);
-    if (refreshed.length) {
-      const refreshedSet = new Map(list.map(entry => [entry.recipeId, entry]));
-      // Display snapshots only; the audit tracks ownership, which does not change.
-      await commit(a, flagUpdate(K.formulasFlag, raw.map(entry => refreshedSet.get(entry?.recipeId) ?? entry)), []);
-    }
-    if (refreshed.length || orphaned.length) changes.push({ actor: a.name, refreshed, orphaned });
+  for (const a of actor ? [actor] : [...game.actors]) {
+    const change = await underActorLock(a, () => refreshOne(api, a));
+    if (change) changes.push(change);
   }
   return changes;
 }

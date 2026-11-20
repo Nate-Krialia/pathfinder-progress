@@ -12,7 +12,7 @@ import { actorKey, withLocks } from "../queue/lock.js";
 import { assertOwner, senderOf } from "../queue/common.js";
 import { refusal } from "../queue/relay.js";
 import { findFormula } from "./formulas.js";
-import { rawList, startProject } from "./store.js";
+import { rawList, startProjectIn } from "./store.js";
 import { itemLeads, overlay, playerStudy, readLedger, startStudy } from "../discovery/store.js";
 import { itemKey, trackOf } from "../discovery/track.js";
 import { W } from "../discovery/words.js";
@@ -94,7 +94,7 @@ export async function runFollowLead(payload, context) {
       await logWorldEvent(`lead followed: ${lead.name} by ${actor.name}`);
       return user.isGM ? entry : playerStudy(entry);
     }
-    const project = await startProject(boundApi, { actor, recipe: lead.recipeId });
+    const project = await startProjectIn(boundApi, { actor, recipe: lead.recipeId });   // the unlocked body: this flow already holds the actor lock
     try {
       await actor.update({ [flagKey]: rawList(actor, K.leadsFlag).filter(l => l?.id !== lead.id) });
     } catch (error) {
