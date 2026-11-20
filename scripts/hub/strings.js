@@ -102,6 +102,7 @@ export const S = {
   stationFee: fee => (fee === 0 ? "No fee" : `${fee} gp`),
   stationTier: tier => `Tier ${tier}`,
   stationCheapest: "Cheapest",
+  stationFeeUnknown: "its fee could not be worked out, so it cannot be used right now. Ask the GM.",
 
   // Buttons
   queueCraft: "Queue the craft",
@@ -110,6 +111,7 @@ export const S = {
   reasonSlotEmpty: "Choose a material for every slot first.",
   reasonShort: names => `You don't have enough ${names.join(" and ")}.`,
   reasonNoStation: "No workshop you can use is within reach for this.",
+  reasonStationFee: "A workshop in reach has no fee set, so it cannot be used right now. Ask the GM.",
   reasonNoDays: (need, have) => `This takes ${need} ${need === 1 ? "day" : "days"} and you have ${have} free.`,
   reasonNoGold: (fee, have) => `The station fee is ${fee} gp and you have ${have} gp.`,
   reasonNotKnown: "You haven't learned this formula yet.",

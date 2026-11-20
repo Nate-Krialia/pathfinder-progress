@@ -87,12 +87,13 @@ function outcome(o) {
 }
 
 function stations(st) {
-  if (st.none) return `<section class="pfp-stations" aria-label="${esc(st.heading)}"><h3>${esc(st.heading)}</h3><p class="pfp-empty">${esc(st.none)}</p></section>`;
+  const blocked = st.blocked?.length ? `<ul class="pfp-facts">${st.blocked.map(b => `<li class="pfp-why">${esc(b.reason)}</li>`).join("")}</ul>` : "";
+  if (st.none) return `<section class="pfp-stations" aria-label="${esc(st.heading)}"><h3>${esc(st.heading)}</h3><p class="pfp-empty">${esc(st.none)}</p>${blocked}</section>`;
   return `<section class="pfp-stations" aria-label="${esc(st.heading)}"><h3>${esc(st.heading)}</h3><ul class="pfp-options">${st.options.map(o => `<li>${button({
     action: "pick-station", cls: "pfp-option", focus: `station:${o.id}`, pressed: o.selected, data: { station: o.id },
     label: `<span class="pfp-option-name">${esc(o.name)}</span><span class="pfp-option-tier">${esc(o.tierText)}</span><span class="pfp-stock">${esc(o.where)} · ${esc(o.feeText)}</span>`
       + `${o.cheapest || o.selected ? `<span class="pfp-badges">${o.cheapest ? `<span class="pfp-badge">${esc(o.cheapest)}</span>` : ""}${o.selected ? `<span class="pfp-badge">${esc(S.selectedWord)}</span>` : ""}</span>` : ""}`
-  })}</li>`).join("")}</ul></section>`;
+  })}</li>`).join("")}</ul>${blocked}</section>`;
 }
 
 function detailPane(body) {

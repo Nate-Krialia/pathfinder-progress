@@ -72,9 +72,11 @@ export function readFacts(api, actor, state) {
   let stations = [];
   let preview = null;
   if (recipe && held) {
-    stations = attempt("the workshops for this formula", () => api.stationsFor(actor, recipe.id), []).map(s => ({
-      id: s.id, name: s.name, tier: s.tier, where: s.where, reachable: s.reachable, usable: s.usable, fee: attempt("a station fee", () => feeForStation(s), 0)
-    }));
+    // A fee that cannot be worked out (a tier with no fee set) is NOT free: the workshop is marked unusable, and the Hub says why, instead of showing "No fee".
+    stations = attempt("the workshops for this formula", () => api.stationsFor(actor, recipe.id), []).map(s => {
+      const fee = attempt("a station fee", () => feeForStation(s), null);
+      return { id: s.id, name: s.name, tier: s.tier, where: s.where, reachable: s.reachable, usable: fee === null ? false : s.usable, fee: fee ?? 0, ...(fee === null ? { feeUnknown: true } : {}) };
+    });
     for (const slot of recipe.slots) {
       for (const id of met) {
         if ((inventory[id] ?? 0) > 0 && materials[id].tier >= slot.tierFloor) learned[learnedKey(recipe.id, slot.name, id)] = attempt("what you have learned", () => api.compendium.knownEffect(actor, recipe, slot.name, id), { known: false });

@@ -870,3 +870,33 @@ test("FACTS (research): the Hub reads projects only through projectInfo: no DC, 
   const src = (await import("node:fs")).readFileSync("scripts/hub/facts.js", "utf8");
   assert.doesNotMatch(src, /getFlag\([^)]*projects|K\.projectsFlag|RESEARCH_KEYS\.projectsFlag/, "facts.js never touches the raw project flag");
 });
+
+// Stage 1c #4: a fee that cannot be worked out is not shown as free --------------------------------------------------------------------------------
+test("FEE ERROR: a workshop whose tier has no fee set is marked unusable with a plain reason, never shown as 'No fee'; the Queue button says why", async () => {
+  const { STATIONS } = await import("../scripts/config.js");
+  const w = await playerWorld();
+  const saved = { ...STATIONS.feeByTier };
+  const quiet = console.error; console.error = () => {};
+  let f, state;
+  try {
+    for (const tier of Object.keys(saved)) delete STATIONS.feeByTier[tier];
+    state = { ...emptyState(), recipeId: DAGGER, picks: { ...SEL } };
+    f = await facts(w, state);
+  } finally { console.error = quiet; Object.assign(STATIONS.feeByTier, saved); }
+  const reachable = f.stations.filter(s => s.reachable);
+  assert.ok(reachable.length >= 1);
+  assert.ok(reachable.every(s => s.usable === false && s.feeUnknown === true && s.fee === 0), "every reachable workshop is unusable and flagged, not free");
+  const tab = formulaeTab(f, state);
+  assert.deepEqual(tab.detail.stations.options, [], "none is offered as a choice");
+  assert.equal(tab.detail.stations.blocked.length, reachable.length);
+  assert.match(tab.detail.stations.blocked[0].reason, /its fee could not be worked out, so it cannot be used right now/);
+  assert.match(tab.detail.buttons.queue.reason, /has no fee set, so it cannot be used right now/);
+  assert.equal(tab.detail.buttons.queue.disabled, true);
+  const html = renderHubMain(hubModel(f, { ...state, tab: "formulae" }));
+  assert.match(html, /its fee could not be worked out/);
+  assert.doesNotMatch(html, /No fee/);
+  // with the fees back, the same workshops are offered with their real fee
+  const fixed = await facts(w, state);
+  assert.ok(fixed.stations.filter(s => s.reachable).every(s => s.feeUnknown === undefined && Number.isFinite(s.fee)));
+  assert.ok(fixed.stations.some(s => s.reachable && s.usable), "and a usable one is offered again");
+});

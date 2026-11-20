@@ -164,8 +164,10 @@ export function slotPane(facts, recipe, picks) {
 export function stationChoices(stations, stationId) {
   const usable = stations.filter(s => s.reachable && s.usable !== false).sort((a, b) => a.fee - b.fee || a.tier - b.tier || a.name.localeCompare(b.name));
   const chosen = usable.find(s => s.id === stationId) ?? usable[0] ?? null;
+  // Workshops in reach that cannot be used because their fee is unknown: named, with a plain reason (never shown as free).
+  const blocked = stations.filter(s => s.reachable && s.feeUnknown).sort((a, b) => a.name.localeCompare(b.name)).map(s => ({ id: s.id, name: s.name, reason: `${s.name}: ${S.stationFeeUnknown}` }));
   return {
-    heading: S.stationHeading, none: usable.length === 0 ? S.stationNone : null, chosenId: chosen?.id ?? null,
+    heading: S.stationHeading, none: usable.length === 0 ? S.stationNone : null, chosenId: chosen?.id ?? null, blocked,
     options: usable.map((s, i) => ({ id: s.id, name: s.name, where: s.where, tierText: S.stationTier(s.tier), fee: s.fee, feeText: S.stationFee(s.fee), selected: s.id === chosen?.id, cheapest: i === 0 ? S.stationCheapest : "" }))
   };
 }
@@ -230,7 +232,7 @@ export function queueButton(facts, recipe, picks, stationId) {
   if (!gate.open) reason = gate.reason;
   else if (!allSlotsPicked(recipe, picks)) reason = S.reasonSlotEmpty;
   else if (short.length) reason = S.reasonShort(short);
-  else if (stations.none) reason = S.reasonNoStation;
+  else if (stations.none) reason = stations.blocked.length ? S.reasonStationFee : S.reasonNoStation;
   else if (days > facts.days.free) reason = S.reasonNoDays(days, facts.days.free);
   else if (chosenFee(stations) > facts.gp) reason = S.reasonNoGold(chosenFee(stations), facts.gp);
   else if (facts.preview && !facts.preview.ok) reason = S.reasonPreview(facts.preview.errors[0]);
