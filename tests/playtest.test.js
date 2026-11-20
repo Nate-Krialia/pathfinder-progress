@@ -346,3 +346,170 @@ test("MUTATION: a SETUP that makes a user is caught by the static check", () => 
   assert.match(broken, /User\.create/);
   assert.doesNotMatch(SETUP, /User\.create/);
 });
+
+// ---- the doc: the INSTALL section and the TEST SHEET, and the console blocks the sheet gives the owner ---------------------------------------------------------------------
+const part = n => doc.split(new RegExp(`^## Part ${n}: [^\\n]*\\n`, "m"))[1]?.split(/^## Part /m)[0] ?? "";
+const INSTALL = part(1), SHEET = part(4);
+const stepsOf = (text, prefix) => [...text.matchAll(new RegExp(`^### ${prefix} (\\d+) (\\[[^\\]]+\\]): ([^\\n]*)\\n([\\s\\S]*?)(?=^### |(?![\\s\\S]))`, "gm"))].map(m => ({ n: Number(m[1]), who: m[2], title: m[3], text: m[4] }));
+
+test("DOC: INSTALL and the TEST SHEET are in the standing gate format (short bullets, one action each, a 'You should see:' bullet per step)", () => {
+  const install = stepsOf(INSTALL, "Install"), sheet = stepsOf(SHEET, "Sheet");
+  assert.deepEqual(install.map(s => s.n), Array.from({ length: 10 }, (_, i) => i + 1), "ten install steps, numbered");
+  assert.deepEqual(sheet.map(s => s.n), Array.from({ length: 12 }, (_, i) => i + 1), "twelve sheet steps, numbered");
+  for (const step of [...install, ...sheet]) {
+    const section = step.text.split("```js")[0];
+    const bullets = section.split("\n").filter(l => /^- /.test(l));
+    assert.ok(bullets.length >= 2, `${step.title}: bullets`);
+    assert.ok(bullets.every(b => b.length <= 800), `${step.title}: every bullet is short`);
+    assert.ok(bullets.some(b => /You should see/.test(b)), `${step.title}: a "You should see" bullet`);
+    assert.doesNotMatch(section.replace(/^- .*$/gm, "").replace(/\*\*What to do and see:\*\*/, ""), /\n[A-Z][^\n]{200,}/, `${step.title}: no long paragraph of instructions outside the bullets`);
+  }
+  assert.match(SHEET, /do the steps in order/);
+});
+
+test("DOC: INSTALL says everything the owner needs, plainly", () => {
+  for (const [what, pattern] of [
+    ["the honour-system warning (hidden DCs, thresholds and GM settings reach every client)", /Perception DCs, a project's stored DC and threshold, the tag ledger and every other GM setting[\s\S]*throwaway data only/],
+    ["the Foundry and PF2e versions", /Foundry 14\.369\*\* and \*\*PF2e 8\.6\.1/],
+    ["a backup of the Data folder", /### Install 1 \[Owner\]: back up the Foundry data folder[\s\S]*Copy the whole Data folder/],
+    ["the exact dev manifest URL", /https:\/\/github\.com\/Nate-Krialia\/pathfinder-progress\/releases\/download\/dev\/module\.json/],
+    ["the SHA-256 comparison with module.zip.sha256 from artifact module-<sha>", /module\.zip\.sha256[\s\S]*module-<full sha>|module-<full sha>[\s\S]*module\.zip\.sha256/],
+    ["Get-FileHash and sha256sum", /Get-FileHash module\.zip -Algorithm SHA256[\s\S]*sha256sum module\.zip/],
+    ["unzipping the artifact into Data/modules/pathfinder-progress/", /Data\/modules\/pathfinder-progress\//],
+    ["restarting the server because of socket true", /"socket": true[\s\S]*only when the server starts/],
+    ["a NEW world on the pf2e system, modules enabled in that world only", /Create World[\s\S]*Pathfinder Second Edition[\s\S]*Manage Modules[\s\S]*Pathfinder Progress\*\* and \*\*socketlib/],
+    ["the socketlib versions", /1\.1\.3[\s\S]*1\.1\.4/],
+    ["why Update is not offered, and how to reinstall", /version stays `0\.22\.0`[\s\S]*will NOT offer an Update[\s\S]*Uninstall/],
+    ["setLocation", /api\.setLocation\("oakhaven"\)/],
+    ["downtime.start", /api\.downtime\.start\(\{ days: 12 \}\)/],
+    ["Owner level for the Player users", /non-GM user owns it at \*\*Owner\*\* level/],
+    ["the macro never makes users", /never makes users/]
+  ]) assert.match(INSTALL, pattern, what);
+});
+
+test("DOC: the TEST SHEET marks the NEW paths, says what a Player sees and must NOT see, and is honest about what cannot be hand-tested", () => {
+  for (const [what, pattern] of [
+    ["NEW: giving a workshop", /\*\*NEW: giving a workshop\.\*\*/], ["NEW: an owned workshop's upgrade", /\*\*NEW: an owned workshop's upgrade\.\*\*/], ["NEW: transfer, then remove", /\*\*NEW: transfer, then remove\.\*\*/],
+    ["NEW: the Hub fee error", /Sheet 9 \[Player: Alice\]: the Hub fee error \(NEW, guessed, untried\)/], ["NEW: the commission engine", /Sheet 10 \[GM\]: the commission engine \(NEW, GM API only\)/],
+    ["NEW: untitled abilities, with the honest reason", /\*\*NEW, no hand-test \(untitled abilities\):\*\*[^\n]*must be a non-empty string/], ["NEW: the tier-1 fallback, with the honest reason", /\*\*NEW, no hand-test \(the tier-1 fallback\):\*\*[^\n]*cannot be built by hand/],
+    ["NEW: the editor discard prompt", /Discard your unsaved changes[^\n]*\*\*NEW\*\*/], ["the damaged stations flag is not hand-testable", /damaged `stations` flag skip is not hand-testable/],
+    ["the damaged-store and __proto__ cases are left out", /damaged-store and `__proto__` cases\*\* are left out/], ["the fee console route is guessed, untried", /This route is \*\*guessed, untried\*\*/], ["the fee console route says how to undo it", /\*\*Undo it:\*\* reload Alice's browser page/],
+    ["what is in memory only, and why", /in memory only: the recipe \*\*`playtest-blade`\*\*[\s\S]*cannot make a recipe[\s\S]*After a \*\*reload of the GM window or a server restart\*\*/]
+  ]) assert.match(SHEET, pattern, what);
+  const areas = stepsOf(SHEET, "Sheet").filter(s => [2, 3, 4, 5, 6, 7, 8, 10].includes(s.n));
+  for (const step of areas) assert.match(step.text, /\*\*Player sees:?\*\*|\*\*Players never see\*\*/, `${step.title}: says what a Player sees`);
+  for (const step of areas.filter(s => s.n !== 7)) assert.match(step.text, /\*\*Must NOT see:?\*\*/, `${step.title}: says what a Player must NOT see`);
+  assert.match(SHEET, /\*\*Players must NEVER see\*\* a DC, odds, a percentage, a tag, a tag's effects, a cap, or a study's thresholds/);
+  assert.doesNotMatch(SHEET.replace(/Must NOT see[^\n]*/g, "").replace(/\*\*Players must NEVER see\*\*[^\n]*/, ""), /\bDC \d|\d+% chance|odds of/i, "the sheet never states a difficulty");
+});
+
+test("the claim 'only the recipe is in memory': after SETUP every Playtest definition the editor can edit is kept in the world, and the recipe is the only one that is not", async () => {
+  const { gm } = await playtestWorld();
+  await run(SETUP, gm);
+  const ours = [["tag", "playtest-edge"], ["tag", "playtest-charm"], ["material", "playtest-ember"], ["material", "playtest-study-ore"], ["recipe", "playtest-blade"]];
+  const inMemory = ours.filter(([kind, id]) => !api().editor.canEdit(`${kind}:${id}`)).map(([kind, id]) => `${kind}:${id}`);
+  assert.deepEqual(inMemory, ["recipe:playtest-blade"]);
+  const everyPlaytest = ["tag", "material", "recipe", "station", "town", "nodeType"].flatMap(kind => [...api().definitions[kind].keys()].filter(id => /^playtest-/.test(id)).map(id => `${kind}:${id}`)).sort();
+  assert.deepEqual(everyPlaytest, ours.map(([kind, id]) => `${kind}:${id}`).sort(), "no other Playtest definition exists");
+});
+
+/** Run every console block of a sheet text as written, in the sheet's order, each as the user the sheet names. Throws when one of them does not do what the sheet says. */
+async function runSheetBlocks(sheetText) {
+  const { gm, annUser } = await playtestWorld();
+  await run(SETUP, gm);
+  const blocks = [...sheetText.matchAll(/```js\n([\s\S]*?)```/g)].map(m => m[1].trim());
+  const find = needle => { const hits = blocks.filter(b => b.includes(needle)); assert.equal(hits.length, 1, `exactly one sheet block has ${needle}`); return hits[0]; };
+  const exec = (code, user) => as(user, () => (0, eval)(`(async () => { ${code} })()`));
+  canvas.scene = game.scenes.getName("Playtest Field");
+  // Sheet 1: open downtime
+  await exec(find("api.downtime.start"), gm);
+  assert.equal(api().downtime.isOpen(), true);
+  // Sheet 4: Alice gathers (queued), the GM resolves, Alice searches, the GM clears the map
+  const roll = (degree, total, natural) => ({ options: { degreeOfSuccess: degree }, total, dice: [{ faces: 20, results: [{ result: natural, active: true }] }] });
+  ofName("Playtest Alice").rolls.push(roll(2, 20, 12));
+  (ofName("Playtest Alice").perceptionRolls ??= []).push(roll(2, 3, 1));
+  await exec(find('t.name === "Playtest Herb Patch"'), annUser);
+  assert.equal(api().queue.list().filter(r => r.action.type === "gather").length, 1, "the gather is queued");
+  const resolved = await as(gm, () => api().queue.resolveAll({ chat: false }));
+  assert.ok(resolved.results.every(r => r.status === "resolved"), JSON.stringify(resolved.results));
+  assert.ok(ofName("Playtest Alice").items.some(i => i.getFlag(M, "material")?.materialId === "moonpetal" || /moonpetal|herb/i.test(i.name) || i.getFlag(M, "material")), "she gathered something");
+  await exec(find("api.searchArea"), annUser);
+  const cleared = await exec(find("api.clearMap"), gm);
+  void cleared;
+  assert.equal(game.scenes.getName("Playtest Field").tokens.some(t => t.name === "Playtest Herb Patch"), false, "the placed nodes are gone");
+  assert.equal(game.scenes.getName("Playtest Field").tokens.some(t => t.name === "Playtest Wolf Corpse"), true, "the hand-made corpse node stays");
+  // Sheet 8: the stations list, an owned workshop's upgrade (Alice asks, the GM resolves), transfer then remove
+  await exec(find("api.stationsFor"), gm);
+  await exec(find("workshop.startUpgrade"), annUser);
+  await exec(find("project: \"upgrade-playtest-anvil-craftDays-1\""), gm);
+  assert.equal(api().stationsFor(ofName("Playtest Alice")).find(s => s.id === "playtest-anvil").upgrades.craftDays, 1, "the owned workshop was upgraded");
+  await exec(find("api.transferStation"), gm);
+  for (const name of ["Playtest Alice", "Playtest Bob"]) assert.equal((ofName(name).getFlag(M, "stations") ?? []).length, 0, `${name} no longer lists the anvil`);
+  // Sheet 10: the commission engine
+  await exec(find("api.commissions.issue"), gm);
+  assert.equal(api().commissions.list()[0].status, "requested");
+  await exec(find("api.commissions.craft"), gm);
+  const patron = ofName("Playtest Patron");
+  assert.equal(patron.items.filter(i => i.type === "weapon" && i.getFlag(M, "crafted")).length, 1, "the patron holds the delivered dagger");
+  assert.deepEqual(patron.items.filter(i => i.getFlag(M, "material")).map(i => `${i.getFlag(M, "material").materialId}x${i.system.quantity}`), ["ironx1"], "the patron's spider fang and one iron were used");
+  assert.equal(api().commissions.list()[0].status, "delivered");
+}
+
+test("the console blocks the sheet gives the owner run as written, in the order of the sheet", async () => { await runSheetBlocks(SHEET); });
+
+test("what a Player's Hub is built from carries no tag, need, cap or difficulty, and an unknown fee shows as unusable on the seed's own workshops (the sheet's console route)", async () => {
+  const { gm, annUser } = await playtestWorld();
+  await run(SETUP, gm);
+  await as(annUser, () => api().definitions.refresh());
+  const { readFacts } = await import("../scripts/hub/facts.js");
+  const { emptyState, formulaeTab } = await import("../scripts/hub/viewmodels.js");
+  const { findTagLeaks } = await import("./helpers.js");
+  const { findings } = await import("./scan.js");
+  const { STATIONS } = await import("../scripts/config.js");
+  const state = { ...emptyState(), recipeId: "playtest-blade" };
+  const facts = await as(annUser, () => readFacts(api(), ofName("Playtest Alice"), state));
+  assert.deepEqual(findTagLeaks({ recipes: facts.recipes, materials: facts.materials, stations: facts.stations }), [], "no tag, need, cap or tier in what a player's window reads");
+  assert.deepEqual(findings(facts.recipes), [], "no difficulty field in the recipes a player reads");
+  const fitsOf = slot => facts.recipes["playtest-blade"].slots.find(s => s.name === slot).fits.map(f => f.name).sort();
+  assert.deepEqual([fitsOf("edge"), fitsOf("charm")], [["Playtest Study Ore", "Playtest Torch"], ["Playtest Rope"]], "a tagged slot reaches the player as the NAMES of her own items that fit (the two Torch stacks share one source, so they are one choice)");
+  // the sheet's console route: take tier 2's fee away on the Player's side
+  const saved = STATIONS.feeByTier[2];
+  const quiet = console.error; console.error = () => {};
+  try {
+    delete STATIONS.feeByTier[2];
+    const broken = await as(annUser, () => readFacts(api(), ofName("Playtest Alice"), state));
+    const forge = broken.stations.find(s => s.id === "oakhaven-forge");
+    assert.deepEqual([forge.usable, forge.feeUnknown], [false, true]);
+    const tab = formulaeTab(broken, state);
+    assert.ok(tab.detail.stations.blocked.some(b => /Oakhaven Forge: its fee could not be worked out, so it cannot be used right now\. Ask the GM\./.test(b.reason)));
+    assert.ok(tab.detail.stations.options.every(o => o.id !== "oakhaven-forge") && tab.detail.stations.options.length >= 1, "the other workshops are still offered");
+  } finally { console.error = quiet; STATIONS.feeByTier[2] = saved; }
+});
+
+test("MUTATION: break a sheet block (a station left out of the commission craft, a wrong project id, a missing skill) and the run of the sheet's blocks fails", async () => {
+  for (const [from, to] of [[', station: "oakhaven-forge" })', " })"], ["upgrade-playtest-anvil-craftDays-1", "upgrade-playtest-anvil-craftDays-9"], ['tokenId: node.id, skill: "survival" }', "tokenId: node.id }"]]) {
+    await assert.rejects(runSheetBlocks(mutate(SHEET, from, to)), undefined, `the sheet run notices: ${from}`);
+  }
+});
+
+test("MUTATION: remove one claim from the INSTALL or the TEST SHEET text and the check for that claim fails (each check is specific)", () => {
+  const claims = [
+    [SHEET, /\*\*NEW: giving a workshop\.\*\*/], [SHEET, /\*\*NEW: an owned workshop's upgrade\.\*\*/], [SHEET, /\*\*NEW: transfer, then remove\.\*\*/], [SHEET, /the Hub fee error \(NEW, guessed, untried\)/], [SHEET, /the commission engine \(NEW, GM API only\)/],
+    [SHEET, /\*\*NEW, no hand-test \(untitled abilities\):\*\*/], [SHEET, /\*\*NEW, no hand-test \(the tier-1 fallback\):\*\*/], [SHEET, /damaged `stations` flag skip is not hand-testable/], [SHEET, /This route is \*\*guessed, untried\*\*/],
+    [SHEET, /\*\*Undo it:\*\* reload Alice's browser page/], [SHEET, /\*\*Players must NEVER see\*\* a DC/], [INSTALL, /socketlib \*\*1\.1\.3\*\*/], [INSTALL, /Get-FileHash module\.zip -Algorithm SHA256/], [INSTALL, /only when the server starts/], [INSTALL, /throwaway data only/], [INSTALL, /api\.setLocation\("oakhaven"\)/], [INSTALL, /non-GM user owns it at \*\*Owner\*\* level/]
+  ];
+  for (const [text, pattern] of claims) {
+    assert.match(text, pattern, `the real text has: ${pattern}`);
+    assert.doesNotMatch(text.replace(new RegExp(pattern.source, "g"), ""), pattern, `without it the check fails: ${pattern}`);
+  }
+  // a step with no "You should see" bullet is caught by the format check
+  const step = stepsOf(SHEET, "Sheet")[0];
+  assert.ok(/You should see/.test(step.text) && !/You should see/.test(step.text.replace(/You should see/g, "")), "the format check looks for the bullet");
+});
+
+test("MUTATION: a recipe or material that leaked a tag, a need or a cap into a player's data is caught by the scan the Hub test uses", async () => {
+  const { findTagLeaks } = await import("./helpers.js");
+  assert.deepEqual(findTagLeaks({ recipes: { r: { slots: [{ name: "edge", fits: [{ id: "x", name: "Torch" }] }] } } }), []);
+  assert.ok(findTagLeaks({ recipes: { r: { slots: [{ name: "edge", needs: { all: ["playtest-edge"] } }] } } }).length > 0, "a need is a leak");
+  assert.ok(findTagLeaks({ materials: { m: { id: "m", tags: ["playtest-edge"] } } }).length > 0, "a tag list is a leak");
+});
