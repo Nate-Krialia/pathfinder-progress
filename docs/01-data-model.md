@@ -33,7 +33,7 @@ Item flag carries `materialId` and `tier`; effects resolved via the layered reso
 **Recipe**
 ```
 id, name, category (weapon|armor|focus|...), itemTemplate,
-slots: [{ name, drives: <role>, tierFloor, qty }],
+slots: [{ name, drives: <role> | [<role>, ...], tierFloor, qty }],
 overrides: [{ materialId, slot, effect }],     // optional
 stationCategory, stationTierMin,
 skillWhitelist (research), researchProject: { tier, ... }
@@ -68,13 +68,14 @@ id, sceneTag, spawnTable (weighted node types), explorationDC, daysRequired
 ```
 id, name, category, tier,
 location: fixed{town} | carried{holder},
-owner (actor|null), access (permission list)
+owner (actor|null), access (permission list),
+upgrades (optional, earned: { craftDays, hearths })
 ```
 
 **Commission**
 ```
 id, patron (actor OR lightweight {name}), crafter (actor), formulaId, itemSpec,
-status, materialsFrom: npc|crafter (default crafter), payout,
+status, materialsFrom: npc|crafter|patron (default: crafter, or patron for a character patron), payout,
 teaches: none|progress{amount}|fullCopy (default none), formulaAccess: loan|copy
 ```
 

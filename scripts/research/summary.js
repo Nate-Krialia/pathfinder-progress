@@ -5,7 +5,7 @@ const DEGREE_LABEL = { criticalSuccess: "Critical Success", success: "Success", 
 const signed = n => (n > 0 ? `+${n}` : n < 0 ? `${n}` : "+0");
 
 /**
- * The text the PLAYERS see: degree words and progress, never a total or a DC (docs/11b). `forGM` adds the total and the DC; it is
+ * The text the PLAYERS see: degree words and progress ("Progress n/m" is shown on purpose for a formula project), never a total or a DC (docs/11b). `forGM` adds the total and the DC; it is
  * only ever sent to the GM(s).
  */
 export function formatResearchSummary({ actorName, project, skillName, results, completed, forGM = false }) {

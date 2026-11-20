@@ -17,13 +17,13 @@ Two routes only. Neither unlocks anything instantly; both end in a Research proj
 - Items WITHOUT a research block have no track: they never offer a lead. Their properties are **known on pickup** and they are usable straight away (decided; e.g. common iron needs no research).
 - Items can have only some milestones (e.g. properties but no blueprint).
 - The 4 steps (properties) and 8 steps (T1 blueprint) below are only the DEFAULTS the GM starts from when adding a track, not rules.
-- Thresholds are GM-only data. Players never see them, not even in the relayed definitions (hidden difficulty).
+- Study thresholds are GM-only data. Players never see them, not even in the relayed definitions (hidden difficulty). (A formula PROJECT's "Progress n of m" is a deliberate exception, `docs/11b-hub-addendum.md` A: it is not a study.)
 
 ## The default research track for a material (one project, milestones)
 - **Default 4 steps:** the material's properties are learned. It gets a Compendium entry, and its general crafting use is unlocked.
 - **Default 8 steps:** the **tier 1** blueprint it can make is learned (example: Mitflit Brain -> Cowardice Bomb, T1 only).
 - "Steps" are the existing research steps (a big success is +2). Researching does NOT consume the item.
-- Players only see plain words about what a part seems related to. No thresholds, counts or "N more materials" anywhere (hidden difficulty still holds).
+- Players only see plain words about what a part seems related to. No study thresholds, counts or "N more materials" anywhere (hidden difficulty still holds; a formula project's "n of m" is the deliberate exception).
 
 ## Two separate axes (do not merge them)
 - **Material tier** changes how strong a craft is, through slot effects learned via Experiments. A T2 material in the T1 bomb makes a better T1 bomb.

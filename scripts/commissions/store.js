@@ -516,7 +516,7 @@ async function postCraftChat({ c, crafter, patronActor, plan, outcome, entry, ne
   } catch (error) {
     console.error(`${MODULE_ID} | the commission craft is saved, but the chat message failed`, error);
   }
-  // The learn roll's progress is n/threshold, and players never see a threshold: it is whispered to the crafter's owners and the GM, never put on the public card (whisper() logs its own failure).
+  // The learn roll's progress is n/threshold. A formula project's "n of m" is shown to players on purpose (docs/11b), so it IS in this whisper to the crafter's owners and the GM; it is never put on the public card (whisper() logs its own failure). The roll total and the DC are not in it.
   if (entry.learn?.degree) await whisper(resultRecipients(crafter), `<p>Learn roll for <strong>${esc(crafter.name)}</strong>: progress ${entry.learn.progress}/${entry.learn.threshold}${entry.learn.completed ? " - formula learned!" : ""}.</p>`);
 }
 

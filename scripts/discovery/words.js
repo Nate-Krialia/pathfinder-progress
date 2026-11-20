@@ -1,5 +1,5 @@
 /**
- * Every word the discovery chain shows a player (Stage 11c). Plain words only: no thresholds, counts, DCs or odds (docs/11b-hub-addendum.md, which
+ * Every word the discovery chain shows a player (Stage 11c). Plain words only: no study thresholds, counts, DCs or odds (a formula PROJECT's "Progress n of m" is the deliberate exception and is not a study) (docs/11b-hub-addendum.md, which
  * the tests enforce by scanning this object).
  */
 export const W = {

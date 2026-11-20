@@ -18,7 +18,7 @@ Portable kits have a **lower tier cap** (initially tier 1 or 2; configurable). T
 
 ## Player-owned workshops
 - Fixed station with an `owner` (PC, NPC, or none for public forges) and a permission list (`access`), so owners can let party crafters use it.
-- Workshops start at tier 1 and **upgrade via projects** on the research engine: `outcome: upgradeStation`, same daily check/threshold/skill whitelist, and consumed materials plus a fee (see `02-research.md`).
+- Workshops start at tier 1 and **upgrade via projects** on the research engine: `outcome: upgradeStation`, same daily check/threshold/skill whitelist, and consumed materials but NO gold fee (`scripts/workshop/rules.js`). Building a workshop from a blueprint is the one that spends materials, gold and days.
 
 ## Fee timing
-The fee is consumed on craft (lost on failure; see `03-crafting.md`). Exact fee amounts per tier are tunable and not yet set.
+The fee is consumed on craft (lost on failure; see `03-crafting.md`). The amounts per tier are a placeholder table in `scripts/config.js` (`STATIONS.feeByTier`), tunable; a tier with no fee set is refused, never treated as free.

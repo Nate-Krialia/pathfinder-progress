@@ -1,7 +1,8 @@
 /**
  * Hidden difficulty (docs/11b-hub-addendum.md, A). A leaf module.
  *
- * Players NEVER see a DC, odds, a percentage or any difficulty wording. The GM does. So anything the module builds for a player
+ * Players NEVER see a DC, odds, a percentage, a STUDY threshold or any difficulty wording. The GM does. The one deliberate exception (decided by the project owner): a formula project's
+ * progress, shown as "Progress n of m", so players can make better decisions (studies still show stage words only). So anything the module builds for a player
  * (a queue row, a project returned over the socket, a preview) must not CARRY these fields at all: they are removed at the source,
  * not hidden in a UI. `HIDDEN_FIELDS` is the list the scanner tests look for in everything a player-callable api returns.
  *

@@ -35,10 +35,11 @@ Use PF2e's level-based DC table via the adapter.
 - **Discovery**: specimens, a master's notes, or a ruined forge grant a chunk of progress or lower the threshold. Commissions with `teaches: progress` use this path (see `06-commissions.md`).
 
 ## Optional costs
-A project may list materials and a fee consumed at start or completion (required for station upgrades).
+A project may list materials consumed at start or completion (station upgrades use this: materials only, no gold fee; building a workshop spends materials, gold and days, see `07-stations.md`).
 
 ## Notes
 - Days are reserved when the action is queued so players cannot over-book.
 - Resolution occurs via the GM-reviewed queue (see `08-foundry-integration.md`).
+- A player sees a formula project's progress as "Progress n of m" on purpose (so they can make better decisions), never its DC, odds or pace; a study (an item's research track) shows stage words only (`docs/11b-hub-addendum.md`).
 - The project's goal (the recipe's name) is visible to the researcher. The recipe's contents are hidden from players' interface only, as an honor system: Foundry does not stop a player reading them from the browser console (see `10-stage2-decisions.md`).
-- Each research result records the natural d20 and the total, so a degree can be audited. The built shape of projects and the tier table is in `10-stage2-decisions.md`.
+- Each research result carries the natural d20 and the total, so a degree can be audited. They go to the in-memory GM log (`api.gm.log()`), never to chat, and are NOT stored on the project: a project's log entries hold only `source`, `delta`, `skill`, `degree` and the GM's `note` (`scripts/research/project.js`). The built shape of projects and the tier table is in `10-stage2-decisions.md`.

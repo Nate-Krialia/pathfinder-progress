@@ -12,7 +12,7 @@ A recipe is a set of **slots**. Each slot has:
 Any material meeting the floor can fill the slot. Different slots control different parts of the item (e.g. blade metal sets base power, coating sets bonus damage, core sets special ability).
 
 ## Effect resolution
-Each material carries default effects tagged by role. A recipe may override any material's effect for a given slot. Use the shared layered resolver (recipe override > material default).
+Each material carries default effects tagged by role, and may carry effects of its own for an item class (a recipe's category). A recipe may override any material's effect for a given slot. Use the shared layered resolver (recipe override > the material's item-class effects > material default; `docs/11c-discovery-addendum.md`, `scripts/data/resolver.js`).
 
 ## Preconditions
 - Crafter has the formula (owned copy, or a loan for an open commission).
@@ -37,4 +37,4 @@ On a failure, **each individual unit** of material gets its own d100 roll agains
 
 ## Output
 - Created item is a real PF2e item with provenance flags: `recipeId`, `materials used`, `crafter`.
-- GM-only action: "Save to compendium" archives a snapshot into the Item output pack for later campaigns.
+- A GM-only action "Save to compendium" (archive a snapshot into the Item output pack for later campaigns) is WANTED and NOT BUILT yet. The pack exists in the manifest; nothing writes to it.

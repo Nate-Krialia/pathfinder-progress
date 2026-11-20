@@ -4,7 +4,7 @@ These decisions were confirmed by the project owner after the real-Foundry gates
 
 ## A. Hidden difficulty, everywhere
 
-- Players NEVER see a DC, odds, a percentage or any difficulty wording, anywhere: exploring, gathering, crafting, research. The GM sees everything.
+- Players NEVER see a DC, odds, a percentage or any difficulty wording, anywhere: exploring, gathering, crafting, research. The GM sees everything. **Study thresholds are hidden too, with ONE deliberate exception decided by the project owner:** a formula project shows its progress as "Progress n of m" (the Hub, the research chat whisper, a commission's learn roll), so players can make better decisions. Studies (a material's or note's research track) still show stage words only.
 - Every player-facing output is audited and fixed: `previewCraft` and its plan fields, research previews, build and upgrade previews, queue rows and their details, refusal messages, result messages, chat cards and whispers, Compendium entries, and every api surface the Hub will call. A Compendium gather entry may say a rung was REACHED, never its DC. A player may see their own visible modifiers only where the PF2e sheet already shows them.
 - Because players can read whatever reaches their client, the player copy of a preview, a queue row or a definition should not CARRY a DC at all. It is stripped at the source (built on the GM client and relayed, or filtered before it is returned), not hidden in the UI. Where that cannot be done (data Foundry stores on an actor, a token or a world setting and delivers to every client) it is reported, not pretended.
 - Tests scan player-facing strings and objects for DC, odds, percent and difficulty words, with a mutation check that a re-added DC is caught.
