@@ -167,3 +167,14 @@ test("the base-power tier can be set on every class that has one (weapon, armor,
   }
   assert.match(renderEditor(editorModel({ registry, selectedKey: "material:iron", base: d, draft: d, effectClass: "weapon", origin: { origin: "pack", editedFields: [], hasItem: true } })), /data-field="power" data-cls="weapon"/);
 });
+
+test("the preview also warns when the DESCRIPTION or the LABEL carries a DC or odds, at every stage and for notes (stage 1c #13)", () => {
+  const draft = fields => { const d = draftFor(registry, {}, "material:iron"); d.fields = { ...d.fields, ...fields }; return d; };
+  for (const stage of ["picked", "studied", "crafted"]) {
+    assert.equal(previewOf(registry, draft({}), "weapon", stage).sheetWarning, undefined, `${stage}: clean text, no warning`);
+    assert.match(previewOf(registry, draft({ description: "Hard to work: DC 25 to refine." }), "weapon", stage).sheetWarning, /description or label mentions a DC or odds/, `${stage}: description`);
+    assert.match(previewOf(registry, draft({ label: "Fifty percent pure" }), "weapon", stage).sheetWarning, /Players read both on the item itself/, `${stage}: label ("percent")`);
+  }
+  const html = renderEditor(editorModel({ registry, selectedKey: "material:iron", draft: draft({ description: "odds are poor" }), base: draftFor(registry, {}, "material:iron") }));
+  assert.match(html, /description or label mentions a DC or odds/);
+});

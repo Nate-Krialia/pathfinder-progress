@@ -65,6 +65,7 @@ export const E = {
   previewStudy: `Study: ${W.stages.join(" → ")}`, previewNoStudy: "No study: known and usable on pickup.",
   previewSheet: "On the item sheet",
   previewDifficulty: "This text mentions a DC or odds. The Hub hides that wording from players, but the item's own description would not.",
+  previewDifficultySheet: "The description or label mentions a DC or odds. Players read both on the item itself, and nothing hides that wording there.",
   confirmYes: "Yes, do it", confirmNo: "No, keep things as they are",
   roleWords: { basePower: "base power", spellPower: "spell power", bonusDamage: "bonus damage", specialAbility: "a special ability", resistance: "resistance", spellSlots: "spell slots", applyCondition: "a condition on the target" }
 };
@@ -250,6 +251,8 @@ export function previewOf(registry, draft, itemClass, stage = "crafted") {
     out.facts.push(recipe ? `Teaches ${recipe.name} once studied.` : "Teaches nothing yet: pick a formula.");
     out.facts.push(E.previewBulk(f.bulk || "L"));
   }
+  // Players read the description and the label on the item itself, whatever the stage (a material or a note): a DC or odds there is shown to them.
+  if (isDifficultyText(f.description) || isDifficultyText(f.label)) out.sheetWarning = E.previewDifficultySheet;
   return out;
 }
 
@@ -465,7 +468,7 @@ function renderPreview(p) {
     : `<p class="pfp-empty">${esc(E.previewNoEffectsYet)}</p>`;
   return `<h2>${esc(p.title)}</h2>${stages}${picker}<h3>${esc(p.name)}</h3>${p.facts.map(f => `<p class="pfp-note">${esc(f)}</p>`).join("")}${know}${p.note ? `<p class="pfp-note">${esc(p.note)}</p>` : ""}
     ${p.stage === "studied" && p.note === NO_STUDY ? "" : effects}
-    ${p.warning ? `<p class="pfp-why" role="status">${esc(p.warning)}</p>` : ""}${p.fits ? `<p class="pfp-note">${esc(p.fits)}</p>` : ""}
+    ${p.warning ? `<p class="pfp-why" role="status">${esc(p.warning)}</p>` : ""}${p.sheetWarning ? `<p class="pfp-why" role="status">${esc(p.sheetWarning)}</p>` : ""}${p.fits ? `<p class="pfp-note">${esc(p.fits)}</p>` : ""}
     ${p.sheet ? `<h4>${esc(E.previewSheet)}</h4><p class="pfp-note">${esc(p.sheet)}</p>` : ""}`;
 }
 
