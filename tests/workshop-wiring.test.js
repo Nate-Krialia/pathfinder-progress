@@ -684,3 +684,35 @@ test("HOLDER LOCK: transfers the opposite way round, an overlapping remove, and 
   await withLock(actorKey(w.ann), () => applyStationUpgrade(api(), "kit-two", { kind: "craftDays", from: 0, to: 1 }));
   assert.equal(ownedOfAnn(w)["kit-two"].upgrades?.craftDays, 1);
 });
+
+// Stage 1c #6: a transfer writes the new holder first and takes back only its own copy if the second write fails ----------------------------------------
+test("TRANSFER ORDER: the target is written first; a failure of the second write leaves the station with its old holder and nothing in neither list", async () => {
+  const w = await world({ downtime: 0 });
+  await as(w.gm, () => api().giveStation(w.ann, { name: "Kit One", category: "smithing", tier: 1, id: "kit-one" }));
+  await as(w.gm, () => api().giveStation(w.bob, { name: "Bob Kit", category: "smithing", tier: 1, id: "bob-kit" }));
+  const order = [];
+  const realFrom = w.ann.setFlag.bind(w.ann), realTo = w.bob.setFlag.bind(w.bob);
+  w.bob.setFlag = (...args) => { order.push("target"); return realTo(...args); };
+  w.ann.setFlag = (...args) => { order.push("source"); return realFrom(...args); };
+  await as(w.gm, () => api().transferStation("kit-one", w.bob));
+  assert.deepEqual(order, ["target", "source"], "the new holder is written before the old one is cleared");
+  assert.deepEqual((w.bob.getFlag(M, "stations") ?? []).map(r => r.id).sort(), ["bob-kit", "kit-one"]);
+  assert.deepEqual(w.ann.getFlag(M, "stations") ?? [], []);
+  // now back the other way, with the SECOND write failing
+  w.bob.setFlag = realTo; w.ann.setFlag = realFrom;
+  const bobBefore = structuredClone(w.bob.getFlag(M, "stations"));
+  const failing = w.bob.setFlag.bind(w.bob);
+  w.bob.setFlag = async (...args) => { throw new Error("injected: the source write failed"); };
+  w.ann.setFlag = realFrom;
+  // kit-one is on bob; move it to ann: the target (ann) is written, then bob's clear fails and ann's copy is taken back
+  await assert.rejects(as(w.gm, () => api().transferStation("kit-one", w.ann)), /injected: the source write failed/);
+  w.bob.setFlag = failing;
+  assert.deepEqual(w.bob.getFlag(M, "stations"), bobBefore, "the old holder still has it");
+  assert.deepEqual(w.ann.getFlag(M, "stations") ?? [], [], "the new holder's copy was taken back");
+  // a failure of the FIRST write changes nothing at all
+  w.ann.setFlag = async () => { throw new Error("injected: the target write failed"); };
+  await assert.rejects(as(w.gm, () => api().transferStation("kit-one", w.ann)), /injected: the target write failed/);
+  w.ann.setFlag = realFrom;
+  assert.deepEqual(w.bob.getFlag(M, "stations"), bobBefore);
+  assert.deepEqual(w.ann.getFlag(M, "stations") ?? [], []);
+});

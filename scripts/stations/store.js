@@ -7,6 +7,7 @@
 import { MODULE_ID, STATION_KEYS as K, STATIONS, WORKSHOP } from "../config.js";
 import { partyCharacterIds } from "../party.js";
 import { withLock, withLocks } from "../queue/lock.js";
+import { undoThenThrow } from "../queue/common.js";
 import { levelsOf, upgradePatch } from "../workshop/rules.js";
 import { check } from "../data/schema.js";
 import { LIVE_SCHEMAS } from "../data/schemas.js";
@@ -194,8 +195,14 @@ async function transferStationIn(api, stationId, toActor) {
   if (record.location.type === "carried") record.location.holder = toActor.id;
   const problems = validateOwnedRecord(record, toActor.id, { towns: api.definitions?.town, config: STATIONS });
   if (problems.length) throw new Error(`transferStation: invalid:\n- ${problems.map(p => `${p.field} ${p.message}`).join("\n- ")}`);
+  // The TARGET first: if that write fails nothing has changed, and a failure of the second write takes back only this copy (the station is then still with its old holder, never in neither list).
   await toActor.setFlag(MODULE_ID, K.actorStationsFlag, [...ownedOf(toActor), record]);
-  await from.setFlag(MODULE_ID, K.actorStationsFlag, ownedOf(from).filter(r => r.id !== stationId));
+  const undos = [{ what: `the copy given to ${toActor.name}`, run: () => toActor.setFlag(MODULE_ID, K.actorStationsFlag, ownedOf(toActor).filter(r => r.id !== stationId)) }];
+  try {
+    await from.setFlag(MODULE_ID, K.actorStationsFlag, ownedOf(from).filter(r => r.id !== stationId));
+  } catch (error) {
+    await undoThenThrow(undos, error);
+  }
   return record;
 }
 
