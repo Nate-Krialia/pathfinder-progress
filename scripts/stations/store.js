@@ -211,7 +211,23 @@ const stationKey = id => `station:${id}`;
 // An actor's OWN stations (their flag) are one list: giveStation, removeStation, transferStation and the owned path of applyStationUpgrade each read it, change it and write all of it back,
 // so they take this per-holder key. It is NOT the actor's queue lock ("actor:<id>"): an upgrade runs inside its researcher's actor lock, and the holder can be that same actor (not re-entrant).
 const holderKey = id => `stationHolder:${id}`;
-const holderOf = stationId => [...game.actors].find(a => ownedOf(a).some(r => r.id === stationId)) ?? null;
+// An actor whose stations flag is not a list is SKIPPED while looking for a holder (one broken character must not stop every other character's workshop from being upgraded or moved), and the GM is
+// told once per actor. Nothing is written to that actor: its flag stays exactly as it was.
+const reportedBroken = new Set();
+function reportBrokenFlag(actor, error) {
+  if (reportedBroken.has(actor.id)) return;
+  reportedBroken.add(actor.id);
+  console.error(`${MODULE_ID} | ${error.message}; it was skipped while looking for a workshop's holder`);
+  globalThis.ui?.notifications?.warn?.(`${MODULE_ID}: ${actor.name}'s workshops are damaged (the saved list is not a list). They were skipped; fix or clear that character's "stations" flag.`);
+}
+const holderOf = stationId => {
+  for (const actor of game.actors) {
+    let owned;
+    try { owned = ownedOf(actor); } catch (error) { reportBrokenFlag(actor, error); continue; }
+    if (owned.some(r => r?.id === stationId)) return actor;
+  }
+  return null;
+};
 const partyListKey = "world:partyStations";
 // Every public station shares ONE world setting, and every party workshop shares another: two different stations written
 // at once would each read the old list and the later write would drop the earlier one. So the write also takes its list's lock.

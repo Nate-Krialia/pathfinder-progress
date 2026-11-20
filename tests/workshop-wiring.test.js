@@ -716,3 +716,23 @@ test("TRANSFER ORDER: the target is written first; a failure of the second write
   assert.deepEqual(w.bob.getFlag(M, "stations"), bobBefore);
   assert.deepEqual(w.ann.getFlag(M, "stations") ?? [], []);
 });
+
+// Stage 1c #15: a damaged stations flag on one character does not block everyone else's workshops ---------------------------------------------------------
+test("DAMAGED STATIONS FLAG: it is skipped when looking for a holder (an upgrade and a transfer of another character's workshop still work), reported once, and left as it was", async () => {
+  const w = await world({ downtime: 0 });
+  const cy = makeActor("Cy", { owners: [] });
+  game.actors.push(cy);                                                           // last in the list, so the search passes Bob (damaged) before it reaches Cy
+  await as(w.gm, () => api().giveStation(cy, { name: "Kit One", category: "smithing", tier: 1, id: "kit-one" }));
+  await w.bob.update({ [`flags.${M}.stations`]: "this is not a list" });
+  const warnings = [], realWarn = ui.notifications.warn, realError = console.error;
+  ui.notifications.warn = text => warnings.push(text); console.error = () => {};
+  try {
+    await applyStationUpgrade(api(), "kit-one", { kind: "craftDays", from: 0, to: 1 });
+    await applyStationUpgrade(api(), "kit-one", { kind: "craftDays", from: 1, to: 2 });
+    assert.equal(cy.getFlag(M, "stations")[0].upgrades.craftDays, 2, "Cy's workshop was upgraded although Bob's flag is damaged");
+    await as(w.gm, () => api().transferStation("kit-one", w.ann));
+    assert.deepEqual((w.ann.getFlag(M, "stations") ?? []).map(r => r.id), ["kit-one"], "and moved to a third character");
+  } finally { ui.notifications.warn = realWarn; console.error = realError; }
+  assert.equal(w.bob.getFlag(M, "stations"), "this is not a list", "the damaged flag was not touched");
+  assert.equal(warnings.filter(t => /Bob's workshops are damaged/.test(t)).length, 1, "the GM was told once, not once per search");
+});
