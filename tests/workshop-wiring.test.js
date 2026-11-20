@@ -607,3 +607,27 @@ test("BUILD WHISPER: the builder's name is escaped (a name like <b>x</b> reads a
   assert.doesNotMatch(content, /<b>/);
   assert.match(content, /Ann&lt;b&gt;x&lt;\/b&gt;/);
 });
+
+test("SET STATE (stage 1c #1): giving a public station an owner keeps its earned upgrades and tier; null clears; access [] empties", async () => {
+  const w = await forgeWorld();
+  await applyStationUpgrade(api(), FORGE, { kind: "craftDays", from: 0, to: 1 });
+  await applyStationUpgrade(api(), FORGE, { kind: "craftDays", from: 1, to: 2 });
+  await applyStationUpgrade(api(), FORGE, { kind: "hearth", from: 0, to: 1 });
+  await applyStationUpgrade(api(), FORGE, { kind: "tier", from: 2, to: 3 });
+  const upgrades = { ...env.values.stationState.find(e => e.stationId === FORGE).upgrades };
+  assert.deepEqual(upgrades, { craftDays: 2, hearths: 1 }, "two craft-day cuts and a hearth are saved");
+  const entry = await as(w.gm, () => api().setStationState(FORGE, { owner: w.bob.id }));
+  assert.deepEqual(entry.upgrades, upgrades, "returned entry keeps the upgrades");
+  const saved = env.values.stationState.find(e => e.stationId === FORGE);
+  assert.deepEqual([saved.owner, saved.tier, saved.upgrades], [w.bob.id, 3, upgrades], "owner set; tier override and upgrades survive");
+  assert.equal(env.values.stationState.filter(e => e.stationId === FORGE).length, 1, "still one entry");
+  await as(w.gm, () => api().setStationState(FORGE, { access: [w.ann.id] }));
+  assert.deepEqual(env.values.stationState.find(e => e.stationId === FORGE).access, [w.ann.id]);
+  await as(w.gm, () => api().setStationState(FORGE, { owner: null }));
+  assert.equal("owner" in env.values.stationState.find(e => e.stationId === FORGE), false, "null clears the owner");
+  await as(w.gm, () => api().setStationState(FORGE, { access: [] , tier: null, upgrades: null }));
+  const cleared = env.values.stationState.find(e => e.stationId === FORGE);
+  assert.deepEqual(cleared, { stationId: FORGE, access: [] }, "explicit nulls clear the tier override and the upgrades");
+  await assert.rejects(as(w.gm, () => api().setStationState(FORGE, { owner: "nobody" })), /is not an actor in this world/);
+  assert.deepEqual(env.values.stationState.find(e => e.stationId === FORGE), cleared, "a refusal changes nothing");
+});

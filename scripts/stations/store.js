@@ -104,22 +104,27 @@ export async function setActorLocation(api, actor, townId) {
   }
 }
 
-/** Set owner / access / tier for a PUBLIC station. Omitted fields are cleared. */
+/**
+ * Change owner / access / tier / upgrades of a PUBLIC station. The change is MERGED over the station's saved entry: a field you leave out keeps what it had (a workshop's
+ * earned upgrades and tier are never lost by an owner change). To clear a field pass it as `null` (`owner: null` makes the station ownerless, `tier: null` takes back the
+ * tier override, `upgrades: null` removes the upgrades); `access: []` empties the access list.
+ */
 export async function setStationState(api, stationId, state = {}) {
   requireGM("setStationState");
   if (!api.definitions?.station.has(stationId)) throw new Error(`setStationState: unknown station "${stationId}"`);
-  const entry = { stationId, access: [], ...state };
-  if (entry.owner === null || entry.owner === undefined) delete entry.owner;
-  if (entry.tier === null || entry.tier === undefined) delete entry.tier;
-  const errors = check(LIVE_SCHEMAS.stationState, entry);
-  if (errors.length) throw new Error(`setStationState: invalid:\n- ${errors.map(e => `${e.field} ${e.message}`).join("\n- ")}`);
-  if (entry.owner && !game.actors.has(entry.owner)) throw new Error(`setStationState: owner "${entry.owner}" is not an actor in this world`);
-
+  let result;
   await withLock(publicListKey, async () => {
-    const list = (game.settings.get(MODULE_ID, K.stationStateSetting) ?? []).filter(e => e.stationId !== stationId);
-    await game.settings.set(MODULE_ID, K.stationStateSetting, [...list, entry]);
+    const stored = game.settings.get(MODULE_ID, K.stationStateSetting) ?? [];
+    const before = stored.find(e => e.stationId === stationId);
+    const entry = { access: [], ...(before ?? {}), ...state, stationId };
+    for (const field of ["owner", "tier", "upgrades"]) if (entry[field] === null || entry[field] === undefined) delete entry[field];
+    const errors = check(LIVE_SCHEMAS.stationState, entry);
+    if (errors.length) throw new Error(`setStationState: invalid:\n- ${errors.map(e => `${e.field} ${e.message}`).join("\n- ")}`);
+    if (entry.owner && !game.actors.has(entry.owner)) throw new Error(`setStationState: owner "${entry.owner}" is not an actor in this world`);
+    await game.settings.set(MODULE_ID, K.stationStateSetting, [...stored.filter(e => e.stationId !== stationId), entry]);
+    result = entry;
   });
-  return entry;
+  return result;
 }
 
 /** Remove a public station's state entry, making it public again. */
