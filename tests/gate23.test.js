@@ -319,7 +319,12 @@ test("GATE 23 Step 5: every tab switch is printed whole (tabs offered, tabGroups
       assert.equal(d.activeTabWhenLooked, tab);
       assert.ok(d.after.dataFields.includes(field), `${field} is in the DOM after the switch`);
       assert.deepEqual(d.pageErrors, []);
-      assert.ok("tabGroups" in d.before && "tabGroups" in d.after);
+      // the tab STATE, not only that its keys are printed: it was somewhere else before, it is on `tab` after, exactly that tab's button is selected, and every tab group the window reports is on it
+      assert.equal(d.before.activeTab === tab, false, `${tab}: the window was on another tab before the switch (it was on ${d.before.activeTab})`);
+      assert.equal(d.after.activeTab, tab, `${tab}: the active tab after the switch`);
+      assert.deepEqual(d.after.tabButtons.filter(b => b.selected === "true").map(b => b.tab), [tab], `${tab}: exactly its button is selected`);
+      assert.ok(d.after.tabGroups && typeof d.after.tabGroups === "object", `${tab}: tabGroups is printed as an object`);
+      assert.ok(Object.values(d.after.tabGroups).every(active => active === tab), `${tab}: every reported tab group is on it (${JSON.stringify(d.after.tabGroups)})`);
     }
     await runBlock(7, gm);
   });
