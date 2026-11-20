@@ -7,7 +7,7 @@ import { loadDefinitions } from "../scripts/data/validate.js";
 import { asPage, seedRecords } from "./helpers.js";
 import { emptyBook, recordMaterial } from "../scripts/compendium/entries.js";
 import {
-  computeBaseline, describeExperiments, effectKnown, experimentFactsText, knownResult, mergeExperiment, pickExperiment, recordBaseline, recordExperiment
+  computeBaseline, describeExperiments, effectKnown, experimentFactsText, knownResult, mergeExperiment, pickExperiment, recordBaseline, recordClassFact, recordExperiment
 } from "../scripts/compendium/experiments.js";
 import { resolveSlotEffects } from "../scripts/crafting/plan.js";
 import { LIVE_SCHEMAS } from "../scripts/data/schemas.js";
@@ -144,4 +144,27 @@ test("VIEW: a shared recipe the character has no private knowledge of is listed 
   const both = describeExperiments({ own: mine, shared: sharedBook })[0];
   assert.equal(both.source, "both");
   assert.deepEqual(both.known.map(k => [k.material, k.source]).sort(), [["Iron", "crafted"], ["Silver", "shared"]]);
+});
+
+test("MERGE KEYS (stage 1c #8): a picked entry with a __proto__ or constructor slot, material or role is refused and Object.prototype stays clean", () => {
+  const entry = slots => JSON.parse(JSON.stringify({ recipeId: "r1", name: "R", firstAt: 1, slots }));
+  const fact = id => ({ materialId: id, materialName: id, effects: {} });
+  const attempts = [
+    ["__proto__ slot", JSON.parse('{"recipeId":"r1","name":"R","firstAt":1,"slots":{"__proto__":{"polluted":{"materialId":"polluted","materialName":"x","effects":{}}}}}')],
+    ["constructor slot", entry({ constructor: { polluted: fact("polluted") } })],
+    ["__proto__ material", JSON.parse('{"recipeId":"r1","name":"R","firstAt":1,"slots":{"blade":{"__proto__":{"materialId":"x","materialName":"x","effects":{}}}}}')],
+    ["constructor material", entry({ blade: { constructor: fact("constructor") } })]
+  ];
+  for (const [what, picked] of attempts) {
+    assert.throws(() => mergeExperiment({ experiments: {} }, picked), /cannot be used as a key/, what);
+    assert.equal(({}).polluted, undefined, `${what}: Object.prototype is clean`);
+    assert.equal(Object.hasOwn(Object, "polluted"), false, `${what}: Object is clean`);
+  }
+  // a class fact with a prototype role is refused too
+  assert.throws(() => recordClassFact(emptyBook(), { category: "weapon", materialId: "iron", effects: JSON.parse('{"__proto__":{"x":1}}') }), /cannot be used as a key/);
+  assert.throws(() => recordClassFact(emptyBook(), { category: "weapon", materialId: "iron", effects: { constructor: "T1" } }), /cannot be used as a key/);
+  // a name that merely exists on every object (toString) is an ordinary slot name and must not write into Object.prototype.toString
+  const ok = mergeExperiment({ experiments: {} }, entry({ toString: { iron: fact("iron") } }));
+  assert.equal(Object.hasOwn(ok.experiments.r1.slots, "toString"), true);
+  assert.equal(Object.hasOwn(Object.prototype.toString, "iron"), false, "Object.prototype.toString was not written to");
 });

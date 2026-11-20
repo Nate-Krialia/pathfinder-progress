@@ -4,7 +4,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DAGGER, M, SEL, addNode, as, craft, env, events, fireHookAs, getApi, loudly, makeActor, measure, resolve, snapshot, world } from "./fake-world.js";
+import { DAGGER, M, SEL, addNode, as, craft, env, events, fireHookAs, getApi, loudly, makeActor, measure, pendingOf, resolve, snapshot, world } from "./fake-world.js";
 import { EXPERIMENTS } from "../scripts/config.js";
 import { HIDDEN_FIELDS } from "../scripts/difficulty.js";
 
@@ -256,4 +256,26 @@ test("FOR THE RECORD: the experiments recorder and the snapshot helper never tou
   const strip = s => ({ ...s, actors: s.actors.map(a => ({ ...a, flags: { ...a.flags, compendium: undefined } })) });
   assert.deepEqual(strip(after), strip(was));
   void fireHookAs; void addNode;
+});
+
+test("DELIVERY (stage 1c #8): a __proto__ slot a player writes into their own queued share reaches resolveShare, is refused there, and Object.prototype stays clean", async () => {
+  const w = await worldWith();
+  await resolve(w.ann, (await craft(w, w.annUser, w.ann, { selection: SEL2 })).id, { degree: "success" });
+  const action = await as(w.annUser, () => api().queue.submit(w.ann, "share", { kind: "experiment", key: DAGGER }));
+  // The player edits their own actor's pending list from the console: the queued entry gets a __proto__ slot (JSON.parse makes it an OWN key, as a database round trip would).
+  const evil = JSON.parse('{"polluted":{"materialId":"polluted","materialName":"x","effects":{}}}');
+  const entry = JSON.parse(JSON.stringify(pendingOf(w.ann).find(a => a.id === action.id).params.entry));
+  Object.defineProperty(entry.slots, "__proto__", { value: evil, enumerable: true, configurable: true, writable: true });
+  const pending = JSON.parse(JSON.stringify(pendingOf(w.ann)));
+  pending.find(a => a.id === action.id).params.entry = JSON.parse(JSON.stringify(entry));       // an own key survives a JSON round trip only when defined, so check below that it did
+  await as(w.annUser, () => w.ann.update({ [`flags.${M}.pendingActions`]: pending }));
+  const stored = pendingOf(w.ann).find(a => a.id === action.id).params.entry.slots;
+  assert.equal(Object.hasOwn(stored, "__proto__"), true, "the fake kept the own __proto__ key (what the real round trip does is NOT proven here)");
+  const before = JSON.stringify(env.values.sharedCompendium ?? null);
+  const batch = await api().queue.resolveAll({ chat: false });
+  assert.equal(batch.results[0].status, "error", "the approval is refused, not applied");
+  assert.match(batch.results[0].message, /cannot be used as a key/);
+  assert.equal(({}).polluted, undefined, "Object.prototype was not written to");
+  assert.equal(JSON.stringify(env.values.sharedCompendium ?? null), before, "the shared Compendium is unchanged");
+  assert.equal(pendingOf(w.ann).some(a => a.id === action.id), true, "the share is still queued for the GM to reject");
 });

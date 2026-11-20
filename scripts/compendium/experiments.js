@@ -68,8 +68,10 @@ export function recordClassFact(book, { category, materialId, materialName, tier
   const next = clone(book);
   next.classes ??= {};
   next.classes[category] ??= {};
-  const fact = next.classes[category][materialId] ??= { materialId, materialName: materialName ?? materialId, ...(tier === undefined ? {} : { tier }), effects: {}, at };
+  if (!own(next.classes[category], materialId)) next.classes[category][materialId] = { materialId, materialName: materialName ?? materialId, ...(tier === undefined ? {} : { tier }), effects: {}, at };
+  const fact = next.classes[category][materialId];
   if (materialName && fact.materialName === materialId) fact.materialName = materialName;
+  for (const role of Object.keys(effects ?? {})) safe(role);
   for (const [role, value] of Object.entries(effects ?? {})) if (!own(fact.effects, role)) fact.effects[role] = clone(forPlayer(role, value));   // a GM-only role (a condition's value, save) is stored as a plain marker only
   return next;
 }
@@ -183,8 +185,13 @@ export function mergeExperiment(book, picked) {
   const merged = entryFor(next, entry.recipeId, entry.name, entry.firstAt, entry.category);
   merged.firstAt = Math.min(merged.firstAt, entry.firstAt);
   for (const [slot, byMaterial] of Object.entries(entry.slots ?? {})) {
-    merged.slots[slot] ??= {};
-    for (const [materialId, fact] of Object.entries(byMaterial)) if (!own(merged.slots[slot], materialId)) merged.slots[slot][materialId] = clone(fact);
+    // The picked entry travels in a queued action on the player's own actor, so its keys are untrusted: a `__proto__` or `constructor` slot would otherwise write into Object.prototype.
+    safe(slot);
+    if (!own(merged.slots, slot)) merged.slots[slot] = {};
+    for (const [materialId, fact] of Object.entries(byMaterial ?? {})) {
+      safe(materialId);
+      if (!own(merged.slots[slot], materialId)) merged.slots[slot][materialId] = clone(fact);
+    }
   }
   if (!merged.baseline && entry.baseline) merged.baseline = clone(entry.baseline);
   for (const fact of Object.values(classFacts ?? {})) next = recordClassFact(next, { category: entry.category, ...fact });
