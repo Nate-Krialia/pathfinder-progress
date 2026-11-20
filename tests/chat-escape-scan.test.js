@@ -35,7 +35,9 @@ const SAFE = [
   /^results\.length\b/, /^Math\.abs\(applied\)$/, /^project\.progress$/, /^project\.threshold$/, /^applied < 0 \? /, /^DEGREE_LABEL\[outcome\.degree\]$/, /^result\.passed \? "Success" : "Failure"$/,
   /^plan\.station\.tier$/, /^unitsUsed\b/, /^outcome\.feeConsumed$/, /^action\.daysReserved$/, /^lines\.join\("<br>"\)$/, /^summary$/, /^who$/, /^message \? /,
   /^formatGatherSummary\(/, /^patronActor \? "" : /, /^outcome\.made \? /, /^entry\.learn\./, /^text \? ` \$\{esc\(text\)\}\.` : ""$/, /^button/, /^buttons\(\)$/, /^n\.tier$/, /^n\.perceptionDC$/,
-  /^results\.map\(r => `<li>\$\{esc\(r\.name\)\} \$\{esc\(r\.lines\.join\(", "\)\)\}\.<\/li>`\)\.join\(""\)$/
+  /^results\.map\(r => `<li>\$\{esc\(r\.name\)\} \$\{esc\(r\.lines\.join\(", "\)\)\}\.<\/li>`\)\.join\(""\)$/,
+  // exploration/summary.js (the GM-only summary; it goes to the in-memory GM log, never to chat): two counts, the list built from esc() parts, and notes escaped one by one
+  /^rolls\.length$/, /^nodes\.length$/, /^list$/, /^notes\.map\(esc\)\.join\(" "\)$/
 ];
 const isSafe = expr => /^esc\(/.test(expr.trim()) || SAFE.some(re => re.test(expr.trim()));
 
@@ -55,4 +57,75 @@ test("the scan itself works: it flags a planted unescaped name and passes an esc
   assert.deepEqual(expressions("`<p>${actor.name} and ${esc(item.name)} and ${a ? `${b}` : 1}</p>`"), ["actor.name", "esc(item.name)", "a ? `${b}` : 1"]);
   assert.equal(isSafe("actor.name"), false);
   assert.equal(isSafe("esc(actor.name)"), true);
+});
+
+// Stage 1c: the line scan above only sees a `${...}` on a line that ALSO holds a tag and a backtick, so a name on a continuation line of a multi-line template slipped past it. This scan reads the
+// whole file as source (strings, comments, regexes and nested templates skipped properly), finds every template literal whose own text holds a tag, and checks EVERY `${...}` in it, on any line.
+const TAG = /<(strong|em|p|li|ul|br)\b/;
+const REGEX_BEFORE = /[(,=:[!&|?{};+\-*%<>~^]$|^$/;
+export function templatesOf(src) {
+  const out = [];
+  const skipString = (i, quote) => { i++; while (i < src.length && src[i] !== quote) { if (src[i] === "\\") i++; i++; } return i + 1; };
+  const skipRegex = i => { let inClass = false; i++; while (i < src.length) { const c = src[i]; if (c === "\\") { i += 2; continue; } if (c === "[") inClass = true; else if (c === "]") inClass = false; else if (c === "/" && !inClass) return i + 1; i++; } return i; };
+  const skipComment = i => (src[i + 1] === "/" ? (src.indexOf("\n", i) === -1 ? src.length : src.indexOf("\n", i)) : (src.indexOf("*/", i + 2) === -1 ? src.length : src.indexOf("*/", i + 2) + 2));
+  const lineOf = pos => src.slice(0, pos).split("\n").length;
+  function code(i, until) {                       // scan code from i; stop at the `}` that closes depth 0 when `until` is set
+    let depth = 0, last = "";
+    while (i < src.length) {
+      const c = src[i];
+      if (c === "`") { i = template(i); last = "`"; continue; }
+      if (c === '"' || c === "'") { i = skipString(i, c); last = c; continue; }
+      if (c === "/" && (src[i + 1] === "/" || src[i + 1] === "*")) { i = skipComment(i); continue; }
+      if (c === "/" && REGEX_BEFORE.test(last)) { i = skipRegex(i); last = "/"; continue; }
+      if (c === "{") depth++;
+      if (c === "}") { if (until && depth === 0) return i; depth--; }
+      if (!/\s/.test(c)) last = c;
+      i++;
+    }
+    return i;
+  }
+  function template(i) {
+    const start = i, exprs = [];
+    let text = "";
+    i++;
+    while (i < src.length && src[i] !== "`") {
+      if (src[i] === "\\") { text += src.slice(i, i + 2); i += 2; continue; }
+      if (src[i] === "$" && src[i + 1] === "{") {
+        const from = i + 2;
+        i = code(from, true);
+        exprs.push({ text: src.slice(from, i), line: lineOf(from) });
+        i++;
+        continue;
+      }
+      text += src[i++];
+    }
+    out.push({ line: lineOf(start), text, exprs });
+    return i + 1;
+  }
+  code(0, false);
+  return out;
+}
+
+test("every interpolation in a chat-HTML template is escaped or cannot carry a name, on ANY line of a multi-line template (stage 1c)", () => {
+  const files = walk("scripts").filter(f => !SKIP_DIRS.some(d => f.startsWith(d + "/")) && !SKIP_FILES.includes(f.replaceAll("\\", "/")));
+  const found = [];
+  for (const file of files) {
+    for (const t of templatesOf(readFileSync(file, "utf8"))) {
+      if (!TAG.test(t.text)) continue;
+      for (const e of t.exprs) if (!isSafe(e.text)) found.push(`${file}:${e.line}: \${${e.text.replace(/\s+/g, " ").slice(0, 90)}}`);
+    }
+  }
+  assert.deepEqual(found, [], "an unescaped interpolation in a multi-line chat HTML template (wrap it in esc(...), or add it to SAFE if it cannot carry a name)");
+});
+
+test("the multi-line scan itself works: it flags a name on a continuation line, passes an escaped one, and is not fooled by strings, comments, regexes or nested templates", () => {
+  const bad = "const html = `\n  <p>\n    ${actor.name}\n  </p>`;";
+  const hits = templatesOf(bad).filter(t => TAG.test(t.text)).flatMap(t => t.exprs.filter(e => !isSafe(e.text)).map(e => [e.line, e.text]));
+  assert.deepEqual(hits, [[3, "actor.name"]], "the unescaped name on line 3 is found");
+  const good = "const html = `\n  <p>\n    ${esc(actor.name)}\n  </p>`;";
+  assert.deepEqual(templatesOf(good).filter(t => TAG.test(t.text)).flatMap(t => t.exprs.filter(e => !isSafe(e.text))), []);
+  const tricky = "const a = \"`\"; // `<p>${x}</p>`\nconst re = /[`\"]<p>/g; const b = `<li>${items.map(i => `<b>${esc(i)}</b>`).join(\"\")}</li>`;";
+  const found = templatesOf(tricky);
+  assert.equal(found.length, 2, "the backtick in a string, a comment and a regex does not start a template; the nested template is its own entry");
+  assert.deepEqual(found.map(t => t.exprs.map(e => e.text)), [["esc(i)"], ["items.map(i => `<b>${esc(i)}</b>`).join(\"\")"]]);
 });
